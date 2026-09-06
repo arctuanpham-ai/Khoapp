@@ -11,8 +11,8 @@ android {
         applicationId = "vn.ecohome.viewer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.1.7"
+        versionCode = 9
+        versionName = "0.1.8"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -24,9 +24,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    kotlinOptions { jvmTarget = "17" }
 
     signingConfigs {
         create("release") {
@@ -39,7 +37,6 @@ android {
             }
         }
     }
-
     buildTypes {
         release {
             isMinifyEnabled = false
