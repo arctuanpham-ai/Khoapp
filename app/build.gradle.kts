@@ -11,8 +11,13 @@ android {
         applicationId = "vn.ecohome.viewer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
+
+        // Xiaomi 13T Pro and current ECOHOME target devices are ARM64.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     compileOptions {
@@ -24,9 +29,22 @@ android {
         jvmTarget = "17"
     }
 
+    signingConfigs {
+        create("release") {
+            val keystorePath = System.getenv("ECOHOME_KEYSTORE_PATH")
+            if (!keystorePath.isNullOrBlank()) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("ECOHOME_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ECOHOME_KEY_ALIAS")
+                keyPassword = System.getenv("ECOHOME_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }
