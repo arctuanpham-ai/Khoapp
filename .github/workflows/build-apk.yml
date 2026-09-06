@@ -16,23 +16,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Patch Filament/Kotlin compatibility
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          p = Path('app/src/main/java/vn/ecohome/viewer/MainActivity.kt')
-          s = p.read_text()
-          pattern = r'\s*val named = asset\.entities\.mapNotNull \{ e ->.*?\}\.distinctBy \{ it\.second \}\.take\(40\)'
-          replacement = "\n        val named = mutableListOf<Pair<Int, String>>()\n        val seen = mutableSetOf<String>()\n        for (e in asset.entities) {\n            val name = runCatching { asset.getName(e) }.getOrNull()\n            if (!name.isNullOrBlank() && seen.add(name)) {\n                named.add(e to name)\n                if (named.size >= 40) break\n            }\n        }"
-          s2, n = re.subn(pattern, replacement, s, count=1, flags=re.S)
-          if n != 1:
-              raise SystemExit(f'Tags source patch count={n}')
-          s2 = s2.replace('        runCatching { modelViewer.resetToDefaultState() }\n', '')
-          p.write_text(s2)
-          PY
-
       - name: Java 17
         uses: actions/setup-java@v4
         with:
@@ -73,21 +56,21 @@ jobs:
           test -f "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -E "package:|sdkVersion:|targetSdkVersion:|native-code:"
-          cp "$APK" ECOHOME_Viewer_v0.1.4_ARM64.apk
+          cp "$APK" ECOHOME_Viewer_v0.1.5_ARM64.apk
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ECOHOME-Viewer-v0.1.4-ARM64
-          path: ECOHOME_Viewer_v0.1.4_ARM64.apk
+          name: ECOHOME-Viewer-v0.1.5-ARM64
+          path: ECOHOME_Viewer_v0.1.5_ARM64.apk
           if-no-files-found: error
 
-      - name: Publish GitHub Release v0.1.4
+      - name: Publish GitHub Release v0.1.5
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v0.1.4 >/dev/null 2>&1; then
-            gh release upload v0.1.4 ECOHOME_Viewer_v0.1.4_ARM64.apk --clobber
+          if gh release view v0.1.5 >/dev/null 2>&1; then
+            gh release upload v0.1.5 ECOHOME_Viewer_v0.1.5_ARM64.apk --clobber
           else
-            gh release create v0.1.4 ECOHOME_Viewer_v0.1.4_ARM64.apk --title "ECOHOME Viewer v0.1.4" --notes "Safe-area UI for Android navigation bars; real one-finger Pan mode; ambient indirect light to remove black faces; real GLB node visibility controls; overall model dimensions; expanded VIEW/SEND intent filters so GLB files from Zalo and file managers can open in ECOHOME Viewer."
+            gh release create v0.1.5 ECOHOME_Viewer_v0.1.5_ARM64.apk --title "ECOHOME Viewer v0.1.5" --notes "Automatic gestures: one-finger Orbit, two-finger Pan and pinch Zoom without switching modes; tap-to-select via Filament pick; precision DIM with long-press magnifier and two-point measurement; SketchUp Tags are read only from ECOHOME metadata, no longer from node IDs; safe-area responsive UI retained."
           fi
