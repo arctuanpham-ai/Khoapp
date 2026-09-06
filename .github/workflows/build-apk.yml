@@ -11,6 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,27 +35,42 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build debug APK
-        run: gradle --no-daemon :app:assembleDebug
+      - name: Create temporary release signing key
+        shell: bash
+        run: |
+          PASS=$(openssl rand -hex 16)
+          KEYSTORE="$GITHUB_WORKSPACE/ecohome-ci-release.jks"
+          keytool -genkeypair -keystore "$KEYSTORE" -storepass "$PASS" -keypass "$PASS" -alias ecohome -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=ECOHOME Viewer, OU=ECOHOME, O=ECOHOME, C=VN"
+          echo "ECOHOME_KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
+          echo "ECOHOME_KEYSTORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
+          echo "ECOHOME_KEY_ALIAS=ecohome" >> "$GITHUB_ENV"
+          echo "ECOHOME_KEY_PASSWORD=$PASS" >> "$GITHUB_ENV"
 
-      - name: Prepare APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk ECOHOME_Viewer.apk
+      - name: Build signed release APK
+        run: gradle --no-daemon :app:assembleRelease
+
+      - name: Validate APK package, SDK, ABI and signature
+        shell: bash
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          test -f "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -E "package:|sdkVersion:|targetSdkVersion:|native-code:"
+          cp "$APK" ECOHOME_Viewer_v0.1.1_ARM64.apk
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ECOHOME-Viewer-APK
-          path: ECOHOME_Viewer.apk
+          name: ECOHOME-Viewer-v0.1.1-ARM64
+          path: ECOHOME_Viewer_v0.1.1_ARM64.apk
           if-no-files-found: error
 
-      - name: Create or update GitHub Release
+      - name: Publish GitHub Release v0.1.1
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v0.1.0 >/dev/null 2>&1; then
-            gh release upload v0.1.0 ECOHOME_Viewer.apk --clobber
+          if gh release view v0.1.1 >/dev/null 2>&1; then
+            gh release upload v0.1.1 ECOHOME_Viewer_v0.1.1_ARM64.apk --clobber
           else
-            gh release create v0.1.0 ECOHOME_Viewer.apk \
-              --title "ECOHOME Viewer v0.1.0" \
-              --notes "Android viewer for ECOHOME / SketchUp GLB workflow. Download ECOHOME_Viewer.apk and install directly on Android."
+            gh release create v0.1.1 ECOHOME_Viewer_v0.1.1_ARM64.apk --title "ECOHOME Viewer v0.1.1" --notes "Signed release APK for Android ARM64, including Xiaomi 13T Pro. Package: vn.ecohome.viewer. Minimum Android 8.0 (API 26)."
           fi
