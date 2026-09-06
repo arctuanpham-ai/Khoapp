@@ -8,15 +8,44 @@
         <activity
             android:name=".MainActivity"
             android:screenOrientation="fullSensor"
+            android:launchMode="singleTop"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Standard GLB / glTF MIME types. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" android:mimeType="model/gltf-binary" />
+                <data android:scheme="file" android:mimeType="model/gltf-binary" />
+                <data android:scheme="content" android:mimeType="model/gltf+json" />
+                <data android:scheme="file" android:mimeType="model/gltf+json" />
+                <data android:scheme="content" android:mimeType="application/octet-stream" />
+                <data android:scheme="file" android:mimeType="application/octet-stream" />
+                <data android:scheme="content" android:mimeType="application/gltf-buffer" />
+                <data android:scheme="file" android:mimeType="application/gltf-buffer" />
+            </intent-filter>
+
+            <!-- Some apps such as chat/file providers expose GLB as */*; path narrows it to .glb. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="*/*" />
+                <data android:pathPattern=".*\.glb" />
+                <data android:pathPattern=".*\.GLB" />
+            </intent-filter>
+
+            <!-- Receive a shared GLB file from Zalo/Telegram/file managers. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="model/gltf-binary" />
                 <data android:mimeType="application/octet-stream" />
             </intent-filter>
