@@ -16,6 +16,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Patch Filament/Kotlin compatibility
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('app/src/main/java/vn/ecohome/viewer/MainActivity.kt')
+          s = p.read_text()
+          old = '''        val named = asset.entities.mapNotNull { e ->
+              val name = runCatching { asset.getName(e) }.getOrNull()
+              if (name.isNullOrBlank()) null else e to name
+          }.distinctBy { it.second }.take(40)'''
+          new = '''        val named = mutableListOf<Pair<Int, String>>()
+          val seen = mutableSetOf<String>()
+          for (e in asset.entities) {
+              val name = runCatching { asset.getName(e) }.getOrNull()
+              if (!name.isNullOrBlank() && seen.add(name)) {
+                  named.add(e to name)
+                  if (named.size >= 40) break
+              }
+          }'''
+          if old not in s:
+              raise SystemExit('Tags source block not found')
+          s = s.replace(old, new)
+          s = s.replace('        runCatching { modelViewer.resetToDefaultState() }\n', '')
+          p.write_text(s)
+          PY
+
       - name: Java 17
         uses: actions/setup-java@v4
         with:
