@@ -25,16 +25,7 @@ jobs:
           p = Path('app/src/main/java/vn/ecohome/viewer/MainActivity.kt')
           s = p.read_text()
           pattern = r'\s*val named = asset\.entities\.mapNotNull \{ e ->.*?\}\.distinctBy \{ it\.second \}\.take\(40\)'
-          replacement = '''
-        val named = mutableListOf<Pair<Int, String>>()
-        val seen = mutableSetOf<String>()
-        for (e in asset.entities) {
-            val name = runCatching { asset.getName(e) }.getOrNull()
-            if (!name.isNullOrBlank() && seen.add(name)) {
-                named.add(e to name)
-                if (named.size >= 40) break
-            }
-        }'''
+          replacement = "\n        val named = mutableListOf<Pair<Int, String>>()\n        val seen = mutableSetOf<String>()\n        for (e in asset.entities) {\n            val name = runCatching { asset.getName(e) }.getOrNull()\n            if (!name.isNullOrBlank() && seen.add(name)) {\n                named.add(e to name)\n                if (named.size >= 40) break\n            }\n        }"
           s2, n = re.subn(pattern, replacement, s, count=1, flags=re.S)
           if n != 1:
               raise SystemExit(f'Tags source patch count={n}')
