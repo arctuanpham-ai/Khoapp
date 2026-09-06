@@ -56,21 +56,21 @@ jobs:
           test -f "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | grep -E "package:|sdkVersion:|targetSdkVersion:|native-code:"
-          cp "$APK" ECOHOME_Viewer_v0.1.2_ARM64.apk
+          cp "$APK" ECOHOME_Viewer_v0.1.3_ARM64.apk
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ECOHOME-Viewer-v0.1.2-ARM64
-          path: ECOHOME_Viewer_v0.1.2_ARM64.apk
+          name: ECOHOME-Viewer-v0.1.3-ARM64
+          path: ECOHOME_Viewer_v0.1.3_ARM64.apk
           if-no-files-found: error
 
-      - name: Publish GitHub Release v0.1.2
+      - name: Publish GitHub Release v0.1.3
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v0.1.2 >/dev/null 2>&1; then
-            gh release upload v0.1.2 ECOHOME_Viewer_v0.1.2_ARM64.apk --clobber
+          if gh release view v0.1.3 >/dev/null 2>&1; then
+            gh release upload v0.1.3 ECOHOME_Viewer_v0.1.3_ARM64.apk --clobber
           else
-            gh release create v0.1.2 ECOHOME_Viewer_v0.1.2_ARM64.apk --title "ECOHOME Viewer v0.1.2" --notes "Responsive portrait/landscape UI, automatic screen rotation, improved light background and directional lighting, FIT/HOME, View/Dim/Tags/Info toolbar foundation. ARM64 Android release for Xiaomi 13T Pro and compatible devices."
+            gh release create v0.1.3 ECOHOME_Viewer_v0.1.3_ARM64.apk --title "ECOHOME Viewer v0.1.3" --notes "Polished ECOHOME UI closer to approved mockup; responsive portrait/landscape toolbars; View/Dim/Tags/Info dialogs; multi-direction studio fill lighting to prevent black faces; ARM64 Android release."
           fi
