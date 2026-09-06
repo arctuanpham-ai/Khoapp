@@ -56,7 +56,6 @@ class MainActivity : Activity() {
 
     private val green = Color.rgb(55, 151, 91)
     private val darkGreen = Color.rgb(25, 77, 51)
-    private val paleGreen = Color.rgb(239, 248, 242)
     private val panel = Color.argb(248, 252, 253, 252)
     private val border = Color.rgb(214, 227, 218)
 
@@ -76,17 +75,27 @@ class MainActivity : Activity() {
         installTouchController()
         setupLighting()
         val restored = savedInstanceState?.getString("last_uri")?.let(Uri::parse)
-        lastUri = restored ?: intent?.data
+        lastUri = restored ?: resolveIncomingUri(intent)
         lastUri?.let { loadModel(it) }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        intent.data?.let {
+        resolveIncomingUri(intent)?.let {
             lastUri = it
             loadModel(it)
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun resolveIncomingUri(intent: Intent?): Uri? {
+        if (intent == null) return null
+        intent.data?.let { return it }
+        if (intent.action == Intent.ACTION_SEND) {
+            return intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
+        }
+        return null
     }
 
     private fun buildUi() {
@@ -95,7 +104,6 @@ class MainActivity : Activity() {
         surfaceView = SurfaceView(this)
         root.addView(surfaceView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
-        // Android 15+ forces edge-to-edge for target 35. Reserve status/navigation bar space.
         root.setOnApplyWindowInsetsListener { v, insets ->
             val bars = insets.getInsets(WindowInsets.Type.systemBars())
             v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
@@ -210,9 +218,7 @@ class MainActivity : Activity() {
         surfaceView.setOnTouchListener { _, event ->
             if (interactionMode != "PAN") return@setOnTouchListener modelViewer.onTouch(surfaceView, event)
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    lastTouchX = event.x; lastTouchY = event.y; true
-                }
+                MotionEvent.ACTION_DOWN -> { lastTouchX = event.x; lastTouchY = event.y; true }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.x - lastTouchX
                     val dy = event.y - lastTouchY
@@ -232,7 +238,6 @@ class MainActivity : Activity() {
         panX += dxPixels / surfaceView.width.coerceAtLeast(1) * 2.4f
         panY -= dyPixels / surfaceView.height.coerceAtLeast(1) * 2.4f
         val m = base.clone()
-        // Filament transform array is column-major; translation is 12,13,14.
         m[12] = base[12] + panX
         m[13] = base[13] + panY
         val tm = modelViewer.engine.transformManager
@@ -250,8 +255,7 @@ class MainActivity : Activity() {
     }
 
     private fun navItem(icon: String, label: String, selected: Boolean, action: () -> Unit): View = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        gravity = Gravity.CENTER
+        orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
         background = solid(if (selected) green else Color.TRANSPARENT, 11f)
         addView(iconText(icon, 22f, if (selected) Color.WHITE else darkGreen), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(29)))
         addView(iconText(label, 10f, if (selected) Color.WHITE else Color.rgb(48, 64, 53)), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(19)))
@@ -259,8 +263,7 @@ class MainActivity : Activity() {
     }
 
     private fun miniTool(icon: String, label: String, selected: Boolean, action: () -> Unit): View = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        gravity = Gravity.CENTER
+        orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
         background = solid(if (selected) green else Color.rgb(253, 254, 253), 11f, if (selected) green else Color.rgb(232, 237, 233))
         addView(iconText(icon, 21f, if (selected) Color.WHITE else Color.BLACK), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(29)))
         addView(iconText(label, 10f, if (selected) Color.WHITE else Color.rgb(50, 57, 52)), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(19)))
@@ -274,8 +277,7 @@ class MainActivity : Activity() {
     }
 
     private fun topAction(text: String, action: () -> Unit): View = iconText(text, 24f, darkGreen).apply {
-        gravity = Gravity.CENTER
-        setOnClickListener { action() }
+        gravity = Gravity.CENTER; setOnClickListener { action() }
     }.also { it.layoutParams = LinearLayout.LayoutParams(dp(44), dp(48)) }
 
     private fun iconText(value: String, size: Float, color: Int): TextView = TextView(this).apply {
@@ -284,21 +286,12 @@ class MainActivity : Activity() {
 
     private fun setupLighting() {
         runCatching {
-            // ModelViewer creates one hard SUN light by default; remove it and use a studio rig.
             modelViewer.scene.removeEntity(modelViewer.light)
-
             skybox = Skybox.Builder().color(0.90f, 0.92f, 0.91f, 1.0f).build(modelViewer.engine)
             modelViewer.scene.skybox = skybox
-
-            // Diffuse ambient fill. This is the important fix for faces that were rendering pure black.
             val ambient = floatArrayOf(1.0f, 1.0f, 1.0f)
-            indirectLight = IndirectLight.Builder()
-                .irradiance(1, ambient)
-                .radiance(1, ambient)
-                .intensity(26000f)
-                .build(modelViewer.engine)
+            indirectLight = IndirectLight.Builder().irradiance(1, ambient).radiance(1, ambient).intensity(26000f).build(modelViewer.engine)
             modelViewer.scene.indirectLight = indirectLight
-
             addLight(-0.55f, -1.0f, -0.75f, 42000f)
             addLight(0.75f, -0.35f, -0.35f, 18000f)
             addLight(-0.65f, 0.15f, 0.55f, 14000f)
@@ -308,93 +301,56 @@ class MainActivity : Activity() {
 
     private fun addLight(x: Float, y: Float, z: Float, intensity: Float) {
         val entity = EntityManager.get().create()
-        LightManager.Builder(LightManager.Type.DIRECTIONAL)
-            .color(1.0f, 0.99f, 0.97f)
-            .intensity(intensity)
-            .direction(x, y, z)
-            .castShadows(false)
-            .build(modelViewer.engine, entity)
-        modelViewer.scene.addEntity(entity)
-        lightEntities.add(entity)
+        LightManager.Builder(LightManager.Type.DIRECTIONAL).color(1.0f, 0.99f, 0.97f).intensity(intensity).direction(x, y, z).castShadows(false).build(modelViewer.engine, entity)
+        modelViewer.scene.addEntity(entity); lightEntities.add(entity)
     }
 
     private fun showViewPanel() {
         val options = arrayOf("Shaded + Edges", "Texture / Material", "Hidden Line", "Wireframe", "X-Ray", "Opacity")
         val selected = when (currentMode) { "SHADED" -> 0; "TEXTURE" -> 1; "HIDDEN" -> 2; "WIREFRAME" -> 3; "X-RAY" -> 4; else -> 5 }
-        AlertDialog.Builder(this).setTitle("Chế độ hiển thị")
-            .setSingleChoiceItems(options, selected) { d, which ->
-                currentMode = arrayOf("SHADED", "TEXTURE", "HIDDEN", "WIREFRAME", "X-RAY", "OPACITY")[which]
-                setStatus("VIEW • ${options[which].uppercase()}")
-                when (which) {
-                    0, 1 -> setBackground(.90f, .92f, .91f)
-                    2, 3 -> setBackground(.97f, .98f, .97f)
-                    4 -> setBackground(.80f, .84f, .82f)
-                    5 -> setBackground(.92f, .94f, .93f)
-                }
-                if (which == 0 || which == 2 || which == 3) {
-                    Toast.makeText(this, "Edges thật sẽ được lấy từ ECOHOME Exporter ở bản kế tiếp; GLB hiện tại không chứa đường cạnh SketchUp.", Toast.LENGTH_LONG).show()
-                }
-                d.dismiss()
-            }.setNegativeButton("Đóng", null).show()
+        AlertDialog.Builder(this).setTitle("Chế độ hiển thị").setSingleChoiceItems(options, selected) { d, which ->
+            currentMode = arrayOf("SHADED", "TEXTURE", "HIDDEN", "WIREFRAME", "X-RAY", "OPACITY")[which]
+            setStatus("VIEW • ${options[which].uppercase()}")
+            when (which) { 0,1 -> setBackground(.90f,.92f,.91f); 2,3 -> setBackground(.97f,.98f,.97f); 4 -> setBackground(.80f,.84f,.82f); 5 -> setBackground(.92f,.94f,.93f) }
+            if (which == 0 || which == 2 || which == 3) Toast.makeText(this, "Edges thật cần dữ liệu cạnh từ ECOHOME Exporter; GLB hiện tại chỉ có mesh.", Toast.LENGTH_LONG).show()
+            d.dismiss()
+        }.setNegativeButton("Đóng", null).show()
     }
 
     private fun showDimPanel() {
-        val asset = modelViewer.asset
-        if (asset == null) {
-            Toast.makeText(this, "Hãy mở model trước", Toast.LENGTH_SHORT).show(); return
-        }
+        val asset = modelViewer.asset ?: run { Toast.makeText(this, "Hãy mở model trước", Toast.LENGTH_SHORT).show(); return }
         val h = asset.boundingBox.halfExtent
-        val x = (h[0] * 2f * 1000f).roundToInt()
-        val y = (h[1] * 2f * 1000f).roundToInt()
-        val z = (h[2] * 2f * 1000f).roundToInt()
-        AlertDialog.Builder(this).setTitle("Công cụ đo kích thước (Dim)")
-            .setItems(arrayOf("Kích thước tổng: X $x mm • Y $y mm • Z $z mm", "Đo 2 điểm", "Đo liên tục", "Góc", "Diện tích", "Xóa đo")) { _, which ->
-                if (which == 0) setStatus("DIM • X $x  Y $y  Z $z mm")
-                else Toast.makeText(this, "Đã chọn ${arrayOf("", "Đo 2 điểm", "Đo liên tục", "Góc", "Diện tích", "Xóa đo")[which]}", Toast.LENGTH_SHORT).show()
-            }.show()
+        val x = (h[0] * 2f * 1000f).roundToInt(); val y = (h[1] * 2f * 1000f).roundToInt(); val z = (h[2] * 2f * 1000f).roundToInt()
+        AlertDialog.Builder(this).setTitle("Công cụ đo kích thước (Dim)").setItems(arrayOf("Kích thước tổng: X $x mm • Y $y mm • Z $z mm", "Đo 2 điểm", "Đo liên tục", "Góc", "Diện tích", "Xóa đo")) { _, which ->
+            if (which == 0) setStatus("DIM • X $x  Y $y  Z $z mm") else Toast.makeText(this, "Đã chọn công cụ đo", Toast.LENGTH_SHORT).show()
+        }.show()
     }
 
     private fun showTagsPanel() {
-        val asset = modelViewer.asset
-        if (asset == null) { Toast.makeText(this, "Hãy mở model trước", Toast.LENGTH_SHORT).show(); return }
-        val entities = asset.entities
-        val named = entities.mapNotNull { e ->
+        val asset = modelViewer.asset ?: run { Toast.makeText(this, "Hãy mở model trước", Toast.LENGTH_SHORT).show(); return }
+        val named = asset.entities.mapNotNull { e ->
             val name = runCatching { asset.getName(e) }.getOrNull()
             if (name.isNullOrBlank()) null else e to name
         }.distinctBy { it.second }.take(40)
-        if (named.isEmpty()) {
-            Toast.makeText(this, "GLB này chưa có tên node/tag. ECOHOME Exporter sẽ bổ sung metadata.", Toast.LENGTH_LONG).show(); return
-        }
-        val labels = named.map { it.second }.toTypedArray()
-        val checked = BooleanArray(labels.size) { true }
-        AlertDialog.Builder(this).setTitle("Quản lý Tags / Layers")
-            .setMultiChoiceItems(labels, checked) { _, which, isChecked ->
-                val entity = named[which].first
-                if (isChecked) modelViewer.scene.addEntity(entity) else modelViewer.scene.removeEntity(entity)
-            }.setPositiveButton("Xong") { _, _ -> setStatus("TAGS • Đã cập nhật hiển thị") }.show()
+        if (named.isEmpty()) { Toast.makeText(this, "GLB này chưa có tên node/tag. ECOHOME Exporter sẽ bổ sung metadata.", Toast.LENGTH_LONG).show(); return }
+        val labels = named.map { it.second }.toTypedArray(); val checked = BooleanArray(labels.size) { true }
+        AlertDialog.Builder(this).setTitle("Quản lý Tags / Layers").setMultiChoiceItems(labels, checked) { _, which, isChecked ->
+            val entity = named[which].first
+            if (isChecked) modelViewer.scene.addEntity(entity) else modelViewer.scene.removeEntity(entity)
+        }.setPositiveButton("Xong") { _, _ -> setStatus("TAGS • Đã cập nhật hiển thị") }.show()
     }
 
     private fun showLightingPanel() {
-        AlertDialog.Builder(this).setTitle("Tùy chọn hiển thị")
-            .setItems(arrayOf("Nền sáng", "Nền xám", "Nền tối", "Tăng ambient", "Giảm ambient")) { _, which ->
-                when (which) {
-                    0 -> setBackground(.94f,.95f,.94f)
-                    1 -> setBackground(.76f,.79f,.77f)
-                    2 -> setBackground(.28f,.30f,.29f)
-                    3 -> indirectLight?.intensity = 40000f
-                    4 -> indirectLight?.intensity = 16000f
-                }
-                setStatus("DISPLAY • Đã cập nhật")
-            }.show()
+        AlertDialog.Builder(this).setTitle("Tùy chọn hiển thị").setItems(arrayOf("Nền sáng", "Nền xám", "Nền tối", "Tăng ambient", "Giảm ambient")) { _, which ->
+            when (which) { 0 -> setBackground(.94f,.95f,.94f); 1 -> setBackground(.76f,.79f,.77f); 2 -> setBackground(.28f,.30f,.29f); 3 -> indirectLight?.intensity = 40000f; 4 -> indirectLight?.intensity = 16000f }
+            setStatus("DISPLAY • Đã cập nhật")
+        }.show()
     }
 
     private fun showInfo() {
-        val asset = modelViewer.asset
-        val box = asset?.boundingBox?.halfExtent
+        val box = modelViewer.asset?.boundingBox?.halfExtent
         val dim = if (box != null) "\nKích thước: ${(box[0]*2000).roundToInt()} × ${(box[1]*2000).roundToInt()} × ${(box[2]*2000).roundToInt()} mm" else ""
-        AlertDialog.Builder(this).setTitle("Thông tin mô hình")
-            .setMessage("${titleView.text}\n\nECOHOME Viewer v0.1.4\nARM64 • GLB\nAuto rotate Portrait / Landscape$dim\n\nOrbit • Pan 1 ngón • Zoom • View • Dim • Tags")
-            .setPositiveButton("Đóng", null).show()
+        AlertDialog.Builder(this).setTitle("Thông tin mô hình").setMessage("${titleView.text}\n\nECOHOME Viewer v0.1.4\nARM64 • GLB\nAuto rotate Portrait / Landscape$dim\n\nOrbit • Pan 1 ngón • Zoom • View • Dim • Tags").setPositiveButton("Đóng", null).show()
     }
 
     private fun showMore() {
@@ -406,16 +362,14 @@ class MainActivity : Activity() {
     private fun setBackground(r: Float, g: Float, b: Float) {
         runCatching {
             skybox?.let { modelViewer.scene.skybox = null; modelViewer.engine.destroySkybox(it) }
-            skybox = Skybox.Builder().color(r, g, b, 1f).build(modelViewer.engine)
-            modelViewer.scene.skybox = skybox
+            skybox = Skybox.Builder().color(r, g, b, 1f).build(modelViewer.engine); modelViewer.scene.skybox = skybox
         }
     }
 
     private fun resetView() {
         panX = 0f; panY = 0f
         runCatching { modelViewer.resetToDefaultState() }
-        fitModel()
-        setInteraction("ORBIT")
+        fitModel(); setInteraction("ORBIT")
     }
 
     private fun fitModel() {
@@ -423,18 +377,15 @@ class MainActivity : Activity() {
             modelViewer.transformToUnitCube()
             val asset = modelViewer.asset ?: return@runCatching
             val tm = modelViewer.engine.transformManager
-            val arr = FloatArray(16)
-            tm.getTransform(tm.getInstance(asset.root), arr)
-            rootTransformAfterFit = arr
-            panX = 0f; panY = 0f
+            val arr = FloatArray(16); tm.getTransform(tm.getInstance(asset.root), arr)
+            rootTransformAfterFit = arr; panX = 0f; panY = 0f
             setStatus("FIT • Model vừa khung nhìn")
         }
     }
 
     private fun openDocument() {
         val i = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
+            addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
             putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("model/gltf-binary", "model/gltf+json", "application/octet-stream", "application/gltf-buffer"))
         }
         startActivityForResult(i, OPEN_MODEL)
@@ -456,31 +407,22 @@ class MainActivity : Activity() {
             if (ext != "glb") Toast.makeText(this, "ECOHOME Viewer hiện tối ưu cho .glb", Toast.LENGTH_LONG).show()
             setStatus("Đang mở $name…")
             val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: error("Không đọc được file")
-            modelViewer.destroyModel()
-            modelViewer.loadModelGlb(ByteBuffer.wrap(bytes))
-            titleView.text = name
+            modelViewer.destroyModel(); modelViewer.loadModelGlb(ByteBuffer.wrap(bytes)); titleView.text = name
             surfaceView.postDelayed({ fitModel() }, 120)
             setStatus("Đã mở • ${"%.1f".format(bytes.size / 1024f / 1024f)} MB")
         } catch (e: Exception) {
-            setStatus("Không mở được model")
-            Toast.makeText(this, "Không mở được model: ${e.message}", Toast.LENGTH_LONG).show()
+            setStatus("Không mở được model"); Toast.makeText(this, "Không mở được model: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
     private fun queryName(uri: Uri): String? {
-        contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-            if (c.moveToFirst()) return c.getString(0)
-        }
+        contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) return c.getString(0) }
         return uri.lastPathSegment
     }
 
     private fun setStatus(text: String) { if (::statusView.isInitialized) statusView.text = text }
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        lastUri?.let { outState.putString("last_uri", it.toString()) }
-    }
-
+    override fun onSaveInstanceState(outState: Bundle) { super.onSaveInstanceState(outState); lastUri?.let { outState.putString("last_uri", it.toString()) } }
     override fun onResume() { super.onResume(); choreographer.postFrameCallback(frameCallback) }
     override fun onPause() { choreographer.removeFrameCallback(frameCallback); super.onPause() }
 
