@@ -28,6 +28,8 @@ jobs:
         run: python3 scripts/patch_v021.py
       - name: Apply v0.2.2 magnetic DIM patch
         run: python3 scripts/patch_v022.py
+      - name: Repair v0.2.3 patch script
+        run: python3 scripts/fix_v023_script.py
       - name: Apply v0.2.3 viewer patch
         run: python3 scripts/patch_v023.py
       - name: Java 17
