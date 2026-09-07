@@ -11,8 +11,8 @@ android {
         applicationId = "vn.ecohome.viewer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 14
-        versionName = "0.2.3"
+        versionCode = 15
+        versionName = "0.3.0"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
