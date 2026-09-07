@@ -11,8 +11,8 @@ android {
         applicationId = "vn.ecohome.viewer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 15
-        versionName = "0.3.0"
+        versionCode = 16
+        versionName = "0.3.1"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -50,3 +50,4 @@ dependencies {
     implementation("com.google.android.filament:gltfio-android:1.57.1")
     implementation("com.google.android.filament:filament-utils-android:1.57.1")
 }
+
