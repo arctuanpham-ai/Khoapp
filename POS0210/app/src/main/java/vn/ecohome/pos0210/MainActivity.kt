@@ -1,6 +1,7 @@
 package vn.ecohome.pos0210
 
 import android.net.Uri
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -15,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -208,8 +210,17 @@ fun Sent(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
                 }
             }
         }
-        Text("Tạm tính ${money(total)}", Modifier.padding(16.dp))
-        Button({ vm.screen.value = "PAY" }, Modifier.fillMaxWidth().padding(16.dp)) { Text("THANH TOÁN") }
+        Text("Tạm tính ${money(total)}", Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(
+                onClick = { vm.addMore() },
+                modifier = Modifier.weight(1f)
+            ) { Text("＋ GỌI THÊM") }
+            Button(
+                onClick = { vm.screen.value = "PAY" },
+                modifier = Modifier.weight(1f)
+            ) { Text("THANH TOÁN") }
+        }
     }
     pv?.let { b ->
         val its by vm.items(b.id).collectAsState(initial = emptyList())
@@ -432,10 +443,19 @@ fun PermissionSwitch(label: String, checked: Boolean, onChange: (Boolean) -> Uni
 fun MenuManager(vm: PosViewModel) {
     val menu by vm.menu.collectAsState()
     val categories by vm.categories.collectAsState()
+    val context = LocalContext.current
     var showAdd by remember { mutableStateOf(false) }
     var imageTarget by remember { mutableStateOf<MenuItemEntity?>(null) }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        imageTarget?.let { vm.setMenuImage(it, uri?.toString()) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            imageTarget?.let { vm.setMenuImage(it, uri.toString()) }
+        }
         imageTarget = null
     }
     Column {
@@ -449,14 +469,30 @@ fun MenuManager(vm: PosViewModel) {
                 Card(Modifier.fillMaxWidth().padding(6.dp)) {
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (!m.imageUri.isNullOrBlank()) {
-                            AsyncImage(model = m.imageUri, contentDescription = m.name, modifier = Modifier.size(54.dp))
+                            AsyncImage(
+                                model = m.imageUri,
+                                contentDescription = m.name,
+                                modifier = Modifier.size(58.dp)
+                            )
+                            Spacer(Modifier.width(10.dp))
+                        } else {
+                            Surface(
+                                modifier = Modifier.size(58.dp),
+                                color = Tint,
+                                shape = MaterialTheme.shapes.medium
+                            ) {
+                                Box(contentAlignment = Alignment.Center) { Text("ẢNH", fontSize = 11.sp) }
+                            }
                             Spacer(Modifier.width(10.dp))
                         }
                         Column(Modifier.weight(1f)) {
                             Text(m.name, fontWeight = FontWeight.Bold)
                             Text(money(m.price))
                         }
-                        TextButton(onClick = { imageTarget = m; picker.launch("image/*") }) { Text("ẢNH") }
+                        TextButton(onClick = {
+                            imageTarget = m
+                            picker.launch(arrayOf("image/*"))
+                        }) { Text(if (m.imageUri.isNullOrBlank()) "＋ ẢNH" else "ĐỔI ẢNH") }
                         Switch(checked = m.active, onCheckedChange = { vm.toggleMenu(m) })
                     }
                 }
@@ -464,8 +500,8 @@ fun MenuManager(vm: PosViewModel) {
         }
     }
     if (showAdd) {
-        MenuAddDialog(categories, onDismiss = { showAdd = false }) { name, price, cat ->
-            vm.saveMenu(name, price, cat)
+        MenuAddDialog(categories, onDismiss = { showAdd = false }) { name, price, cat, imageUri ->
+            vm.saveMenu(name, price, cat, imageUri)
             showAdd = false
         }
     }
@@ -475,36 +511,62 @@ fun MenuManager(vm: PosViewModel) {
 fun MenuAddDialog(
     categories: List<MenuCategoryEntity>,
     onDismiss: () -> Unit,
-    onSave: (String, Long, String) -> Unit
+    onSave: (String, Long, String, String?) -> Unit
 ) {
+    val context = LocalContext.current
     var name by remember { mutableStateOf("") }
     var priceText by remember { mutableStateOf("") }
     var cat by remember(categories) { mutableStateOf(categories.firstOrNull()?.id ?: "") }
+    var imageUri by remember { mutableStateOf<String?>(null) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            imageUri = uri.toString()
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Thêm món") },
         confirmButton = {
             Button(
-                onClick = { onSave(name, priceText.toLongOrNull() ?: 0L, cat) },
+                onClick = { onSave(name, priceText.toLongOrNull() ?: 0L, cat, imageUri) },
                 enabled = name.isNotBlank() && priceText.toLongOrNull() != null && cat.isNotBlank()
             ) { Text("LƯU MÓN") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("HỦY") } },
         text = {
-            Column {
-                OutlinedTextField(name, { name = it }, label = { Text("Tên món") })
-                OutlinedTextField(
-                    priceText,
-                    { priceText = it.filter(Char::isDigit) },
-                    label = { Text("Giá bán") }
-                )
-                Text("Nhóm món", Modifier.padding(top = 10.dp))
-                categories.forEach { c ->
-                    FilterChip(
-                        selected = cat == c.id,
-                        onClick = { cat = c.id },
-                        label = { Text(c.name) }
+            LazyColumn {
+                item {
+                    OutlinedTextField(name, { name = it }, label = { Text("Tên món") })
+                    OutlinedTextField(
+                        priceText,
+                        { priceText = it.filter(Char::isDigit) },
+                        label = { Text("Giá bán") }
                     )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(onClick = { picker.launch(arrayOf("image/*")) }) {
+                        Text(if (imageUri == null) "＋ THÊM ẢNH MINH HOẠ" else "✓ ĐÃ CHỌN ẢNH · ĐỔI ẢNH")
+                    }
+                    if (imageUri != null) {
+                        AsyncImage(
+                            model = imageUri,
+                            contentDescription = "Ảnh món mới",
+                            modifier = Modifier.fillMaxWidth().height(150.dp).padding(top = 8.dp)
+                        )
+                    }
+                    Text("Nhóm món", Modifier.padding(top = 10.dp))
+                    categories.forEach { c ->
+                        FilterChip(
+                            selected = cat == c.id,
+                            onClick = { cat = c.id },
+                            label = { Text(c.name) }
+                        )
+                    }
                 }
             }
         }
@@ -513,23 +575,134 @@ fun MenuAddDialog(
 
 @Composable
 fun Purchases(vm: PosViewModel) {
+    val purchases by vm.purchases.collectAsState()
+    val context = LocalContext.current
     var itemName by remember { mutableStateOf("") }
-    var amountText by remember { mutableStateOf("") }
-    var dateText by remember { mutableStateOf(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date())) }
+    var qtyText by remember { mutableStateOf("") }
+    var unit by remember { mutableStateOf("kg") }
+    var unitPriceText by remember { mutableStateOf("") }
+    var supplier by remember { mutableStateOf("") }
+    var note by remember { mutableStateOf("") }
+    var invoiceImage by remember { mutableStateOf<String?>(null) }
+    var dateText by remember {
+        mutableStateOf(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date()))
+    }
+    var message by remember { mutableStateOf("") }
+    val invoicePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            invoiceImage = uri.toString()
+        }
+    }
+    val qty = qtyText.replace(',', '.').toDoubleOrNull()
+    val unitPrice = unitPriceText.toLongOrNull()
+    val total = if (qty != null && unitPrice != null) (qty * unitPrice).toLong() else 0L
+
     Column {
         Header("Nhập đầu vào") { vm.screen.value = "MANAGE" }
-        Column(Modifier.padding(16.dp)) {
-            OutlinedTextField(dateText, { dateText = it }, label = { Text("Ngày giờ dd/MM/yyyy HH:mm") })
-            OutlinedTextField(itemName, { itemName = it }, label = { Text("Mặt hàng") })
-            OutlinedTextField(amountText, { amountText = it.filter(Char::isDigit) }, label = { Text("Tổng tiền") })
-            Button(
-                onClick = {
-                    val parser = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
-                    val parsedAt = runCatching { parser.parse(dateText)?.time }.getOrNull() ?: System.currentTimeMillis()
-                    vm.addPurchase(itemName, amountText.toLongOrNull() ?: 0L, "", parsedAt)
-                },
-                enabled = itemName.isNotBlank() && amountText.isNotBlank()
-            ) { Text("TẠO PHIẾU") }
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+            item {
+                OutlinedTextField(
+                    dateText,
+                    { dateText = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Ngày giờ dd/MM/yyyy HH:mm") }
+                )
+                OutlinedTextField(
+                    supplier,
+                    { supplier = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Nhà cung cấp (không bắt buộc)") }
+                )
+                OutlinedTextField(
+                    itemName,
+                    { itemName = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Mặt hàng") }
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        qtyText,
+                        { qtyText = it.filter { ch -> ch.isDigit() || ch == ',' || ch == '.' } },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("Khối lượng / SL") }
+                    )
+                    OutlinedTextField(
+                        unit,
+                        { unit = it },
+                        modifier = Modifier.weight(1f),
+                        label = { Text("Đơn vị") }
+                    )
+                }
+                OutlinedTextField(
+                    unitPriceText,
+                    { unitPriceText = it.filter(Char::isDigit) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Đơn giá") }
+                )
+                OutlinedTextField(
+                    note,
+                    { note = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Ghi chú") }
+                )
+                Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                    Text(
+                        "Thành tiền: ${money(total)}",
+                        Modifier.padding(16.dp),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                OutlinedButton(
+                    onClick = { invoicePicker.launch(arrayOf("image/*")) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (invoiceImage == null) "＋ ẢNH HÓA ĐƠN" else "✓ ĐÃ CHỌN ẢNH HÓA ĐƠN")
+                }
+                Button(
+                    onClick = {
+                        val parser = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+                        val parsedAt = runCatching { parser.parse(dateText)?.time }.getOrNull()
+                            ?: System.currentTimeMillis()
+                        vm.addPurchaseDetailed(
+                            name = itemName,
+                            qty = qty ?: 0.0,
+                            unit = unit.ifBlank { "lần" },
+                            unitPrice = unitPrice ?: 0L,
+                            note = note,
+                            at = parsedAt,
+                            supplierName = supplier,
+                            imageUri = invoiceImage
+                        )
+                        message = "Đã tạo phiếu nhập · ${money(total)}"
+                        itemName = ""
+                        qtyText = ""
+                        unitPriceText = ""
+                        note = ""
+                        invoiceImage = null
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                    enabled = itemName.isNotBlank() && (qty ?: 0.0) > 0 && (unitPrice ?: 0L) > 0
+                ) { Text("TẠO PHIẾU NHẬP") }
+                if (message.isNotBlank()) {
+                    Text(message, Modifier.padding(vertical = 6.dp), fontWeight = FontWeight.Bold)
+                }
+                Text("Phiếu nhập gần đây", Modifier.padding(top = 14.dp, bottom = 6.dp), fontWeight = FontWeight.Bold)
+            }
+            items(purchases.take(10)) { p ->
+                Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(time(p.purchasedAt), fontWeight = FontWeight.Bold)
+                        Text("${money(p.total)} · ${p.note.ifBlank { "Không ghi chú" }}")
+                        if (!p.invoiceImageUri.isNullOrBlank()) Text("📷 Có ảnh hóa đơn", fontSize = 12.sp)
+                    }
+                }
+            }
         }
     }
 }

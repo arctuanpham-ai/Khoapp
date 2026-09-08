@@ -16,7 +16,7 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  private suspend fun audit(type:String,id:String,action:String,payload:String=""){dao.audit(AuditEventEntity(UUID.randomUUID().toString(),type,id,action,currentEmployee.value?.id,"ANDROID",System.currentTimeMillis(),payload))}
  fun add(i:MenuItemEntity){cart.value=cart.value.toMutableMap().apply{put(i.id,(get(i.id)?:0)+1)}};fun sub(i:MenuItemEntity){cart.value=cart.value.toMutableMap().apply{val q=get(i.id)?:0;if(q<=1)remove(i.id)else put(i.id,q-1)}}
  fun selectTable(t:DiningTableEntity){val e=currentEmployee.value?:return;if(!e.canOrder&&e.role!="ADMIN")return;viewModelScope.launch{currentTable.value=t;currentSession.value=sessions.value.firstOrNull{it.tableId==t.id}?:repo.openSession(t.id,e.id);cart.value=emptyMap();screen.value="ORDER"}}
- fun addTable(a:String){viewModelScope.launch{val n=tables.value.size+1;repo.saveTable(DiningTableEntity(UUID.randomUUID().toString(),a,"Bàn %02d".format(n),n));audit("TABLE",a,"CREATE")}}
+ fun addMore(){if(currentSession.value==null||currentTable.value==null)return;cart.value=emptyMap();screen.value="ORDER"}\n fun addTable(a:String){viewModelScope.launch{val n=tables.value.size+1;repo.saveTable(DiningTableEntity(UUID.randomUUID().toString(),a,"Bàn %02d".format(n),n));audit("TABLE",a,"CREATE")}}
  private fun canManageMenu():Boolean{val e=currentEmployee.value?:return false;return e.role=="ADMIN"||e.canManageMenu}
  fun saveMenu(name:String,price:Long,cat:String,imageUri:String?=null){if(!canManageMenu())return;viewModelScope.launch{val id=UUID.randomUUID().toString();repo.saveMenuItem(MenuItemEntity(id,cat,name,price,imageUri,menu.value.size+1));audit("MENU",id,"CREATE",name)}}
  fun setMenuImage(i:MenuItemEntity,uri:String?){if(!canManageMenu())return;viewModelScope.launch{repo.saveMenuItem(i.copy(imageUri=uri));audit("MENU",i.id,"IMAGE")}}
@@ -24,7 +24,22 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  fun saveEmployee(name:String,pin:String,role:String,checkout:Boolean,purchase:Boolean,order:Boolean=true,kitchen:Boolean=true,report:Boolean=false,menu:Boolean=false,system:Boolean=false){if(currentEmployee.value?.role!="ADMIN")return;viewModelScope.launch{val id=UUID.randomUUID().toString();repo.saveEmployee(EmployeeEntity(id,name,true,pin,role,checkout,purchase,order,kitchen,report,menu,system));audit("EMPLOYEE",id,"CREATE",name)}}
  fun updateEmployee(e:EmployeeEntity){if(currentEmployee.value?.role!="ADMIN")return;viewModelScope.launch{repo.saveEmployee(e);audit("EMPLOYEE",e.id,"UPDATE")}};fun toggleEmployee(e:EmployeeEntity){if(currentEmployee.value?.role!="ADMIN"||e.id==currentEmployee.value?.id)return;viewModelScope.launch{dao.setEmployeeActive(e.id,!e.active);audit("EMPLOYEE",e.id,if(e.active)"DISABLE" else "ENABLE")}}
  fun saveSupplier(name:String){viewModelScope.launch{repo.saveSupplier(SupplierEntity(UUID.randomUUID().toString(),name))}};fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(AppSettingEntity(key,value));audit("SETTING",key,"SAVE",value)}};fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
- fun addPurchase(name:String,amount:Long,note:String,at:Long=System.currentTimeMillis(),imageUri:String?=null){val e=currentEmployee.value?:return;if(!e.canPurchase&&e.role!="ADMIN")return;viewModelScope.launch{val id=UUID.randomUUID().toString();repo.savePurchase(PurchaseEntity(id,null,e.id,at,amount,note.ifBlank{name},imageUri),listOf(PurchaseItemEntity(UUID.randomUUID().toString(),id,name,1.0,"lần",amount,amount)));audit("PURCHASE",id,"CREATE","$name:$amount")}}
+ fun addPurchase(name:String,amount:Long,note:String,at:Long=System.currentTimeMillis(),imageUri:String?=null){addPurchaseDetailed(name,1.0,"lần",amount,note,at,"",imageUri)}
+ fun addPurchaseDetailed(name:String,qty:Double,unit:String,unitPrice:Long,note:String,at:Long=System.currentTimeMillis(),supplierName:String="",imageUri:String?=null){
+  val e=currentEmployee.value?:return
+  if(!e.canPurchase&&e.role!="ADMIN")return
+  if(name.isBlank()||qty<=0||unitPrice<=0)return
+  viewModelScope.launch{
+   val id=UUID.randomUUID().toString()
+   val supplierId=if(supplierName.isBlank())null else UUID.randomUUID().toString().also{repo.saveSupplier(SupplierEntity(it,supplierName.trim()))}
+   val amount=(qty*unitPrice).toLong()
+   repo.savePurchase(
+    PurchaseEntity(id,supplierId,e.id,at,amount,note,imageUri),
+    listOf(PurchaseItemEntity(UUID.randomUUID().toString(),id,name.trim(),qty,unit.ifBlank{"lần"},unitPrice,amount))
+   )
+   audit("PURCHASE",id,"CREATE","${name.trim()}:$qty:$unit:$unitPrice:$amount")
+  }
+ }
  fun sendBatch(){val s=currentSession.value?:return;val e=currentEmployee.value?:return;if(!e.canSendKitchen&&e.role!="ADMIN")return;val lines=cart.value;if(lines.isEmpty())return;viewModelScope.launch{val bs=dao.batches(s.id).first();val its=lines.mapNotNull{(id,q)->menu.value.firstOrNull{it.id==id}?.let{OrderItemEntity("","",it.id,it.name,it.price,q)}};repo.createBatch(s.id,bs.size+1,e.id,its);cart.value=emptyMap();screen.value="SENT"}}
  fun markBatchSent(b:OrderBatchEntity){val e=currentEmployee.value?:return;if(!e.canSendKitchen&&e.role!="ADMIN")return;viewModelScope.launch{repo.queueKitchenPrint(b);dao.transitionBatch(b.id,"DRAFT","SENT",System.currentTimeMillis());audit("PRINT",b.id,"KITCHEN_CONFIRMED","operator=${e.name}")}}
  fun batches(id:String)=dao.batches(id);fun items(id:String)=dao.batchItems(id);fun total(id:String)=dao.sessionTotal(id)
