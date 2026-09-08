@@ -1,4 +1,5 @@
 package vn.ecohome.pos0210
+
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -17,12 +18,81 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.text.SimpleDateFormat
 import java.util.*
-val Cream=Color(0xFFF7F2E9);val Ink=Color(0xFF211B18);val Coffee=Color(0xFF5A3C2D)
-fun money(v:Int)="%,dđ".format(v).replace(',','.');fun clock(t:Long)=SimpleDateFormat("HH:mm",Locale.getDefault()).format(Date(t))
-data class Dish(val name:String,val price:Int,val cat:String);data class PosTable(val id:Int,var name:String,var area:String);data class Batch(val no:Int,val orderItems:Map<String,Int>,val staff:String,val sentAt:Long=System.currentTimeMillis(),var printState:String="Đã gửi bếp");data class Session(val table:String,val area:String,val openedAt:Long=System.currentTimeMillis(),val batches:MutableList<Batch> = mutableListOf());data class Sale(val bill:String,val table:String,val area:String,val openedAt:Long,val closedAt:Long,val batches:List<Batch>,val total:Int,val method:String,val cashier:String)
-class MainActivity:ComponentActivity(){override fun onCreate(b:Bundle?){super.onCreate(b);setContent{Pos()}}}
-@Composable fun Pos(){val menu=remember{listOf(Dish("Đen đá",25000,"Cà phê"),Dish("Nâu đá",30000,"Cà phê"),Dish("Bạc xỉu",30000,"Cà phê"),Dish("Bún gà",40000,"Ăn sáng"),Dish("Đùi gà",55000,"Ăn sáng"),Dish("Cánh gà",45000,"Ăn sáng"),Dish("Trà mạn",25000,"Trà"),Dish("Trà đào",35000,"Trà"),Dish("Trà chanh",30000,"Trà"))};val tables=remember{mutableStateListOf(PosTable(1,"Bàn 01","Trong nhà"),PosTable(2,"Bàn 02","Trong nhà"),PosTable(3,"Bàn 03","Trong nhà"),PosTable(4,"Bàn 04","Trong nhà"),PosTable(5,"Bàn 05","Trong nhà"),PosTable(6,"Bàn 06","Trong nhà"),PosTable(7,"Bàn 07","Ngoài trời"),PosTable(8,"Bàn 08","Ngoài trời"))};val sessions=remember{mutableStateMapOf<String,Session>()};val sales=remember{mutableStateListOf<Sale>()};val cart=remember{mutableStateMapOf<String,Int>()};var screen by remember{mutableStateOf("TABLES")};var current by remember{mutableStateOf<PosTable?>(null)};var orderStaff by remember{mutableStateOf("Tuấn")};var cashier by remember{mutableStateOf("Tuấn")};fun sessionTotal(s:Session?):Int=s?.batches?.sumOf{b->b.orderItems.entries.sumOf{e->(menu.firstOrNull{it.name==e.key}?.price?:0)*e.value}}?:0;MaterialTheme(colorScheme=lightColorScheme(primary=Coffee,background=Cream,surface=Color(0xFFFFFCF7),onSurface=Ink)){Surface(Modifier.fillMaxSize(),color=Cream){when(screen){"TABLES"->Tables(tables,sessions,{p->current=p;sessions.getOrPut(p.name){Session(p.name,p.area)};cart.clear();screen="ORDER"},{screen="HISTORY"},{screen="REPORT"}){area->val n=tables.size+1;tables.add(PosTable(n,"Bàn %02d".format(n),area))};"ORDER"->Order(current!!,menu,cart,orderStaff,{orderStaff=it},{screen="TABLES"}){if(cart.isNotEmpty()){val s=sessions[current!!.name]!!;s.batches.add(Batch(s.batches.size+1,cart.toMap(),orderStaff));cart.clear();screen="SENT"}};"SENT"->Sent(current!!,sessions[current!!.name]!!,{screen="ORDER"},{screen="PAY"},{screen="TABLES"});"PAY"->Pay(current!!,sessions[current!!.name]!!,menu,cashier,{cashier=it},{screen="SENT"}){method->val s=sessions[current!!.name]!!;val now=System.currentTimeMillis();sales.add(Sale("0210-%04d".format(sales.size+1),s.table,s.area,s.openedAt,now,s.batches.toList(),sessionTotal(s),method,cashier));sessions.remove(current!!.name);cart.clear();screen="TABLES"};"HISTORY"->History(sales){screen="TABLES"};"REPORT"->Report(sales){screen="TABLES"}}}}}}
-@Composable fun Brand(title:String="",back:(()->Unit)?=null){Row(Modifier.fillMaxWidth().padding(18.dp),verticalAlignment=Alignment.CenterVertically){if(back==null)Column{Text("0210",fontSize=30.sp,fontWeight=FontWeight.Black);Text("BREAKFAST · COFFEE · DRINKS",fontSize=9.sp)}else Text("‹",Modifier.clickable{back()}.padding(8.dp),fontSize=34.sp);Spacer(Modifier.weight(1f));Text(title,fontSize=22.sp,fontWeight=FontWeight.Bold)}}
+
+val Cream = Color(0xFFF7F2E9)
+val Ink = Color(0xFF211B18)
+val Coffee = Color(0xFF5A3C2D)
+fun money(v: Int) = "%,dđ".format(v).replace(',', '.')
+fun clock(t: Long) = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(t))
+
+data class Dish(val name: String, val price: Int, val cat: String)
+data class PosTable(val id: Int, var name: String, var area: String)
+data class Batch(val no: Int, val orderItems: Map<String, Int>, val staff: String, val sentAt: Long = System.currentTimeMillis(), var printState: String = "Đã gửi bếp")
+data class Session(val table: String, val area: String, val openedAt: Long = System.currentTimeMillis(), val batches: MutableList<Batch> = mutableListOf())
+data class Sale(val bill: String, val table: String, val area: String, val openedAt: Long, val closedAt: Long, val batches: List<Batch>, val total: Int, val method: String, val cashier: String)
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent { Pos() }
+    }
+}
+
+@Composable
+fun Pos() {
+    val menu = remember {
+        listOf(
+            Dish("Đen đá", 25000, "Cà phê"), Dish("Nâu đá", 30000, "Cà phê"), Dish("Bạc xỉu", 30000, "Cà phê"),
+            Dish("Bún gà", 40000, "Ăn sáng"), Dish("Đùi gà", 55000, "Ăn sáng"), Dish("Cánh gà", 45000, "Ăn sáng"),
+            Dish("Trà mạn", 25000, "Trà"), Dish("Trà đào", 35000, "Trà"), Dish("Trà chanh", 30000, "Trà")
+        )
+    }
+    val tables = remember {
+        mutableStateListOf(
+            PosTable(1,"Bàn 01","Trong nhà"), PosTable(2,"Bàn 02","Trong nhà"), PosTable(3,"Bàn 03","Trong nhà"),
+            PosTable(4,"Bàn 04","Trong nhà"), PosTable(5,"Bàn 05","Trong nhà"), PosTable(6,"Bàn 06","Trong nhà"),
+            PosTable(7,"Bàn 07","Ngoài trời"), PosTable(8,"Bàn 08","Ngoài trời")
+        )
+    }
+    val sessions = remember { mutableStateMapOf<String, Session>() }
+    val sales = remember { mutableStateListOf<Sale>() }
+    val cart = remember { mutableStateMapOf<String, Int>() }
+    var screen by remember { mutableStateOf("TABLES") }
+    var current by remember { mutableStateOf<PosTable?>(null) }
+    var orderStaff by remember { mutableStateOf("Tuấn") }
+    var cashier by remember { mutableStateOf("Tuấn") }
+
+    fun sessionTotal(s: Session?): Int {
+        if (s == null) return 0
+        return s.batches.sumOf { batch ->
+            batch.orderItems.entries.sumOf { e ->
+                (menu.firstOrNull { it.name == e.key }?.price ?: 0) * e.value
+            }
+        }
+    }
+
+    MaterialTheme(colorScheme = lightColorScheme(primary = Coffee, background = Cream, surface = Color(0xFFFFFCF7), onSurface = Ink)) {
+        Surface(Modifier.fillMaxSize(), color = Cream) {
+            when (screen) {
+                "TABLES" -> Tables(tables, sessions,
+                    open = { p -> current = p; sessions.getOrPut(p.name) { Session(p.name, p.area) }; cart.clear(); screen = "ORDER" },
+                    history = { screen = "HISTORY" }, report = { screen = "REPORT" },
+                    add = { area -> val n = tables.size + 1; tables.add(PosTable(n, "Bàn %02d".format(n), area)) })
+                "ORDER" -> current?.let { t -> Order(t, menu, cart, orderStaff, { orderStaff = it }, { screen = "TABLES" }) {
+                    if (cart.isNotEmpty()) { val s = sessions[t.name]!!; s.batches.add(Batch(s.batches.size + 1, cart.toMap(), orderStaff)); cart.clear(); screen = "SENT" }
+                }}
+                "SENT" -> current?.let { t -> sessions[t.name]?.let { s -> Sent(t, s, { screen = "ORDER" }, { screen = "PAY" }, { screen = "TABLES" }) } }
+                "PAY" -> current?.let { t -> sessions[t.name]?.let { s -> Pay(t, s, menu, cashier, { cashier = it }, { screen = "SENT" }) { method ->
+                    val now = System.currentTimeMillis(); sales.add(Sale("0210-%04d".format(sales.size + 1), s.table, s.area, s.openedAt, now, s.batches.toList(), sessionTotal(s), method, cashier)); sessions.remove(t.name); cart.clear(); screen = "TABLES"
+                } } }
+                "HISTORY" -> History(sales) { screen = "TABLES" }
+                "REPORT" -> Report(sales) { screen = "TABLES" }
+            }
+        }
+    }
+}
+
+@Composable fun Brand(title:String="", back:(()->Unit)?=null){Row(Modifier.fillMaxWidth().padding(18.dp),verticalAlignment=Alignment.CenterVertically){if(back==null){Column{Text("0210",fontSize=30.sp,fontWeight=FontWeight.Black);Text("BREAKFAST · COFFEE · DRINKS",fontSize=9.sp)}}else{Text("‹",Modifier.clickable{back()}.padding(8.dp),fontSize=34.sp)};Spacer(Modifier.weight(1f));Text(title,fontSize=22.sp,fontWeight=FontWeight.Bold)}}
 @Composable fun Tables(tables:MutableList<PosTable>,sessions:Map<String,Session>,open:(PosTable)->Unit,history:()->Unit,report:()->Unit,add:(String)->Unit){var area by remember{mutableStateOf("Trong nhà")};Column{Brand();Row(Modifier.padding(horizontal=16.dp)){listOf("BÁN HÀNG","LỊCH SỬ","BÁO CÁO").forEach{x->Text(x,Modifier.weight(1f).clickable{if(x=="LỊCH SỬ")history() else if(x=="BÁO CÁO")report()}.padding(12.dp),fontWeight=if(x=="BÁN HÀNG")FontWeight.Bold else FontWeight.Normal)}};Row(Modifier.padding(16.dp)){FilterChip(area=="Trong nhà",{area="Trong nhà"},{Text("TRONG NHÀ")});Spacer(Modifier.width(8.dp));FilterChip(area=="Ngoài trời",{area="Ngoài trời"},{Text("NGOÀI TRỜI")})};LazyColumn(Modifier.weight(1f).padding(horizontal=14.dp)){items(tables.filter{it.area==area}.chunked(2)){rowTables->Row{rowTables.forEach{t->val s=sessions[t.name];Card(Modifier.weight(1f).padding(5.dp).height(112.dp).clickable{open(t)},shape=RoundedCornerShape(12.dp)){Column(Modifier.fillMaxSize().padding(12.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center){Text(t.name,fontWeight=FontWeight.Bold);if(s==null)Text("Trống",color=Coffee)else{Text("Đang phục vụ",fontSize=12.sp);Text(clock(s.openedAt),fontSize=11.sp)}}}}}}};Row(Modifier.padding(16.dp)){OutlinedButton({add(area)},Modifier.weight(1f)){Text("＋ TẠO BÀN")};Spacer(Modifier.width(8.dp));Button({open(PosTable(-1,"Mang đi","Mang đi"))},Modifier.weight(1f)){Text("MANG ĐI")}}}}
 @Composable fun StaffPick(label:String,value:String,set:(String)->Unit){var expanded by remember{mutableStateOf(false)};Box{OutlinedButton({expanded=true}){Text("$label: $value ▾")};DropdownMenu(expanded,{expanded=false}){listOf("Tuấn","Hương","Nam").forEach{staffName->DropdownMenuItem(text={Text(staffName)},onClick={set(staffName);expanded=false})}}}}
 @Composable fun Order(t:PosTable,menu:List<Dish>,cart:MutableMap<String,Int>,staff:String,setStaff:(String)->Unit,back:()->Unit,send:()->Unit){var cat by remember{mutableStateOf("Cà phê")};Column{Brand(t.name,back);Row(Modifier.padding(horizontal=12.dp)){listOf("Cà phê","Ăn sáng","Trà").forEach{x->FilterChip(cat==x,{cat=x},{Text(x)},Modifier.padding(3.dp))}};Box(Modifier.padding(horizontal=16.dp)){StaffPick("NV order",staff,setStaff)};LazyColumn(Modifier.weight(1f).padding(12.dp)){items(menu.filter{it.cat==cat}){d->val q=cart[d.name]?:0;Card(Modifier.fillMaxWidth().padding(4.dp)){Row(Modifier.padding(14.dp),verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text(d.name,fontWeight=FontWeight.Bold);Text(money(d.price))};if(q>0){Text("−",Modifier.clickable{if(q==1)cart.remove(d.name)else cart[d.name]=q-1}.padding(12.dp));Text("$q")};Text("＋",Modifier.clickable{cart[d.name]=q+1}.padding(12.dp),fontWeight=FontWeight.Bold)}}}};Button(send,enabled=cart.isNotEmpty(),modifier=Modifier.fillMaxWidth().padding(16.dp).height(58.dp)){Text("GỬI LÀM HÀNG")}}}
