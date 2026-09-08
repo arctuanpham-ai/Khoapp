@@ -20,14 +20,14 @@ class PosViewModel(app:Application):AndroidViewModel(app){
   if(!e.canOrder&&e.role!="ADMIN")return
   viewModelScope.launch{
    currentTable.value=t
-   val existing=sessions.value.firstOrNull{it.tableId==t.id}
+   val existing=dao.openSessionForTable(t.id)
+   cart.value=emptyMap()
    if(existing!=null){
     currentSession.value=existing
-    cart.value=emptyMap()
     screen.value="SENT"
    }else{
-    currentSession.value=repo.openSession(t.id,e.id)
-    cart.value=emptyMap()
+    val fresh=repo.openSession(t.id,e.id)
+    currentSession.value=fresh
     screen.value="ORDER"
    }
   }
