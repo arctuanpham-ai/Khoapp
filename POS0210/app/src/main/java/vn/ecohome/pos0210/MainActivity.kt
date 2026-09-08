@@ -1,8 +1,8 @@
 package vn.ecohome.pos0210
-
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,87 +16,19 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import vn.ecohome.pos0210.data.*
 import java.text.SimpleDateFormat
 import java.util.*
-
-val Cream = Color(0xFFF7F2E9)
-val Ink = Color(0xFF211B18)
-val Coffee = Color(0xFF5A3C2D)
-fun money(v: Int) = "%,dđ".format(v).replace(',', '.')
-fun clock(t: Long) = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(t))
-
-data class Dish(val name: String, val price: Int, val cat: String)
-data class PosTable(val id: Int, var name: String, var area: String)
-data class Batch(val no: Int, val orderItems: Map<String, Int>, val staff: String, val sentAt: Long = System.currentTimeMillis(), var printState: String = "Đã gửi bếp")
-data class Session(val table: String, val area: String, val openedAt: Long = System.currentTimeMillis(), val batches: MutableList<Batch> = mutableListOf())
-data class Sale(val bill: String, val table: String, val area: String, val openedAt: Long, val closedAt: Long, val batches: List<Batch>, val total: Int, val method: String, val cashier: String)
-
-class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContent { Pos() }
-    }
-}
-
-@Composable
-fun Pos() {
-    val menu = remember {
-        listOf(
-            Dish("Đen đá", 25000, "Cà phê"), Dish("Nâu đá", 30000, "Cà phê"), Dish("Bạc xỉu", 30000, "Cà phê"),
-            Dish("Bún gà", 40000, "Ăn sáng"), Dish("Đùi gà", 55000, "Ăn sáng"), Dish("Cánh gà", 45000, "Ăn sáng"),
-            Dish("Trà mạn", 25000, "Trà"), Dish("Trà đào", 35000, "Trà"), Dish("Trà chanh", 30000, "Trà")
-        )
-    }
-    val tables = remember {
-        mutableStateListOf(
-            PosTable(1,"Bàn 01","Trong nhà"), PosTable(2,"Bàn 02","Trong nhà"), PosTable(3,"Bàn 03","Trong nhà"),
-            PosTable(4,"Bàn 04","Trong nhà"), PosTable(5,"Bàn 05","Trong nhà"), PosTable(6,"Bàn 06","Trong nhà"),
-            PosTable(7,"Bàn 07","Ngoài trời"), PosTable(8,"Bàn 08","Ngoài trời")
-        )
-    }
-    val sessions = remember { mutableStateMapOf<String, Session>() }
-    val sales = remember { mutableStateListOf<Sale>() }
-    val cart = remember { mutableStateMapOf<String, Int>() }
-    var screen by remember { mutableStateOf("TABLES") }
-    var current by remember { mutableStateOf<PosTable?>(null) }
-    var orderStaff by remember { mutableStateOf("Tuấn") }
-    var cashier by remember { mutableStateOf("Tuấn") }
-
-    fun sessionTotal(s: Session?): Int {
-        if (s == null) return 0
-        return s.batches.sumOf { batch ->
-            batch.orderItems.entries.sumOf { e ->
-                (menu.firstOrNull { it.name == e.key }?.price ?: 0) * e.value
-            }
-        }
-    }
-
-    MaterialTheme(colorScheme = lightColorScheme(primary = Coffee, background = Cream, surface = Color(0xFFFFFCF7), onSurface = Ink)) {
-        Surface(Modifier.fillMaxSize(), color = Cream) {
-            when (screen) {
-                "TABLES" -> Tables(tables, sessions,
-                    open = { p -> current = p; sessions.getOrPut(p.name) { Session(p.name, p.area) }; cart.clear(); screen = "ORDER" },
-                    history = { screen = "HISTORY" }, report = { screen = "REPORT" },
-                    add = { area -> val n = tables.size + 1; tables.add(PosTable(n, "Bàn %02d".format(n), area)) })
-                "ORDER" -> current?.let { t -> Order(t, menu, cart, orderStaff, { orderStaff = it }, { screen = "TABLES" }) {
-                    if (cart.isNotEmpty()) { val s = sessions[t.name]!!; s.batches.add(Batch(s.batches.size + 1, cart.toMap(), orderStaff)); cart.clear(); screen = "SENT" }
-                }}
-                "SENT" -> current?.let { t -> sessions[t.name]?.let { s -> Sent(t, s, { screen = "ORDER" }, { screen = "PAY" }, { screen = "TABLES" }) } }
-                "PAY" -> current?.let { t -> sessions[t.name]?.let { s -> Pay(t, s, menu, cashier, { cashier = it }, { screen = "SENT" }) { method ->
-                    val now = System.currentTimeMillis(); sales.add(Sale("0210-%04d".format(sales.size + 1), s.table, s.area, s.openedAt, now, s.batches.toList(), sessionTotal(s), method, cashier)); sessions.remove(t.name); cart.clear(); screen = "TABLES"
-                } } }
-                "HISTORY" -> History(sales) { screen = "TABLES" }
-                "REPORT" -> Report(sales) { screen = "TABLES" }
-            }
-        }
-    }
-}
-
-@Composable fun Brand(title:String="", back:(()->Unit)?=null){Row(Modifier.fillMaxWidth().padding(18.dp),verticalAlignment=Alignment.CenterVertically){if(back==null){Column{Text("0210",fontSize=30.sp,fontWeight=FontWeight.Black);Text("BREAKFAST · COFFEE · DRINKS",fontSize=9.sp)}}else{Text("‹",Modifier.clickable{back()}.padding(8.dp),fontSize=34.sp)};Spacer(Modifier.weight(1f));Text(title,fontSize=22.sp,fontWeight=FontWeight.Bold)}}
-@Composable fun Tables(tables:MutableList<PosTable>,sessions:Map<String,Session>,open:(PosTable)->Unit,history:()->Unit,report:()->Unit,add:(String)->Unit){var area by remember{mutableStateOf("Trong nhà")};Column{Brand();Row(Modifier.padding(horizontal=16.dp)){listOf("BÁN HÀNG","LỊCH SỬ","BÁO CÁO").forEach{x->Text(x,Modifier.weight(1f).clickable{if(x=="LỊCH SỬ")history() else if(x=="BÁO CÁO")report()}.padding(12.dp),fontWeight=if(x=="BÁN HÀNG")FontWeight.Bold else FontWeight.Normal)}};Row(Modifier.padding(16.dp)){FilterChip(area=="Trong nhà",{area="Trong nhà"},{Text("TRONG NHÀ")});Spacer(Modifier.width(8.dp));FilterChip(area=="Ngoài trời",{area="Ngoài trời"},{Text("NGOÀI TRỜI")})};LazyColumn(Modifier.weight(1f).padding(horizontal=14.dp)){items(tables.filter{it.area==area}.chunked(2)){rowTables->Row{rowTables.forEach{t->val s=sessions[t.name];Card(Modifier.weight(1f).padding(5.dp).height(112.dp).clickable{open(t)},shape=RoundedCornerShape(12.dp)){Column(Modifier.fillMaxSize().padding(12.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center){Text(t.name,fontWeight=FontWeight.Bold);if(s==null)Text("Trống",color=Coffee)else{Text("Đang phục vụ",fontSize=12.sp);Text(clock(s.openedAt),fontSize=11.sp)}}}}}}};Row(Modifier.padding(16.dp)){OutlinedButton({add(area)},Modifier.weight(1f)){Text("＋ TẠO BÀN")};Spacer(Modifier.width(8.dp));Button({open(PosTable(-1,"Mang đi","Mang đi"))},Modifier.weight(1f)){Text("MANG ĐI")}}}}
-@Composable fun StaffPick(label:String,value:String,set:(String)->Unit){var expanded by remember{mutableStateOf(false)};Box{OutlinedButton({expanded=true}){Text("$label: $value ▾")};DropdownMenu(expanded,{expanded=false}){listOf("Tuấn","Hương","Nam").forEach{staffName->DropdownMenuItem(text={Text(staffName)},onClick={set(staffName);expanded=false})}}}}
-@Composable fun Order(t:PosTable,menu:List<Dish>,cart:MutableMap<String,Int>,staff:String,setStaff:(String)->Unit,back:()->Unit,send:()->Unit){var cat by remember{mutableStateOf("Cà phê")};Column{Brand(t.name,back);Row(Modifier.padding(horizontal=12.dp)){listOf("Cà phê","Ăn sáng","Trà").forEach{x->FilterChip(cat==x,{cat=x},{Text(x)},Modifier.padding(3.dp))}};Box(Modifier.padding(horizontal=16.dp)){StaffPick("NV order",staff,setStaff)};LazyColumn(Modifier.weight(1f).padding(12.dp)){items(menu.filter{it.cat==cat}){d->val q=cart[d.name]?:0;Card(Modifier.fillMaxWidth().padding(4.dp)){Row(Modifier.padding(14.dp),verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text(d.name,fontWeight=FontWeight.Bold);Text(money(d.price))};if(q>0){Text("−",Modifier.clickable{if(q==1)cart.remove(d.name)else cart[d.name]=q-1}.padding(12.dp));Text("$q")};Text("＋",Modifier.clickable{cart[d.name]=q+1}.padding(12.dp),fontWeight=FontWeight.Bold)}}}};Button(send,enabled=cart.isNotEmpty(),modifier=Modifier.fillMaxWidth().padding(16.dp).height(58.dp)){Text("GỬI LÀM HÀNG")}}}
-@Composable fun Sent(t:PosTable,s:Session,more:()->Unit,pay:()->Unit,home:()->Unit){Column{Brand(t.name,home);Text("ĐÃ GỌI",Modifier.padding(horizontal=18.dp),fontSize=20.sp,fontWeight=FontWeight.Bold);LazyColumn(Modifier.weight(1f).padding(12.dp)){items(s.batches){b->Card(Modifier.fillMaxWidth().padding(5.dp)){Column(Modifier.padding(14.dp)){Row{Text("${clock(b.sentAt)} · Đơn #${b.no.toString().padStart(3,'0')}",fontWeight=FontWeight.Bold);Spacer(Modifier.weight(1f));Text("● ${b.printState}",color=Color(0xFF3F7D59),fontSize=12.sp)};Text("Order: ${b.staff}",fontSize=11.sp,color=Coffee);b.orderItems.forEach{(n,q)->Text("$q × $n",Modifier.padding(top=9.dp))}}}}};Row(Modifier.padding(16.dp)){OutlinedButton(more,Modifier.weight(1f)){Text("＋ GỌI THÊM")};Spacer(Modifier.width(8.dp));Button(pay,Modifier.weight(1f)){Text("XEM TẠM TÍNH")}}}}
-@Composable fun Pay(t:PosTable,s:Session,menu:List<Dish>,cashier:String,setCashier:(String)->Unit,back:()->Unit,done:(String)->Unit){var method by remember{mutableStateOf("CASH")};val all=mutableMapOf<String,Int>();s.batches.forEach{b->b.orderItems.forEach{(n,q)->all[n]=(all[n]?:0)+q}};val total=all.entries.sumOf{e->(menu.first{it.name==e.key}.price)*e.value};Column{Brand("Thanh toán",back);Column(Modifier.weight(1f).padding(18.dp)){Text("${t.name} · ${t.area}",fontWeight=FontWeight.Bold);Text("Mở bàn ${clock(s.openedAt)}",fontSize=12.sp,color=Coffee);all.forEach{(n,q)->Row(Modifier.padding(vertical=7.dp)){Text("$q × $n");Spacer(Modifier.weight(1f));Text(money(menu.first{it.name==n}.price*q))}};HorizontalDivider();Row(Modifier.padding(vertical=16.dp)){Text("Tổng cộng",fontWeight=FontWeight.Bold);Spacer(Modifier.weight(1f));Text(money(total),fontSize=25.sp,fontWeight=FontWeight.Black)};Row{FilterChip(method=="CASH",{method="CASH"},{Text("Tiền mặt")});Spacer(Modifier.width(8.dp));FilterChip(method=="TRANSFER",{method="TRANSFER"},{Text("Chuyển khoản")})};Spacer(Modifier.height(14.dp));StaffPick("Người thu tiền",cashier,setCashier)};Button({done(method)},Modifier.fillMaxWidth().padding(18.dp).height(60.dp)){Text("✓ XÁC NHẬN THANH TOÁN")}}}
-@Composable fun History(sales:List<Sale>,back:()->Unit){Column{Brand("Lịch sử",back);if(sales.isEmpty())Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center){Text("Chưa có bill đã thanh toán")}else LazyColumn(Modifier.padding(14.dp)){items(sales.reversed()){sale->Card(Modifier.fillMaxWidth().padding(5.dp)){Column(Modifier.padding(14.dp)){Row{Text(sale.bill,fontWeight=FontWeight.Bold);Spacer(Modifier.weight(1f));Text(money(sale.total),fontWeight=FontWeight.Bold)};Text("${sale.table} · ${sale.area} · ${clock(sale.openedAt)}–${clock(sale.closedAt)}");Text("Thu tiền: ${sale.cashier} · ${if(sale.method=="CASH")"Tiền mặt" else "Chuyển khoản"}",fontSize=12.sp);sale.batches.forEach{b->Text("Đơn #${b.no}: ${b.staff} · ${b.orderItems.entries.joinToString{"${it.value}×${it.key}"}}",fontSize=11.sp,color=Coffee)}}}}}}}
-@Composable fun Report(sales:List<Sale>,back:()->Unit){val total=sales.sumOf{it.total};val cash=sales.filter{it.method=="CASH"}.sumOf{it.total};val itemCount=mutableMapOf<String,Int>();val hourly=mutableMapOf<Int,Int>();val byCashier=mutableMapOf<String,Int>();sales.forEach{sale->sale.batches.forEach{b->b.orderItems.forEach{(n,q)->itemCount[n]=(itemCount[n]?:0)+q}};val h=Calendar.getInstance().apply{timeInMillis=sale.closedAt}.get(Calendar.HOUR_OF_DAY);hourly[h]=(hourly[h]?:0)+sale.total;byCashier[sale.cashier]=(byCashier[sale.cashier]?:0)+sale.total};val peak=hourly.maxByOrNull{it.value};Column{Brand("Báo cáo",back);LazyColumn(Modifier.padding(16.dp)){item{Card(Modifier.fillMaxWidth()){Column(Modifier.fillMaxWidth().padding(20.dp),horizontalAlignment=Alignment.CenterHorizontally){Text("Tổng doanh thu");Text(money(total),fontSize=32.sp,fontWeight=FontWeight.Black);Text("${sales.size} bill · TB ${money(if(sales.isEmpty())0 else total/sales.size)}")}};Spacer(Modifier.height(10.dp));Row{Text("Tiền mặt: ${money(cash)}",Modifier.weight(1f));Text("Chuyển khoản: ${money(total-cash)}")};Spacer(Modifier.height(18.dp));Text("GIỜ CAO ĐIỂM",fontWeight=FontWeight.Bold);Text(if(peak==null)"Chưa đủ dữ liệu" else "%02d:00–%02d:00 · %s".format(peak.key,peak.key+1,money(peak.value)));Spacer(Modifier.height(18.dp));Text("MÓN BÁN CHẠY",fontWeight=FontWeight.Bold)};items(itemCount.entries.sortedByDescending{it.value}.take(5)){entry->Row(Modifier.padding(vertical=6.dp)){Text(entry.key);Spacer(Modifier.weight(1f));Text("${entry.value}")}};item{Spacer(Modifier.height(18.dp));Text("ĐỐI SOÁT NGƯỜI THU TIỀN",fontWeight=FontWeight.Bold)};items(byCashier.entries.toList()){entry->Row(Modifier.padding(vertical=6.dp)){Text(entry.key);Spacer(Modifier.weight(1f));Text(money(entry.value),fontWeight=FontWeight.Bold)}}}}}
+private val Cream=Color(0xFFF7F2E9);private val Ink=Color(0xFF211B18);private val Coffee=Color(0xFF5A3C2D)
+private fun money(v:Long)="%,dđ".format(v).replace(',','.');private fun clock(v:Long)=SimpleDateFormat("HH:mm",Locale.getDefault()).format(Date(v))
+class MainActivity:ComponentActivity(){override fun onCreate(b:Bundle?){super.onCreate(b);enableEdgeToEdge();setContent{MaterialTheme(colorScheme=lightColorScheme(primary=Coffee,background=Cream,surface=Color(0xFFFFFCF7),onSurface=Ink)){Surface(Modifier.fillMaxSize().safeDrawingPadding(),color=Cream){App()}}}}}
+@Composable private fun App(vm:PosViewModel=viewModel()){val screen by vm.screen.collectAsState();val t by vm.currentTable.collectAsState();val s by vm.currentSession.collectAsState();when(screen){"TABLES"->Tables(vm);"ORDER"->if(t!=null)Order(vm,t!!);"SENT"->if(t!=null&&s!=null)Sent(vm,t!!,s!!);"PAY"->if(t!=null&&s!=null)Pay(vm,t!!,s!!);"HISTORY"->History(vm);"REPORT"->Report(vm)}}
+@Composable private fun Brand(title:String="",back:(()->Unit)?=null){Row(Modifier.fillMaxWidth().padding(18.dp),verticalAlignment=Alignment.CenterVertically){if(back==null)Column{Text("0210",fontSize=30.sp,fontWeight=FontWeight.Black);Text("BREAKFAST · COFFEE · DRINKS",fontSize=9.sp)}else Text("‹",Modifier.clickable{back()}.padding(6.dp),fontSize=36.sp);Spacer(Modifier.weight(1f));Text(title,fontSize=21.sp,fontWeight=FontWeight.Bold)}}
+@Composable private fun Tables(vm:PosViewModel){val areas by vm.areas.collectAsState();val tables by vm.tables.collectAsState();val sessions by vm.sessions.collectAsState();val emps by vm.employees.collectAsState();var area by remember{mutableStateOf("inside")};val employee=emps.firstOrNull()?.id?:"e0";Column{Brand();Row(Modifier.padding(horizontal=12.dp)){TextButton({}){Text("BÁN HÀNG",fontWeight=FontWeight.Bold)};TextButton({vm.screen.value="HISTORY"}){Text("LỊCH SỬ")};TextButton({vm.screen.value="REPORT"}){Text("BÁO CÁO")}};Row(Modifier.padding(horizontal=16.dp)){areas.forEach{a->FilterChip(area==a.id,{area=a.id},{Text(a.name)},Modifier.padding(end=8.dp))}};LazyColumn(Modifier.weight(1f).padding(12.dp)){items(tables.filter{it.areaId==area}.chunked(2)){r->Row{r.forEach{tb->val open=sessions.any{it.tableId==tb.id};Card(Modifier.weight(1f).height(108.dp).padding(5.dp).clickable{vm.selectTable(tb,employee)},shape=RoundedCornerShape(14.dp)){Column(Modifier.fillMaxSize(),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center){Text(tb.name,fontWeight=FontWeight.Bold);Text(if(open)"Đang phục vụ" else "Trống",fontSize=12.sp,color=Coffee)}}};if(r.size==1)Spacer(Modifier.weight(1f))}}};Button({vm.addTable(area)},Modifier.fillMaxWidth().padding(16.dp)){Text("＋ TẠO BÀN")}}}
+@Composable private fun Staff(emps:List<EmployeeEntity>,selected:String,set:(String)->Unit,label:String){var exp by remember{mutableStateOf(false)};val name=emps.firstOrNull{it.id==selected}?.name?:"Nhân viên";Box{OutlinedButton({exp=true}){Text("$label: $name ▾")};DropdownMenu(exp,{exp=false}){emps.forEach{e->DropdownMenuItem({Text(e.name)},{set(e.id);exp=false})}}}}
+@Composable private fun Order(vm:PosViewModel,t:DiningTableEntity){val cats by vm.categories.collectAsState();val menu by vm.menu.collectAsState();val emps by vm.employees.collectAsState();val cart by vm.cart.collectAsState();var cat by remember(cats){mutableStateOf(cats.firstOrNull()?.id?:"")};var emp by remember(emps){mutableStateOf(emps.firstOrNull()?.id?:"e0")};val count=cart.values.sum();val total=cart.entries.sumOf{(id,q)->(menu.firstOrNull{it.id==id}?.price?:0)*q};Column{Brand(t.name){vm.screen.value="TABLES"};LazyColumn(Modifier.weight(1f).padding(horizontal=12.dp)){item{Row{cats.forEach{c->FilterChip(cat==c.id,{cat=c.id},{Text(c.name)},Modifier.padding(3.dp))}};Staff(emps,emp,{emp=it},"NV order")};items(menu.filter{it.categoryId==cat}){m->val q=cart[m.id]?:0;Card(Modifier.fillMaxWidth().padding(vertical=5.dp)){Row(Modifier.padding(14.dp),verticalAlignment=Alignment.CenterVertically){Column(Modifier.weight(1f)){Text(m.name,fontWeight=FontWeight.Bold);Text(money(m.price))};if(q>0){Text("−",Modifier.clickable{vm.sub(m)}.padding(12.dp));Text("$q")};Text("＋",Modifier.clickable{vm.add(m)}.padding(12.dp),fontSize=22.sp)}}}};Text("$count món · ${money(total)}",Modifier.padding(horizontal=18.dp),fontWeight=FontWeight.Bold);Button({vm.sendBatch(emp)},enabled=count>0,modifier=Modifier.fillMaxWidth().padding(16.dp).height(56.dp)){Text("GỬI LÀM HÀNG")}}}
+@Composable private fun Sent(vm:PosViewModel,t:DiningTableEntity,s:TableSessionEntity){val batches by vm.batches(s.id).collectAsState(initial=emptyList());val total by vm.total(s.id).collectAsState(initial=0);Column{Brand(t.name){vm.screen.value="TABLES"};Text("ĐÃ GỌI",Modifier.padding(horizontal=18.dp),fontWeight=FontWeight.Bold,fontSize=20.sp);LazyColumn(Modifier.weight(1f).padding(12.dp)){items(batches){b->val its by vm.items(b.id).collectAsState(initial=emptyList());Card(Modifier.fillMaxWidth().padding(5.dp)){Column(Modifier.padding(14.dp)){Text("${clock(b.sentAt?:b.createdAt)} · Đơn #${b.sequence.toString().padStart(3,'0')}",fontWeight=FontWeight.Bold);Text(if(b.status=="SENT")"● Đã gửi làm hàng" else b.status,color=Color(0xFF3F7D59),fontSize=12.sp);its.forEach{i->Text("${i.qty} × ${i.itemNameSnapshot}",Modifier.padding(top=7.dp))}}}}};Text("Tạm tính ${money(total)}",Modifier.padding(horizontal=18.dp),fontWeight=FontWeight.Bold);Row(Modifier.padding(16.dp)){OutlinedButton({vm.screen.value="ORDER"},Modifier.weight(1f)){Text("＋ GỌI THÊM")};Spacer(Modifier.width(8.dp));Button({vm.screen.value="PAY"},Modifier.weight(1f),enabled=batches.isNotEmpty()){Text("THANH TOÁN")}}}}
+@Composable private fun Pay(vm:PosViewModel,t:DiningTableEntity,s:TableSessionEntity){val total by vm.total(s.id).collectAsState(initial=0);val emps by vm.employees.collectAsState();var cashier by remember(emps){mutableStateOf(emps.firstOrNull()?.id?:"e0")};var method by remember{mutableStateOf("CASH")};Column{Brand("Thanh toán"){vm.screen.value="SENT"};Column(Modifier.weight(1f).padding(18.dp)){Text("${t.name} · Mở ${clock(s.openedAt)}",fontWeight=FontWeight.Bold);Spacer(Modifier.height(24.dp));Text("TỔNG CỘNG");Text(money(total),fontSize=34.sp,fontWeight=FontWeight.Black);Spacer(Modifier.height(20.dp));Row{FilterChip(method=="CASH",{method="CASH"},{Text("TIỀN MẶT")});Spacer(Modifier.width(8.dp));FilterChip(method=="TRANSFER",{method="TRANSFER"},{Text("CHUYỂN KHOẢN")})};Spacer(Modifier.height(16.dp));Staff(emps,cashier,{cashier=it},"Người thu tiền");if(method=="TRANSFER"){Spacer(Modifier.height(20.dp));Card{Text("VietQR · ${money(total)}\nNội dung: 0210 ${t.name}",Modifier.padding(18.dp))}}};Button({vm.close(method,cashier,total)},enabled=total>0,modifier=Modifier.fillMaxWidth().padding(18.dp).height(58.dp)){Text("✓ XÁC NHẬN THANH TOÁN")}}}
+@Composable private fun History(vm:PosViewModel){val bills by vm.bills.collectAsState();Column{Brand("Lịch sử"){vm.screen.value="TABLES"};LazyColumn(Modifier.padding(14.dp)){if(bills.isEmpty())item{Text("Chưa có bill đã thanh toán")};items(bills){b->Card(Modifier.fillMaxWidth().padding(5.dp)){Row(Modifier.padding(14.dp)){Column(Modifier.weight(1f)){Text(b.billNo,fontWeight=FontWeight.Bold);Text(b.closedAt?.let{clock(it)}?:"")};Text(money(b.total),fontWeight=FontWeight.Bold)}}}}}}
+@Composable private fun Report(vm:PosViewModel){val bills by vm.bills.collectAsState();val total=bills.sumOf{it.total};Column{Brand("Báo cáo"){vm.screen.value="TABLES"};Card(Modifier.fillMaxWidth().padding(18.dp)){Column(Modifier.fillMaxWidth().padding(24.dp),horizontalAlignment=Alignment.CenterHorizontally){Text("DOANH THU ĐÃ CHỐT");Text(money(total),fontSize=34.sp,fontWeight=FontWeight.Black);Text("${bills.size} bill · dữ liệu từ Room")}}}}
