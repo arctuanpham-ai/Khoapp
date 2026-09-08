@@ -3,6 +3,7 @@ package vn.ecohome.pos0210
 import android.net.Uri
 import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -197,46 +198,100 @@ fun Order(vm: PosViewModel, t: DiningTableEntity) {
 fun Sent(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
     val bs by vm.batches(s.id).collectAsState(initial = emptyList())
     val total by vm.total(s.id).collectAsState(initial = 0)
+    val current by vm.currentEmployee.collectAsState()
     var pv by remember { mutableStateOf<OrderBatchEntity?>(null) }
+    var cancelTarget by remember { mutableStateOf<OrderBatchEntity?>(null) }
+    var cancelReason by remember { mutableStateOf("") }
+
     Column {
         Header(t.name) { vm.screen.value = "TABLES" }
         LazyColumn(Modifier.weight(1f)) {
             items(bs) { b ->
-                Card(Modifier.fillMaxWidth().padding(8.dp).clickable { pv = b }) {
+                Card(
+                    Modifier.fillMaxWidth().padding(8.dp).clickable { pv = b },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (b.status == "CANCELLED") Color(0xFFF1DDDA) else Tint
+                    )
+                ) {
                     Column(Modifier.padding(14.dp)) {
                         Text("Đơn #${b.sequence}", fontWeight = FontWeight.Bold)
-                        Text(b.status)
+                        Text(
+                            when (b.status) {
+                                "CANCELLED" -> "ĐÃ HỦY"
+                                "SENT" -> "ĐÃ GỬI BẾP"
+                                else -> b.status
+                            }
+                        )
                     }
                 }
             }
         }
         Text("Tạm tính ${money(total)}", Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
         Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(
-                onClick = { vm.addMore() },
-                modifier = Modifier.weight(1f)
-            ) { Text("＋ GỌI THÊM") }
-            Button(
-                onClick = { vm.screen.value = "PAY" },
-                modifier = Modifier.weight(1f)
-            ) { Text("THANH TOÁN") }
+            OutlinedButton(onClick = { vm.addMore() }, modifier = Modifier.weight(1f)) {
+                Text("＋ GỌI THÊM")
+            }
+            Button(onClick = { vm.screen.value = "PAY" }, modifier = Modifier.weight(1f), enabled = total > 0) {
+                Text("THANH TOÁN")
+            }
         }
     }
+
     pv?.let { b ->
         val its by vm.items(b.id).collectAsState(initial = emptyList())
         AlertDialog(
             onDismissRequest = { pv = null },
             confirmButton = {
-                Button(onClick = { vm.markBatchSent(b); pv = null }) { Text("XÁC NHẬN GỬI") }
+                if (b.status == "DRAFT") {
+                    Button(onClick = { vm.markBatchSent(b); pv = null }) { Text("XÁC NHẬN GỬI") }
+                } else {
+                    Button(onClick = { pv = null }) { Text("ĐÓNG") }
+                }
             },
-            dismissButton = { TextButton(onClick = { pv = null }) { Text("ĐÓNG") } },
-            title = { Text("PREVIEW PHIẾU BẾP") },
+            dismissButton = {},
+            title = { Text("Đơn #${b.sequence} · ${b.status}") },
             text = {
                 Column {
                     Text("0210 · ${t.name}")
                     its.forEach { Text("${it.qty} × ${it.itemNameSnapshot}") }
+                    if (b.status != "CANCELLED" && (current?.role == "ADMIN" || current?.role == "MANAGER")) {
+                        Spacer(Modifier.height(14.dp))
+                        OutlinedButton(
+                            onClick = { cancelTarget = b; cancelReason = ""; pv = null },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("HỦY ĐƠN · MANAGER") }
+                    }
                 }
             }
+        )
+    }
+
+    cancelTarget?.let { b ->
+        AlertDialog(
+            onDismissRequest = { cancelTarget = null },
+            title = { Text("Hủy Đơn #${b.sequence}") },
+            text = {
+                Column {
+                    Text("Chỉ hủy khi bếp chưa làm. Đơn vẫn được lưu trong lịch sử.")
+                    OutlinedTextField(
+                        cancelReason,
+                        { cancelReason = it },
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                        label = { Text("Lý do hủy bắt buộc") }
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.cancelBatch(b, cancelReason)
+                        cancelTarget = null
+                        cancelReason = ""
+                    },
+                    enabled = cancelReason.isNotBlank()
+                ) { Text("XÁC NHẬN HỦY") }
+            },
+            dismissButton = { TextButton(onClick = { cancelTarget = null }) { Text("KHÔNG HỦY") } }
         )
     }
 }
@@ -296,6 +351,29 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
 @Composable
 fun Manage(vm: PosViewModel) {
     val employee by vm.currentEmployee.collectAsState()
+    val context = LocalContext.current
+    var backupMessage by remember { mutableStateOf("") }
+
+    val exportBackup = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        if (uri != null) {
+            val result = DataBackup.exportDatabase(context, uri)
+            backupMessage = if (result.isSuccess) "Đã xuất file backup." else "Backup lỗi: ${result.exceptionOrNull()?.message}"
+        }
+    }
+    val restoreBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val result = DataBackup.restoreDatabase(context, uri)
+            if (result.isSuccess) {
+                Toast.makeText(context, "Đã khôi phục dữ liệu. Hãy mở lại app.", Toast.LENGTH_LONG).show()
+                android.os.Process.killProcess(android.os.Process.myPid())
+            } else {
+                backupMessage = "Restore lỗi: ${result.exceptionOrNull()?.message}"
+            }
+        }
+    }
+
     Column {
         Header("Quản lý") { vm.screen.value = "TABLES" }
         Column(Modifier.padding(16.dp)) {
@@ -308,6 +386,32 @@ fun Manage(vm: PosViewModel) {
             Rowx("Nhập đầu vào", "Ngày giờ thủ công") { vm.screen.value = "PURCHASE" }
             Rowx("VietQR", "Lưu tài khoản · tạo QR") { vm.screen.value = "VIETQR" }
             Rowx("Máy in", "Cấu hình") { vm.screen.value = "PRINTER" }
+
+            if (employee?.role == "ADMIN" || employee?.canManageSystem == true) {
+                Card(Modifier.fillMaxWidth().padding(5.dp)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Sao lưu dữ liệu", fontWeight = FontWeight.Bold)
+                        Text("Xuất/khôi phục toàn bộ dữ liệu local bằng 1 file .db", fontSize = 12.sp)
+                        Row(
+                            Modifier.fillMaxWidth().padding(top = 10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
+                                    exportBackup.launch("POS0210_backup_$stamp.db")
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("BACKUP") }
+                            Button(
+                                onClick = { restoreBackup.launch(arrayOf("application/octet-stream", "*/*")) },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("RESTORE") }
+                        }
+                        if (backupMessage.isNotBlank()) Text(backupMessage, Modifier.padding(top = 8.dp), fontSize = 12.sp)
+                    }
+                }
+            }
         }
     }
 }
