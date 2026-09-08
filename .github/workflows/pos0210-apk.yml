@@ -1,7 +1,7 @@
 name: Build POS 0210 APK
 on:
   push:
-    branches: [pos0210-dev]
+    branches: [pos0210-dev, pos0210-v1-rebuild]
     paths: ['POS0210/**', '.github/workflows/pos0210-apk.yml']
   workflow_dispatch:
 jobs:
@@ -18,5 +18,5 @@ jobs:
         run: gradle assembleDebug --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: POS0210-debug-apk
+          name: POS0210-V1-debug-apk
           path: POS0210/app/build/outputs/apk/debug/app-debug.apk
