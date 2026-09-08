@@ -34,7 +34,31 @@ class MainActivity:ComponentActivity(){override fun onCreate(b:Bundle?){super.on
 @Composable fun Manage(vm:PosViewModel){Column{Header("Quản lý"){vm.screen.value="TABLES"};Column(Modifier.padding(16.dp)){Rowx("Nhân viên","Thêm · khóa · phân quyền"){vm.screen.value="EMP"};Rowx("Nhập đầu vào","Ngày giờ thủ công"){vm.screen.value="PURCHASE"};Rowx("VietQR","Lưu tài khoản"){vm.screen.value="VIETQR"};Rowx("Máy in","Cấu hình"){vm.screen.value="PRINTER"};Rowx("Nhật ký","Audit"){vm.screen.value="SETTINGS"}}}}
 @Composable fun Rowx(t:String,s:String,go:()->Unit){Card(Modifier.fillMaxWidth().padding(5.dp).clickable{go()}){Column(Modifier.padding(16.dp)){Text(t,fontWeight=FontWeight.Bold);Text(s,fontSize=12.sp)}}}
 @Composable fun Employees(vm:PosViewModel){val es by vm.employees.collectAsState();Column{Header("Nhân viên"){vm.screen.value="MANAGE"};LazyColumn{items(es){e->Card(Modifier.fillMaxWidth().padding(6.dp)){Column(Modifier.padding(14.dp)){Text("${e.name} · ${e.role}",fontWeight=FontWeight.Bold);Text("Order ${e.canOrder} · Bếp ${e.canSendKitchen} · Thu ${e.canCheckout} · Nhập ${e.canPurchase}");Switch(e.active,{vm.toggleEmployee(e)})}}}}}}
-@Composable fun Purchases(vm:PosViewModel){var n by remember{mutableStateOf("")};var a by remember{mutableStateOf("")};var dt by remember{mutableStateOf(SimpleDateFormat("dd/MM/yyyy HH:mm",Locale.getDefault()).format(Date()))};Column{Header("Nhập đầu vào"){vm.screen.value="MANAGE"};Column(Modifier.padding(16.dp)){OutlinedTextField(dt,{dt=it},label={Text("Ngày giờ dd/MM/yyyy HH:mm")});OutlinedTextField(n,{n=it},label={Text("Mặt hàng")});OutlinedTextField(a,{a=it.filter(Char::isDigit)},label={Text("Tổng tiền")});Button({val at=runCatching{SimpleDateFormat("dd/MM/yyyy HH:mm",Locale.getDefault()).parse(dt)?.time}.getOrNull()?:System.currentTimeMillis();vm.addPurchase(n,a.toLongOrNull()?:0,"",at)},enabled=n.isNotBlank()&&a.isNotBlank()){Text("TẠO PHIẾU")}}}}
+@Composable
+fun Purchases(vm: PosViewModel) {
+    var itemName by remember { mutableStateOf("") }
+    var amountText by remember { mutableStateOf("") }
+    var dateText by remember {
+        mutableStateOf(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date()))
+    }
+    Column {
+        Header("Nhập đầu vào") { vm.screen.value = "MANAGE" }
+        Column(Modifier.padding(16.dp)) {
+            OutlinedTextField(value = dateText, onValueChange = { dateText = it }, label = { Text("Ngày giờ dd/MM/yyyy HH:mm") })
+            OutlinedTextField(value = itemName, onValueChange = { itemName = it }, label = { Text("Mặt hàng") })
+            OutlinedTextField(value = amountText, onValueChange = { amountText = it.filter(Char::isDigit) }, label = { Text("Tổng tiền") })
+            Button(
+                onClick = {
+                    val parser = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+                    val parsedAt = runCatching { parser.parse(dateText)?.time }.getOrNull() ?: System.currentTimeMillis()
+                    val amount = amountText.toLongOrNull() ?: 0L
+                    vm.addPurchase(itemName, amount, "", parsedAt)
+                },
+                enabled = itemName.isNotBlank() && amountText.isNotBlank()
+            ) { Text("TẠO PHIẾU") }
+        }
+    }
+}
 @Composable fun VietQr(vm:PosViewModel){val sets by vm.settings.collectAsState();fun v(k:String)=sets.firstOrNull{it.key==k}?.value?:"";var bank by remember(sets){mutableStateOf(v("bank_name"))};var acc by remember(sets){mutableStateOf(v("bank_account"))};var holder by remember(sets){mutableStateOf(v("bank_holder"))};Column{Header("VietQR"){vm.screen.value="MANAGE"};Column(Modifier.padding(16.dp)){OutlinedTextField(bank,{bank=it},label={Text("Ngân hàng")});OutlinedTextField(acc,{acc=it},label={Text("Số tài khoản")});OutlinedTextField(holder,{holder=it},label={Text("Chủ tài khoản")});Button({vm.saveSetting("bank_name",bank);vm.saveSetting("bank_account",acc);vm.saveSetting("bank_holder",holder);vm.saveSetting("qr_prefix","0210")}){Text("LƯU")}}}}
 @Composable fun Printer(vm:PosViewModel){Column{Header("Máy in"){vm.screen.value="MANAGE"};Text("Driver ESC/POS chưa kích hoạt",Modifier.padding(20.dp))}}
 @Composable fun Report(vm:PosViewModel){val bs by vm.bills.collectAsState();Column{Header("Báo cáo"){vm.screen.value="TABLES"};Text("Doanh thu ${money(bs.sumOf{it.total})}",Modifier.padding(20.dp),fontSize=24.sp)}}
