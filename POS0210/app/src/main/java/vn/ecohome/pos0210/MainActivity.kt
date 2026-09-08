@@ -575,6 +575,7 @@ fun MenuAddDialog(
 @Composable
 fun Purchases(vm: PosViewModel) {
     val purchases by vm.purchases.collectAsState()
+    val itemSales by vm.itemSales.collectAsState()
     val context = LocalContext.current
     var itemName by remember { mutableStateOf("") }
     var qtyText by remember { mutableStateOf("") }
@@ -824,6 +825,14 @@ fun Report(vm: PosViewModel) {
     val cash = filteredPayments.filter { it.method == "CASH" }.sumOf { it.amount }
     val transfer = filteredPayments.filter { it.method == "TRANSFER" }.sumOf { it.amount }
     val avgBill = if (filteredBills.isEmpty()) 0L else revenue / filteredBills.size
+    val sessionIds = filteredBills.map { it.sessionId }.toSet()
+    val salesInPeriod = itemSales.filter { it.sessionId in sessionIds }
+    val totalItemQty = salesInPeriod.sumOf { it.qty }
+    val favoriteRows = salesInPeriod
+        .groupBy { it.name }
+        .map { (name, rows) -> name to rows.sumOf { it.qty } }
+        .sortedByDescending { it.second }
+        .take(8)
 
     Column {
         Header("Báo cáo") { vm.screen.value = "TABLES" }
@@ -854,6 +863,27 @@ fun Report(vm: PosViewModel) {
                     item { MetricCard("Chuyển khoản", money(transfer)) }
                     item { MetricCard("Tổng nhập hàng", money(purchaseTotal)) }
                     item { MetricCard("Chênh lệch thu - nhập", money(revenue - purchaseTotal)) }
+                    item {
+                        Text(
+                            "Món khách chọn nhiều",
+                            Modifier.padding(start = 8.dp, top = 16.dp, bottom = 6.dp),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                    }
+                    if (favoriteRows.isEmpty()) {
+                        item { Text("Chưa đủ dữ liệu món trong kỳ.", Modifier.padding(8.dp)) }
+                    } else {
+                        items(favoriteRows) { row ->
+                            val pct = if (totalItemQty == 0) 0 else ((row.second * 100.0 / totalItemQty) + 0.5).toInt()
+                            Card(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                                Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(row.first, Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                                    Text("${row.second} phần · $pct%")
+                                }
+                            }
+                        }
+                    }
                     item {
                         Text(
                             "Dữ liệu lấy trực tiếp từ bill đã thanh toán và phiếu nhập.",

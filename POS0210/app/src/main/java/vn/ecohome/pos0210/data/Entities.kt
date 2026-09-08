@@ -18,3 +18,5 @@ import androidx.room.PrimaryKey
 @Entity(indices=[Index("batchId")]) data class PrintJobEntity(@PrimaryKey val id:String,val batchId:String?,val billId:String?,val type:String,val status:String="PENDING",val claimedByDeviceId:String?=null,val attempts:Int=0,val createdAt:Long,val printedAt:Long?=null,val error:String?=null)
 @Entity(indices=[Index("entityId")]) data class AuditEventEntity(@PrimaryKey val id:String,val entityType:String,val entityId:String,val action:String,val actorId:String?,val deviceId:String?,val occurredAt:Long,val payload:String="")
 @Entity data class AppSettingEntity(@PrimaryKey val key:String,val value:String)
+
+data class ItemSaleRow(val name:String,val qty:Int,val sessionId:String)
