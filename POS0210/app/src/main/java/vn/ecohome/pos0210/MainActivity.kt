@@ -38,28 +38,69 @@ class MainActivity:ComponentActivity(){override fun onCreate(b:Bundle?){super.on
 fun Purchases(vm: PosViewModel) {
     var itemName by remember { mutableStateOf("") }
     var amountText by remember { mutableStateOf("") }
-    var dateText by remember {
-        mutableStateOf(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date()))
-    }
+    var dateText by remember { mutableStateOf(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date())) }
     Column {
         Header("Nhập đầu vào") { vm.screen.value = "MANAGE" }
         Column(Modifier.padding(16.dp)) {
-            OutlinedTextField(value = dateText, onValueChange = { dateText = it }, label = { Text("Ngày giờ dd/MM/yyyy HH:mm") })
-            OutlinedTextField(value = itemName, onValueChange = { itemName = it }, label = { Text("Mặt hàng") })
-            OutlinedTextField(value = amountText, onValueChange = { amountText = it.filter(Char::isDigit) }, label = { Text("Tổng tiền") })
-            Button(
-                onClick = {
-                    val parser = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
-                    val parsedAt = runCatching { parser.parse(dateText)?.time }.getOrNull() ?: System.currentTimeMillis()
-                    val amount = amountText.toLongOrNull() ?: 0L
-                    vm.addPurchase(itemName, amount, "", parsedAt)
-                },
-                enabled = itemName.isNotBlank() && amountText.isNotBlank()
-            ) { Text("TẠO PHIẾU") }
+            OutlinedTextField(value=dateText,onValueChange={dateText=it},label={Text("Ngày giờ dd/MM/yyyy HH:mm")})
+            OutlinedTextField(value=itemName,onValueChange={itemName=it},label={Text("Mặt hàng")})
+            OutlinedTextField(value=amountText,onValueChange={amountText=it.filter(Char::isDigit)},label={Text("Tổng tiền")})
+            Button(onClick={
+                val parser=SimpleDateFormat("dd/MM/yyyy HH:mm",Locale.getDefault())
+                val parsedAt=runCatching{parser.parse(dateText)?.time}.getOrNull()?:System.currentTimeMillis()
+                val amount=amountText.toLongOrNull()?:0L
+                vm.addPurchase(itemName,amount,"",parsedAt)
+            },enabled=itemName.isNotBlank()&&amountText.isNotBlank()){Text("TẠO PHIẾU")}
         }
     }
 }
-@Composable fun VietQr(vm:PosViewModel){val sets by vm.settings.collectAsState();fun v(k:String)=sets.firstOrNull{it.key==k}?.value?:"";var bank by remember(sets){mutableStateOf(v("bank_name"))};var acc by remember(sets){mutableStateOf(v("bank_account"))};var holder by remember(sets){mutableStateOf(v("bank_holder"))};Column{Header("VietQR"){vm.screen.value="MANAGE"};Column(Modifier.padding(16.dp)){OutlinedTextField(bank,{bank=it},label={Text("Ngân hàng")});OutlinedTextField(acc,{acc=it},label={Text("Số tài khoản")});OutlinedTextField(holder,{holder=it},label={Text("Chủ tài khoản")});Button({vm.saveSetting("bank_name",bank);vm.saveSetting("bank_account",acc);vm.saveSetting("bank_holder",holder);vm.saveSetting("qr_prefix","0210")}){Text("LƯU")}}}}
-@Composable fun Printer(vm:PosViewModel){Column{Header("Máy in"){vm.screen.value="MANAGE"};Text("Driver ESC/POS chưa kích hoạt",Modifier.padding(20.dp))}}
-@Composable fun Report(vm:PosViewModel){val bs by vm.bills.collectAsState();Column{Header("Báo cáo"){vm.screen.value="TABLES"};Text("Doanh thu ${money(bs.sumOf{it.total})}",Modifier.padding(20.dp),fontSize=24.sp)}}
-@Composable fun Settings(vm:PosViewModel){val a by vm.audits.collectAsState();Column{Header("Nhật ký"){vm.screen.value="MANAGE"};LazyColumn{items(a.take(30)){Text("${time(it.occurredAt)} · ${it.action}",Modifier.padding(8.dp))}}}}
+@Composable
+fun VietQr(vm: PosViewModel) {
+    val sets by vm.settings.collectAsState()
+    val valueFor: (String) -> String = { key -> sets.firstOrNull { it.key == key }?.value ?: "" }
+    var bank by remember(sets) { mutableStateOf(valueFor("bank_name")) }
+    var acc by remember(sets) { mutableStateOf(valueFor("bank_account")) }
+    var holder by remember(sets) { mutableStateOf(valueFor("bank_holder")) }
+    Column {
+        Header("VietQR") { vm.screen.value = "MANAGE" }
+        Column(Modifier.padding(16.dp)) {
+            OutlinedTextField(value=bank,onValueChange={bank=it},label={Text("Ngân hàng")})
+            OutlinedTextField(value=acc,onValueChange={acc=it},label={Text("Số tài khoản")})
+            OutlinedTextField(value=holder,onValueChange={holder=it},label={Text("Chủ tài khoản")})
+            Button(onClick={
+                vm.saveSetting("bank_name",bank)
+                vm.saveSetting("bank_account",acc)
+                vm.saveSetting("bank_holder",holder)
+                vm.saveSetting("qr_prefix","0210")
+            }) { Text("LƯU") }
+        }
+    }
+}
+@Composable
+fun Printer(vm: PosViewModel) {
+    Column {
+        Header("Máy in") { vm.screen.value = "MANAGE" }
+        Text("Driver ESC/POS chưa kích hoạt", Modifier.padding(20.dp))
+    }
+}
+@Composable
+fun Report(vm: PosViewModel) {
+    val bs by vm.bills.collectAsState()
+    val revenue = bs.sumOf { bill -> bill.total }
+    Column {
+        Header("Báo cáo") { vm.screen.value = "TABLES" }
+        Text("Doanh thu ${money(revenue)}", Modifier.padding(20.dp), fontSize=24.sp)
+    }
+}
+@Composable
+fun Settings(vm: PosViewModel) {
+    val a by vm.audits.collectAsState()
+    Column {
+        Header("Nhật ký") { vm.screen.value = "MANAGE" }
+        LazyColumn {
+            items(a.take(30)) { event ->
+                Text("${time(event.occurredAt)} · ${event.action}", Modifier.padding(8.dp))
+            }
+        }
+    }
+}
