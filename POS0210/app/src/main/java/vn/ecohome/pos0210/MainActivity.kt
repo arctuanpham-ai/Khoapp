@@ -384,6 +384,24 @@ fun Manage(vm: PosViewModel) {
         }
     }
 
+    val chooseAutoBackupFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+            vm.saveSetting("autoback_tree_uri", uri.toString())
+            val result = DataBackup.autoBackup(context, uri.toString())
+            backupMessage = if (result.isSuccess) {
+                "Autobackup đã bật · file POS0210_autoback_latest.db"
+            } else {
+                "Autobackup lỗi: ${result.exceptionOrNull()?.message}"
+            }
+        }
+    }
+
     Column {
         Header("Quản lý") { vm.screen.value = "TABLES" }
         Column(Modifier.padding(16.dp)) {
@@ -401,7 +419,18 @@ fun Manage(vm: PosViewModel) {
                 Card(Modifier.fillMaxWidth().padding(5.dp)) {
                     Column(Modifier.padding(16.dp)) {
                         Text("Sao lưu dữ liệu", fontWeight = FontWeight.Bold)
-                        Text("Xuất/khôi phục toàn bộ dữ liệu local bằng 1 file .db", fontSize = 12.sp)
+                        Text("Xuất/khôi phục dữ liệu và bật Autobackup tự động.", fontSize = 12.sp)
+                        OutlinedButton(
+                            onClick = { chooseAutoBackupFolder.launch(null) },
+                            modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                        ) { Text("CHỌN THƯ MỤC AUTOBACKUP") }
+                        val autoFolder = vm.setting("autoback_tree_uri")
+                        Text(
+                            if (autoFolder.isBlank()) "Autobackup: CHƯA BẬT" else "Autobackup: ĐÃ BẬT",
+                            Modifier.padding(top = 6.dp),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                         Row(
                             Modifier.fillMaxWidth().padding(top = 10.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
