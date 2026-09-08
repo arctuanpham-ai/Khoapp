@@ -43,6 +43,10 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  }
  fun sendBatch(){val s=currentSession.value?:return;val e=currentEmployee.value?:return;if(!e.canSendKitchen&&e.role!="ADMIN")return;val lines=cart.value;if(lines.isEmpty())return;viewModelScope.launch{val bs=dao.batches(s.id).first();val its=lines.mapNotNull{(id,q)->menu.value.firstOrNull{it.id==id}?.let{OrderItemEntity("","",it.id,it.name,it.price,q)}};repo.createBatch(s.id,bs.size+1,e.id,its);cart.value=emptyMap();screen.value="SENT"}}
  fun markBatchSent(b:OrderBatchEntity){val e=currentEmployee.value?:return;if(!e.canSendKitchen&&e.role!="ADMIN")return;viewModelScope.launch{repo.queueKitchenPrint(b);dao.transitionBatch(b.id,"DRAFT","SENT",System.currentTimeMillis());audit("PRINT",b.id,"KITCHEN_CONFIRMED","operator=${e.name}")}}
- fun batches(id:String)=dao.batches(id);fun items(id:String)=dao.batchItems(id);fun total(id:String)=dao.sessionTotal(id)
+ fun batches(id:String)=dao.batches(id)
+ fun items(id:String)=dao.batchItems(id)
+ fun total(id:String)=dao.sessionTotal(id)
+ fun session(id:String)=dao.sessionById(id)
+ fun purchaseItems(id:String)=dao.purchaseItems(id)
  fun close(method:String,total:Long){val s=currentSession.value?:return;val e=currentEmployee.value?:return;if(!e.canCheckout&&e.role!="ADMIN")return;viewModelScope.launch{repo.closeAndPay(s,total,method,e.id,"0210-${System.currentTimeMillis().toString().takeLast(6)}");currentSession.value=null;currentTable.value=null;screen.value="TABLES"}}
 }

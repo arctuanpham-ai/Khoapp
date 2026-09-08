@@ -308,7 +308,6 @@ fun Manage(vm: PosViewModel) {
             Rowx("Nhập đầu vào", "Ngày giờ thủ công") { vm.screen.value = "PURCHASE" }
             Rowx("VietQR", "Lưu tài khoản · tạo QR") { vm.screen.value = "VIETQR" }
             Rowx("Máy in", "Cấu hình") { vm.screen.value = "PRINTER" }
-            Rowx("Nhật ký", "Audit") { vm.screen.value = "SETTINGS" }
         }
     }
 }
@@ -584,6 +583,7 @@ fun Purchases(vm: PosViewModel) {
     var supplier by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     var invoiceImage by remember { mutableStateOf<String?>(null) }
+    var selectedPurchase by remember { mutableStateOf<PurchaseEntity?>(null) }
     var dateText by remember {
         mutableStateOf(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date()))
     }
@@ -652,11 +652,7 @@ fun Purchases(vm: PosViewModel) {
                     label = { Text("Ghi chú") }
                 )
                 Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                    Text(
-                        "Thành tiền: ${money(total)}",
-                        Modifier.padding(16.dp),
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text("Thành tiền: ${money(total)}", Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
                 }
                 OutlinedButton(
                     onClick = { invoicePicker.launch(arrayOf("image/*")) },
@@ -694,17 +690,68 @@ fun Purchases(vm: PosViewModel) {
                 }
                 Text("Phiếu nhập gần đây", Modifier.padding(top = 14.dp, bottom = 6.dp), fontWeight = FontWeight.Bold)
             }
-            items(purchases.take(10)) { p ->
-                Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            items(purchases.take(20)) { p ->
+                Card(
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { selectedPurchase = p }
+                ) {
                     Column(Modifier.padding(12.dp)) {
                         Text(time(p.purchasedAt), fontWeight = FontWeight.Bold)
                         Text("${money(p.total)} · ${p.note.ifBlank { "Không ghi chú" }}")
-                        if (!p.invoiceImageUri.isNullOrBlank()) Text("📷 Có ảnh hóa đơn", fontSize = 12.sp)
+                        Text(if (!p.invoiceImageUri.isNullOrBlank()) "📷 Có ảnh hóa đơn · Chạm để xem" else "Chạm để xem chi tiết", fontSize = 12.sp)
                     }
                 }
             }
         }
     }
+
+    selectedPurchase?.let { p ->
+        PurchaseDetailDialog(vm, p) { selectedPurchase = null }
+    }
+}
+
+@Composable
+fun PurchaseDetailDialog(vm: PosViewModel, p: PurchaseEntity, onDismiss: () -> Unit) {
+    val items by vm.purchaseItems(p.id).collectAsState(initial = emptyList())
+    val suppliers by vm.suppliers.collectAsState()
+    val employees by vm.employees.collectAsState()
+    val supplierName = suppliers.firstOrNull { it.id == p.supplierId }?.name ?: "Không ghi"
+    val enteredBy = employees.firstOrNull { it.id == p.enteredBy }?.name ?: p.enteredBy
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { Button(onClick = onDismiss) { Text("ĐÓNG") } },
+        title = { Text("Phiếu nhập · ${time(p.purchasedAt)}") },
+        text = {
+            LazyColumn {
+                item {
+                    Text("Nhà cung cấp: $supplierName")
+                    Text("Người nhập: $enteredBy")
+                    if (p.note.isNotBlank()) Text("Ghi chú: ${p.note}")
+                    Spacer(Modifier.height(8.dp))
+                }
+                items(items) { line ->
+                    Card(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                        Column(Modifier.padding(10.dp)) {
+                            Text(line.name, fontWeight = FontWeight.Bold)
+                            Text("${line.qty} ${line.unit} × ${money(line.unitPrice)}")
+                            Text("= ${money(line.amount)}")
+                        }
+                    }
+                }
+                item {
+                    Text("TỔNG: ${money(p.total)}", Modifier.padding(vertical = 10.dp), fontWeight = FontWeight.Black)
+                    if (!p.invoiceImageUri.isNullOrBlank()) {
+                        Text("Ảnh hóa đơn", fontWeight = FontWeight.Bold)
+                        AsyncImage(
+                            model = p.invoiceImageUri,
+                            contentDescription = "Ảnh hóa đơn",
+                            modifier = Modifier.fillMaxWidth().height(320.dp).padding(top = 8.dp)
+                        )
+                    }
+                }
+            }
+        }
+    )
 }
 
 @Composable
@@ -751,11 +798,184 @@ fun Printer(vm: PosViewModel) {
 
 @Composable
 fun Report(vm: PosViewModel) {
-    val bs by vm.bills.collectAsState()
-    val revenue = bs.sumOf { it.total }
+    val bills by vm.bills.collectAsState()
+    val payments by vm.payments.collectAsState()
+    val purchases by vm.purchases.collectAsState()
+    var section by remember { mutableStateOf("OVERVIEW") }
+    var periodDays by remember { mutableStateOf(1) }
+    var selectedBill by remember { mutableStateOf<BillEntity?>(null) }
+    var selectedPurchase by remember { mutableStateOf<PurchaseEntity?>(null) }
+
+    val cal = Calendar.getInstance().apply {
+        timeInMillis = System.currentTimeMillis()
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+        if (periodDays > 1) add(Calendar.DAY_OF_YEAR, -(periodDays - 1))
+    }
+    val from = cal.timeInMillis
+    val filteredBills = bills.filter { (it.closedAt ?: 0L) >= from }
+    val filteredPurchases = purchases.filter { it.purchasedAt >= from }
+    val billIds = filteredBills.map { it.id }.toSet()
+    val filteredPayments = payments.filter { it.billId in billIds }
+    val revenue = filteredBills.sumOf { it.total }
+    val purchaseTotal = filteredPurchases.sumOf { it.total }
+    val cash = filteredPayments.filter { it.method == "CASH" }.sumOf { it.amount }
+    val transfer = filteredPayments.filter { it.method == "TRANSFER" }.sumOf { it.amount }
+    val avgBill = if (filteredBills.isEmpty()) 0L else revenue / filteredBills.size
+
     Column {
         Header("Báo cáo") { vm.screen.value = "TABLES" }
-        Text("Doanh thu ${money(revenue)}", Modifier.padding(20.dp), fontSize = 24.sp)
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            FilterChip(section == "OVERVIEW", { section = "OVERVIEW" }, { Text("TỔNG QUAN") })
+            FilterChip(section == "BILLS", { section = "BILLS" }, { Text("LỊCH SỬ BILL") })
+            FilterChip(section == "PURCHASES", { section = "PURCHASES" }, { Text("NHẬP HÀNG") })
+        }
+
+        when (section) {
+            "OVERVIEW" -> {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    FilterChip(periodDays == 1, { periodDays = 1 }, { Text("Hôm nay") })
+                    FilterChip(periodDays == 7, { periodDays = 7 }, { Text("7 ngày") })
+                    FilterChip(periodDays == 30, { periodDays = 30 }, { Text("30 ngày") })
+                }
+                LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
+                    item { MetricCard("Doanh thu", money(revenue)) }
+                    item { MetricCard("Số bill", filteredBills.size.toString()) }
+                    item { MetricCard("Bill trung bình", money(avgBill)) }
+                    item { MetricCard("Tiền mặt", money(cash)) }
+                    item { MetricCard("Chuyển khoản", money(transfer)) }
+                    item { MetricCard("Tổng nhập hàng", money(purchaseTotal)) }
+                    item { MetricCard("Chênh lệch thu - nhập", money(revenue - purchaseTotal)) }
+                    item {
+                        Text(
+                            "Dữ liệu lấy trực tiếp từ bill đã thanh toán và phiếu nhập.",
+                            Modifier.padding(8.dp),
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+            "BILLS" -> {
+                if (filteredBills.isEmpty()) {
+                    Text("Chưa có bill trong kỳ đã chọn", Modifier.padding(20.dp))
+                } else {
+                    LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
+                        items(filteredBills) { b ->
+                            val p = payments.firstOrNull { it.billId == b.id }
+                            Card(
+                                Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { selectedBill = b }
+                            ) {
+                                Column(Modifier.padding(14.dp)) {
+                                    Text(b.billNo, fontWeight = FontWeight.Bold)
+                                    Text("${b.closedAt?.let { time(it) } ?: "--"} · ${money(b.total)}")
+                                    Text(if (p?.method == "TRANSFER") "Chuyển khoản" else "Tiền mặt", fontSize = 12.sp)
+                                    Text("Chạm để xem chi tiết bill", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            "PURCHASES" -> {
+                if (filteredPurchases.isEmpty()) {
+                    Text("Chưa có phiếu nhập trong kỳ đã chọn", Modifier.padding(20.dp))
+                } else {
+                    LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
+                        item {
+                            Text("Tổng nhập: ${money(purchaseTotal)}", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        }
+                        items(filteredPurchases) { p ->
+                            Card(
+                                Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { selectedPurchase = p }
+                            ) {
+                                Column(Modifier.padding(14.dp)) {
+                                    Text(time(p.purchasedAt), fontWeight = FontWeight.Bold)
+                                    Text(money(p.total))
+                                    Text(if (!p.invoiceImageUri.isNullOrBlank()) "📷 Có ảnh hóa đơn · Chạm để xem" else "Chạm để xem chi tiết", fontSize = 12.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    selectedBill?.let { b ->
+        BillDetailDialog(vm, b) { selectedBill = null }
+    }
+    selectedPurchase?.let { p ->
+        PurchaseDetailDialog(vm, p) { selectedPurchase = null }
+    }
+}
+
+@Composable
+fun MetricCard(label: String, value: String) {
+    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, Modifier.weight(1f))
+            Text(value, fontWeight = FontWeight.Black, fontSize = 20.sp)
+        }
+    }
+}
+
+@Composable
+fun BillDetailDialog(vm: PosViewModel, bill: BillEntity, onDismiss: () -> Unit) {
+    val session by vm.session(bill.sessionId).collectAsState(initial = null)
+    val batches by vm.batches(bill.sessionId).collectAsState(initial = emptyList())
+    val tables by vm.tables.collectAsState()
+    val employees by vm.employees.collectAsState()
+    val payments by vm.payments.collectAsState()
+    val payment = payments.firstOrNull { it.billId == bill.id }
+    val tableName = tables.firstOrNull { it.id == session?.tableId }?.name ?: session?.tableId ?: "?"
+    val cashier = employees.firstOrNull { it.id == payment?.cashierId }?.name ?: payment?.cashierId ?: "?"
+    val methodText = if (payment?.method == "TRANSFER") "Chuyển khoản" else "Tiền mặt"
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = { Button(onClick = onDismiss) { Text("ĐÓNG") } },
+        title = { Text("$tableName · ${bill.billNo}") },
+        text = {
+            LazyColumn {
+                item {
+                    Text("Mở: ${time(bill.openedAt)}")
+                    Text("Đóng: ${bill.closedAt?.let { time(it) } ?: "--"}")
+                    Text("Thanh toán: $methodText")
+                    Text("Thu tiền: $cashier")
+                    Text("Tổng bill: ${money(bill.total)}", fontWeight = FontWeight.Black)
+                    Spacer(Modifier.height(8.dp))
+                }
+                items(batches) { batch ->
+                    BillBatchDetail(vm, batch, employees)
+                }
+            }
+        }
+    )
+}
+
+@Composable
+fun BillBatchDetail(vm: PosViewModel, batch: OrderBatchEntity, employees: List<EmployeeEntity>) {
+    val lines by vm.items(batch.id).collectAsState(initial = emptyList())
+    val orderer = employees.firstOrNull { it.id == batch.ordererId }?.name ?: batch.ordererId
+    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Column(Modifier.padding(12.dp)) {
+            Text(
+                "Đơn #${batch.sequence} · $orderer · ${time(batch.createdAt)}",
+                fontWeight = FontWeight.Bold
+            )
+            lines.forEach { line ->
+                Text("${line.qty} × ${line.itemNameSnapshot} · ${money(line.unitPriceSnapshot * line.qty)}")
+                if (line.note.isNotBlank()) Text("  Ghi chú: ${line.note}", fontSize = 12.sp)
+            }
+        }
     }
 }
 

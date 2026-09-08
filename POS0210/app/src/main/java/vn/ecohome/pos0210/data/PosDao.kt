@@ -9,12 +9,14 @@ import kotlinx.coroutines.flow.Flow
 @Query("SELECT * FROM EmployeeEntity ORDER BY name") fun employees():Flow<List<EmployeeEntity>>
 @Query("SELECT * FROM SupplierEntity ORDER BY name") fun suppliers():Flow<List<SupplierEntity>>
 @Query("SELECT * FROM TableSessionEntity WHERE status='OPEN'") fun openSessions():Flow<List<TableSessionEntity>>
+@Query("SELECT * FROM TableSessionEntity WHERE id=:id LIMIT 1") fun sessionById(id:String):Flow<TableSessionEntity?>
 @Query("SELECT * FROM OrderBatchEntity WHERE sessionId=:sessionId ORDER BY sequence") fun batches(sessionId:String):Flow<List<OrderBatchEntity>>
 @Query("SELECT * FROM OrderItemEntity WHERE batchId=:batchId") fun batchItems(batchId:String):Flow<List<OrderItemEntity>>
 @Query("SELECT COALESCE(SUM(qty*unitPriceSnapshot),0) FROM OrderItemEntity WHERE batchId IN (SELECT id FROM OrderBatchEntity WHERE sessionId=:sessionId)") fun sessionTotal(sessionId:String):Flow<Long>
 @Query("SELECT * FROM BillEntity WHERE status='PAID' ORDER BY closedAt DESC") fun paidBills():Flow<List<BillEntity>>
 @Query("SELECT * FROM PaymentEntity ORDER BY paidAt DESC") fun payments():Flow<List<PaymentEntity>>
 @Query("SELECT * FROM PurchaseEntity ORDER BY purchasedAt DESC") fun purchases():Flow<List<PurchaseEntity>>
+@Query("SELECT * FROM PurchaseItemEntity WHERE purchaseId=:purchaseId") fun purchaseItems(purchaseId:String):Flow<List<PurchaseItemEntity>>
 @Query("SELECT * FROM PrintJobEntity ORDER BY createdAt DESC") fun printJobs():Flow<List<PrintJobEntity>>
 @Query("SELECT * FROM AuditEventEntity ORDER BY occurredAt DESC LIMIT 100") fun audits():Flow<List<AuditEventEntity>>
 @Query("SELECT * FROM AppSettingEntity") fun settings():Flow<List<AppSettingEntity>>
