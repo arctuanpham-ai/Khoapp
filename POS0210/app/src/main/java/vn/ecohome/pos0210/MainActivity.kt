@@ -227,12 +227,22 @@ fun Sent(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
             }
         }
         Text("Tạm tính ${money(total)}", Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-        Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(onClick = { vm.addMore() }, modifier = Modifier.weight(1f)) {
-                Text("＋ GỌI THÊM")
-            }
-            Button(onClick = { vm.screen.value = "PAY" }, modifier = Modifier.weight(1f), enabled = total > 0) {
-                Text("THANH TOÁN")
+        val allCancelled = bs.isNotEmpty() && bs.all { it.status == "CANCELLED" }
+        val canRelease = allCancelled && total == 0L && (current?.role == "ADMIN" || current?.role == "MANAGER")
+
+        if (canRelease) {
+            Button(
+                onClick = { vm.releaseCancelledTable() },
+                modifier = Modifier.fillMaxWidth().padding(16.dp)
+            ) { Text("TRẢ BÀN") }
+        } else {
+            Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(onClick = { vm.addMore() }, modifier = Modifier.weight(1f)) {
+                    Text("＋ GỌI THÊM")
+                }
+                Button(onClick = { vm.screen.value = "PAY" }, modifier = Modifier.weight(1f), enabled = total > 0) {
+                    Text("THANH TOÁN")
+                }
             }
         }
     }

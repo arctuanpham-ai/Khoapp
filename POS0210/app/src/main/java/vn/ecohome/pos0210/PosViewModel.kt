@@ -61,6 +61,22 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  fun markBatchSent(b:OrderBatchEntity){val e=currentEmployee.value?:return;if(!e.canSendKitchen&&e.role!="ADMIN")return;viewModelScope.launch{repo.queueKitchenPrint(b);dao.transitionBatch(b.id,"DRAFT","SENT",System.currentTimeMillis());audit("PRINT",b.id,"KITCHEN_CONFIRMED","operator=${e.name}")}}
  fun canCancelOrder():Boolean{val r=currentEmployee.value?.role?:return false;return r=="ADMIN"||r=="MANAGER"}
  fun cancelBatch(b:OrderBatchEntity,reason:String){val e=currentEmployee.value?:return;if(e.role!="ADMIN"&&e.role!="MANAGER")return;if(reason.isBlank())return;viewModelScope.launch{if(dao.cancelBatch(b.id)>0)audit("BATCH",b.id,"CANCELLED","reason=${reason.trim()},operator=${e.name}")}}
+ fun releaseCancelledTable(){
+  val s=currentSession.value?:return
+  val e=currentEmployee.value?:return
+  if(e.role!="ADMIN"&&e.role!="MANAGER")return
+  viewModelScope.launch{
+   val bs=dao.batches(s.id).first()
+   val remaining=dao.sessionTotal(s.id).first()
+   if(bs.isNotEmpty()&&bs.all{it.status=="CANCELLED"}&&remaining==0L){
+    repo.closeCancelledSession(s,e.id)
+    currentSession.value=null
+    currentTable.value=null
+    cart.value=emptyMap()
+    screen.value="TABLES"
+   }
+  }
+ }
  fun batches(id:String)=dao.batches(id)
  fun items(id:String)=dao.batchItems(id)
  fun total(id:String)=dao.sessionTotal(id)

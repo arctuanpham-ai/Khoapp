@@ -44,5 +44,24 @@ class PosRepository(private val db:PosDatabase){
         return bill
     }
 
+    suspend fun closeCancelledSession(session:TableSessionEntity,actorId:String) {
+        val now=System.currentTimeMillis()
+        db.withTransaction {
+            if(dao.closeSession(session.id,session.version)!=1) error("SESSION_ALREADY_CLOSED_OR_CHANGED")
+            dao.audit(
+                AuditEventEntity(
+                    UUID.randomUUID().toString(),
+                    "SESSION",
+                    session.id,
+                    "CLOSED_CANCELLED",
+                    actorId,
+                    null,
+                    now,
+                    "ALL_ORDERS_CANCELLED"
+                )
+            )
+        }
+    }
+
     suspend fun savePurchase(p:PurchaseEntity,items:List<PurchaseItemEntity>){ db.withTransaction{dao.insertPurchase(p);dao.insertPurchaseItems(items)} }
 }
