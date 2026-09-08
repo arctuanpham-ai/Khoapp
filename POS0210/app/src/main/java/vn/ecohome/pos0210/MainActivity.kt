@@ -802,6 +802,7 @@ fun Report(vm: PosViewModel) {
     val bills by vm.bills.collectAsState()
     val payments by vm.payments.collectAsState()
     val purchases by vm.purchases.collectAsState()
+    val itemSales by vm.itemSales.collectAsState()
     var section by remember { mutableStateOf("OVERVIEW") }
     var periodDays by remember { mutableStateOf(1) }
     var selectedBill by remember { mutableStateOf<BillEntity?>(null) }
