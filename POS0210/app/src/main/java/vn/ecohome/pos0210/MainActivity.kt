@@ -686,7 +686,10 @@ fun Customers(vm: PosViewModel) {
     val customers by vm.customers.collectAsState()
     val itemStats by vm.customerItemStats.collectAsState()
     val bills by vm.bills.collectAsState()
+    val current by vm.currentEmployee.collectAsState()
+    val updateMessage by vm.customerUpdateMessage.collectAsState()
     var selected by remember { mutableStateOf<CustomerEntity?>(null) }
+    var editTarget by remember { mutableStateOf<CustomerEntity?>(null) }
     var query by remember { mutableStateOf("") }
     var section by remember { mutableStateOf("LIST") }
 
@@ -735,6 +738,7 @@ fun Customers(vm: PosViewModel) {
                             Column(Modifier.padding(14.dp)) {
                                 Text("${c.phone} · ${c.tier}", fontWeight = FontWeight.Black)
                                 if (c.name.isNotBlank()) Text(c.name)
+                                if (c.address.isNotBlank()) Text(c.address, fontSize = 11.sp)
                                 Text("${c.points} điểm · ${c.visitCount} lần ghé · ${money(c.totalSpend)}")
                                 c.lastVisitAt?.let { Text("Gần nhất: ${time(it)}", fontSize = 11.sp) }
                             }
@@ -806,6 +810,13 @@ fun Customers(vm: PosViewModel) {
                 LazyColumn {
                     item {
                         Text("Hạng: ${c.tier}", fontWeight = FontWeight.Black)
+                        if (c.name.isNotBlank()) Text("Tên: ${c.name}")
+                        Text("SĐT: ${c.phone}")
+                        if (c.address.isNotBlank()) Text("Địa chỉ: ${c.address}")
+                        OutlinedButton(
+                            onClick = { editTarget = c },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                        ) { Text("CHỈNH SỬA THÔNG TIN") }
                         Text("Tổng chi tiêu: ${money(c.totalSpend)}")
                         Text("Điểm: ${c.points}")
                         Text("Lượt ghé: ${c.visitCount}")
@@ -829,17 +840,21 @@ fun Customers(vm: PosViewModel) {
                     }
                     item {
                         Text("HẠNG KHÁCH", Modifier.padding(top = 10.dp), fontWeight = FontWeight.Bold)
-                        Text(if (c.tierManual) "Đang khóa hạng thủ công" else "Đang tự động theo điểm", fontSize = 11.sp)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf("MEMBER","VIP","VVIP").forEach { tier ->
-                                FilterChip(c.tier == tier, { vm.setCustomerTier(c,tier); selected = c.copy(tier=tier,tierManual=true) }, { Text(tier) })
+                        Text(if (c.tierManual) "Hạng đặc biệt do Admin gán" else "Đang tự động theo điểm", fontSize = 11.sp)
+                        if (current?.role == "ADMIN") {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf("MEMBER","VIP","VVIP").forEach { tier ->
+                                    FilterChip(c.tier == tier, { vm.setCustomerTier(c,tier); selected = c.copy(tier=tier,tierManual=true) }, { Text(tier) })
+                                }
                             }
-                        }
-                        if (c.tierManual) {
-                            OutlinedButton(
-                                onClick = { vm.setCustomerTierAutomatic(c); selected = null },
-                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                            ) { Text("CHUYỂN VỀ TỰ ĐỘNG THEO ĐIỂM") }
+                            if (c.tierManual) {
+                                OutlinedButton(
+                                    onClick = { vm.setCustomerTierAutomatic(c); selected = null },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                                ) { Text("CHUYỂN VỀ TỰ ĐỘNG THEO ĐIỂM") }
+                            }
+                        } else {
+                            Text("Chỉ Admin được thay đổi hạng khách.", fontSize = 11.sp)
                         }
                     }
                 }
@@ -847,7 +862,43 @@ fun Customers(vm: PosViewModel) {
             confirmButton = { Button(onClick = { selected = null }) { Text("ĐÓNG") } }
         )
     }
+
+    editTarget?.let { target ->
+        CustomerEditDialog(
+            vm = vm,
+            customer = target,
+            onDismiss = { editTarget = null },
+            onSaved = { updated -> selected = updated; editTarget = null }
+        )
+    }
 }
+@Composable
+fun CustomerEditDialog(vm: PosViewModel, customer: CustomerEntity, onDismiss: () -> Unit, onSaved: (CustomerEntity) -> Unit) {
+    var name by remember(customer.id) { mutableStateOf(customer.name) }
+    var phone by remember(customer.id) { mutableStateOf(customer.phone) }
+    var address by remember(customer.id) { mutableStateOf(customer.address) }
+    val message by vm.customerUpdateMessage.collectAsState()
+    AlertDialog(
+        onDismissRequest = { vm.clearCustomerUpdateMessage(); onDismiss() },
+        title = { Text("Cập nhật khách hàng") },
+        text = {
+            Column {
+                OutlinedTextField(name, { name = it.take(50) }, modifier = Modifier.fillMaxWidth(), label = { Text("Tên khách") })
+                OutlinedTextField(phone, { phone = it.filter(Char::isDigit).take(15) }, modifier = Modifier.fillMaxWidth(), label = { Text("Số điện thoại") })
+                OutlinedTextField(address, { address = it.take(150) }, modifier = Modifier.fillMaxWidth(), label = { Text("Địa chỉ · nếu có") }, minLines = 2)
+                if (message.isNotBlank()) Text(message, Modifier.padding(top = 8.dp), fontWeight = FontWeight.Bold)
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                vm.updateCustomerProfile(customer,name,phone,address)
+                onSaved(customer.copy(name=name.trim(),phone=phone.filter(Char::isDigit),address=address.trim()))
+            }, enabled = phone.filter(Char::isDigit).length >= 9) { Text("LƯU") }
+        },
+        dismissButton = { TextButton(onClick = { vm.clearCustomerUpdateMessage(); onDismiss() }) { Text("HỦY") } }
+    )
+}
+
 @Composable
 fun LoyaltyConfig(vm: PosViewModel) {
     val settings by vm.settings.collectAsState()
@@ -952,8 +1003,8 @@ fun Manage(vm: PosViewModel) {
             if (employee?.role == "ADMIN") {
                 Rowx("Ưu đãi & điều chỉnh giá", "Mã giảm giá · Happy Hour · phụ thu ngày lễ · thời hạn") { vm.screen.value = "PRICING" }
             }
+            Rowx("Khách hàng", "Tra cứu · cập nhật tên/SĐT/địa chỉ · Member/VIP/VVIP") { vm.screen.value = "CUSTOMERS" }
             if (employee?.role == "ADMIN") {
-                Rowx("Khách hàng", "Member · VIP · VVIP · điểm · tổng chi tiêu") { vm.screen.value = "CUSTOMERS" }
                 Rowx("Cấu hình hạng thành viên", "Ngưỡng điểm · tự nâng hạng · % ưu đãi Member/VIP/VVIP") { vm.screen.value = "LOYALTY_CONFIG" }
                 Rowx("Nhân viên", "Thêm · khóa · phân quyền") { vm.screen.value = "EMP" }
             }
