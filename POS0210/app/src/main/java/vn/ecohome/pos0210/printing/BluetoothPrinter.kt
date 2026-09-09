@@ -102,13 +102,29 @@ object ReceiptRenderer {
         table="BÀN 02",
         period="08:32–09:25",
         items=listOf(Triple("Bún gà",2,40000L),Triple("Bạc xỉu",1,30000L),Triple("Đen đá",1,25000L)),
-        total=135000L,
-        method="TIỀN MẶT / CHUYỂN KHOẢN",
+        subtotal=135000L,
+        surcharge=0L,
+        discount=13500L,
+        total=121500L,
+        adjustmentLines=listOf("ƯU ĐÃI HAPPY10  -10%"),
+        method="CHUYỂN KHOẢN",
         qr=qr
     )
 
-    fun bill(table:String,period:String,items:List<Triple<String,Int,Long>>,total:Long,method:String,qr:Bitmap?):Bitmap{
-        val estimated=540+items.size*48+(if(qr!=null)250 else 0)
+    fun bill(
+        table:String,
+        period:String,
+        items:List<Triple<String,Int,Long>>,
+        subtotal:Long,
+        surcharge:Long=0L,
+        discount:Long=0L,
+        total:Long,
+        adjustmentLines:List<String> = emptyList(),
+        method:String,
+        qr:Bitmap?
+    ):Bitmap{
+        val adjustmentHeight = (if(surcharge>0) 34 else 0) + (if(discount>0) 34 else 0) + adjustmentLines.size*24
+        val estimated=610+items.size*48+adjustmentHeight+(if(qr!=null)340 else 0)
         val (b,c)=canvas(estimated)
         var y=48f
         c.drawText("0210",W/2f,y,paint(40f,true,Paint.Align.CENTER));y+=27
@@ -119,15 +135,31 @@ object ReceiptRenderer {
         items.forEach{(name,qty,unitPrice)->
             y=item(c,y,"$qty × $name",money(unitPrice*qty))
         }
-        line(c,y);y+=34
-        c.drawText("TỔNG CỘNG",PAD,y,paint(30f,true))
-        c.drawText(money(total),W-PAD,y,paint(24f,true,Paint.Align.RIGHT));y+=30
-        c.drawText("Thanh toán: $method",PAD,y,paint(18f));y+=24
         line(c,y);y+=30
+        c.drawText("TẠM TÍNH",PAD,y,paint(20f,true))
+        c.drawText(money(subtotal),W-PAD,y,paint(19f,true,Paint.Align.RIGHT));y+=30
+        if(surcharge>0){
+            c.drawText("PHỤ THU",PAD,y,paint(19f,true))
+            c.drawText("+${money(surcharge)}",W-PAD,y,paint(18f,true,Paint.Align.RIGHT));y+=28
+        }
+        if(discount>0){
+            c.drawText("ƯU ĐÃI",PAD,y,paint(19f,true))
+            c.drawText("-${money(discount)}",W-PAD,y,paint(18f,true,Paint.Align.RIGHT));y+=28
+        }
+        adjustmentLines.forEach{lineText->
+            y=wrap(c,lineText,PAD,y,W-PAD*2,paint(15f,true),20f)
+        }
+        line(c,y);y+=35
+        c.drawText("THÀNH TIỀN",PAD,y,paint(30f,true))
+        c.drawText(money(total),W-PAD,y,paint(25f,true,Paint.Align.RIGHT));y+=31
+        c.drawText("Thanh toán: $method",PAD,y,paint(18f));y+=24
+        line(c,y);y+=28
         if(qr!=null){
             c.drawText("QUÉT MÃ THANH TOÁN",W/2f,y,paint(22f,true,Paint.Align.CENTER));y+=14
-            val q=Bitmap.createScaledBitmap(qr,210,210,true)
-            c.drawBitmap(q,(W-210)/2f,y,null);y+=225
+            val qrSize=292
+            val q=Bitmap.createScaledBitmap(qr,qrSize,qrSize,true)
+            c.drawBitmap(q,(W-qrSize)/2f,y,null);y+=qrSize+14
+            c.drawText("SỐ TIỀN: ${money(total)}",W/2f,y,paint(17f,true,Paint.Align.CENTER));y+=23
         }
         line(c,y);y+=30
         c.drawText("CẢM ƠN QUÝ KHÁCH!",W/2f,y,paint(17f,true,Paint.Align.CENTER));y+=23
