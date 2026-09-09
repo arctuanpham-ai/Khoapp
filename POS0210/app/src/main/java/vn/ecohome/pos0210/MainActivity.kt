@@ -724,7 +724,7 @@ fun BackupCenter(vm: PosViewModel) {
                                 }
                             },
                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                        ) { Text("RESTORE DATA_LATEST + MASTER") }
+                        ) { Text("KHÔI PHỤC TOÀN BỘ TỪ POS0210") }
                     }
 
                     OutlinedButton(
@@ -736,11 +736,38 @@ fun BackupCenter(vm: PosViewModel) {
 
             Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                 Column(Modifier.padding(16.dp)) {
+                    Text("HƯỚNG DẪN LƯU TRỮ & KHÔI PHỤC", fontWeight = FontWeight.Black, fontSize = 18.sp)
+                    Text(
+                        "CẤU TRÚC ĐÚNG:\n" +
+                        "Download/POS0210/CONFIG/POS0210_MASTER.0210\n" +
+                        "Download/POS0210/DATA/POS0210_DATA_LATEST.db\n" +
+                        "Download/POS0210/ARCHIVE/...\n\n" +
+                        "LƯU TRỮ:\n" +
+                        "• MASTER: bấm GHI MASTER NGAY khi thay menu, bàn, nhân viên/PIN, phân quyền, VietQR, máy in.\n" +
+                        "• DATA_LATEST: app tự cập nhật sau các thao tác vận hành quan trọng; nút BACKUP NGAY dùng để ép ghi thủ công.\n" +
+                        "• ARCHIVE: dùng TẠO SNAPSHOT khi muốn giữ một mốc dữ liệu riêng.\n\n" +
+                        "CHUYỂN SANG MÁY KHÁC:\n" +
+                        "1. Copy nguyên thư mục POS0210 vào Download của máy mới.\n" +
+                        "2. Cài POS0210 và vào Dữ liệu & Backup.\n" +
+                        "3. Gắn đúng thư mục Download/POS0210.\n" +
+                        "4. Bấm KHÔI PHỤC TOÀN BỘ TỪ POS0210.\n" +
+                        "5. App sẽ khôi phục DATA_LATEST và áp MASTER, sau đó mở lại.\n\n" +
+                        "LƯU Ý:\n" +
+                        "• Sau khi cài lại app phải gắn lại thư mục vì Android có thể mất quyền SAF của app cũ.\n" +
+                        "• Nên copy cả thư mục POS0210, không copy riêng từng file.",
+                        Modifier.padding(top = 8.dp),
+                        fontSize = 13.sp
+                    )
+                }
+            }
+
+            Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                Column(Modifier.padding(16.dp)) {
                     Text("QUY TẮC AN TOÀN", fontWeight = FontWeight.Black)
                     Text(
                         "• App không tự tạo MASTER/DATA khi chưa gắn thư mục.\n" +
-                        "• Sau reinstall phải gắn lại Download một lần vì Android xóa quyền SAF của app cũ.\n" +
-                        "• Restore DATA luôn áp MASTER lại để PIN/quyền/menu không bị snapshot DB cũ ghi đè.",
+                        "• Restore DATA luôn áp MASTER lại để PIN/quyền/menu không bị snapshot DB cũ ghi đè.\n" +
+                        "• Trước khi chuyển máy nên bấm GHI MASTER NGAY và BACKUP NGAY để chắc chắn lấy dữ liệu mới nhất.",
                         Modifier.padding(top = 8.dp)
                     )
                 }
