@@ -323,15 +323,14 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
   val e=currentEmployee.value?:return
   if(e.role!="ADMIN")return
   viewModelScope.launch{
-   val tier=autoTierFor(customer.points)
+   val auto=setting("loyalty_auto_tier").ifBlank{"true"}.toBoolean()
+   val tier=if(auto)autoTierFor(customer.points) else customer.tier
    dao.saveCustomer(customer.copy(tier=tier,tierManual=false))
    audit("CUSTOMER",customer.id,"TIER_AUTO","$tier")
    autoBackup()
   }
  }
  private fun autoTierFor(points:Int):String{
-  val auto=setting("loyalty_auto_tier").ifBlank{"true"}.toBoolean()
-  if(!auto)return "MEMBER"
   val vip=setting("vip_min_points").toIntOrNull() ?: 200
   val vvip=setting("vvip_min_points").toIntOrNull() ?: 500
   return when{
@@ -368,10 +367,18 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
      audit("BILL",bill.id,"DELETE_SOFT","reason=${reason.trim()},total=${bill.total},admin=${e.name}")
      bill.customerId?.let{customerId->
       val delta=dao.pointDeltaForBill(bill.id)
+      val cu=dao.customerById(customerId)
       if(delta!=0){
        dao.insertCustomerPoint(CustomerPointTransactionEntity(UUID.randomUUID().toString(),customerId,bill.id,-delta,"HỦY/XÓA BILL ${bill.billNo}",System.currentTimeMillis(),e.id))
       }
-      dao.updateCustomerStats(customerId,-delta,-bill.total,-1,System.currentTimeMillis())
+      if(cu!=null){
+       val newPoints=(cu.points-delta).coerceAtLeast(0)
+       val newSpend=(cu.totalSpend-bill.total).coerceAtLeast(0)
+       val newVisits=(cu.visitCount-1).coerceAtLeast(0)
+       val autoTier=setting("loyalty_auto_tier").ifBlank{"true"}.toBoolean()
+       val newTier=if(cu.tierManual||!autoTier)cu.tier else autoTierFor(newPoints)
+       dao.saveCustomer(cu.copy(points=newPoints,totalSpend=newSpend,visitCount=newVisits,tier=newTier,lastVisitAt=System.currentTimeMillis()))
+      }
      }
     }
     autoBackup()
@@ -396,7 +403,8 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
    customer?.let{cu->
     pointsEarned=(preview.total/10000L).toInt()
     pointsAfter=pointsBefore+pointsEarned
-    val newTier=if(cu.tierManual)cu.tier else autoTierFor(pointsAfter)
+    val autoTier=setting("loyalty_auto_tier").ifBlank{"true"}.toBoolean()
+    val newTier=if(cu.tierManual||!autoTier)cu.tier else autoTierFor(pointsAfter)
     dao.updateCustomerStats(cu.id,pointsEarned,preview.total,1,System.currentTimeMillis())
     if(newTier!=cu.tier)dao.saveCustomer(cu.copy(tier=newTier,points=pointsAfter,totalSpend=cu.totalSpend+preview.total,visitCount=cu.visitCount+1,lastVisitAt=System.currentTimeMillis()))
     receiptTier=newTier
