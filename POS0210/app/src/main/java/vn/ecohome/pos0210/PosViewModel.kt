@@ -425,29 +425,15 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
   val e=currentEmployee.value?:return
   if(e.role!="ADMIN"||reason.isBlank()||targets.isEmpty())return
   viewModelScope.launch{
-   val ids=targets.map{it.id}
-   val changed=dao.softDeleteBills(ids)
-   if(changed>0){
-    targets.forEach{ bill ->
-     audit("BILL",bill.id,"DELETE_SOFT","reason=${reason.trim()},total=${bill.total},admin=${e.name}")
-     bill.customerId?.let{customerId->
-      val delta=dao.pointDeltaForBill(bill.id)
-      val cu=dao.customerById(customerId)
-      if(delta!=0){
-       dao.insertCustomerPoint(CustomerPointTransactionEntity(UUID.randomUUID().toString(),customerId,bill.id,-delta,"HỦY/XÓA BILL ${bill.billNo}",System.currentTimeMillis(),e.id))
-      }
-      if(cu!=null){
-       val newPoints=(cu.points-delta).coerceAtLeast(0)
-       val newSpend=(cu.totalSpend-bill.total).coerceAtLeast(0)
-       val newVisits=(cu.visitCount-1).coerceAtLeast(0)
-       val autoTier=setting("loyalty_auto_tier").ifBlank{"true"}.toBoolean()
-       val newTier=if(cu.tierManual||!autoTier)cu.tier else autoTierFor(newPoints)
-       dao.saveCustomer(cu.copy(points=newPoints,totalSpend=newSpend,visitCount=newVisits,tier=newTier,lastVisitAt=System.currentTimeMillis()))
-      }
-     }
-    }
-    autoBackup()
-   }
+   val changed=repo.deleteBillsAtomic(
+    targets=targets,
+    reason=reason,
+    actorId=e.id,
+    autoTier=setting("loyalty_auto_tier").ifBlank{"true"}.toBoolean(),
+    vipMinPoints=setting("vip_min_points").toIntOrNull() ?: 200,
+    vvipMinPoints=setting("vvip_min_points").toIntOrNull() ?: 500
+   )
+   if(changed>0) autoBackup()
   }
  }
  fun close(method:String,preview:PricingPreview,customerPhone:String="",customerName:String=""){
