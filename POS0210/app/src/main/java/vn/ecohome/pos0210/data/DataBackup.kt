@@ -142,11 +142,31 @@ object DataBackup {
 
     fun archiveSnapshot(context: Context, rootTreeUriString: String): Result<Uri> = runCatching {
         val structure = SafPosStorage.ensureSelectedRoot(context, rootTreeUriString).getOrThrow()
+        kotlinx.coroutines.runBlocking {
+            ManagedMedia.migrateLegacy(context, PosDatabase.get(context).dao())
+        }
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val name = "POS0210_DATA_$stamp.db"
         val target = SafPosStorage.createFile(context, structure.archive, name)
         exportDatabase(context, target).getOrThrow()
         validateSqlite(context, target)
+
+        val mediaName = "POS0210_MEDIA_$stamp.0210"
+        val mediaTarget = SafPosStorage.createFile(context, structure.archive, mediaName)
+        val dir = File(context.filesDir, "managed_media").apply { mkdirs() }
+        SafPosStorage.overwrite(context, mediaTarget) { raw ->
+            ZipOutputStream(raw).use { zip ->
+                dir.listFiles()
+                    ?.filter { it.isFile }
+                    ?.sortedBy { it.name }
+                    ?.forEach { file ->
+                        zip.putNextEntry(ZipEntry(file.name))
+                        file.inputStream().use { input -> input.copyTo(zip) }
+                        zip.closeEntry()
+                    }
+            }
+        }
+        validateMediaArchive(context, mediaTarget)
         target
     }
 
