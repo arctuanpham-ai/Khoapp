@@ -22,7 +22,7 @@ import androidx.room.PrimaryKey
 @Entity(indices=[Index("supplierId"),Index("status")]) data class PurchaseEntity(@PrimaryKey val id:String,val supplierId:String?,val enteredBy:String,val purchasedAt:Long,val total:Long,val note:String="",val invoiceImageUri:String?=null,val status:String="ACTIVE")
 @Entity data class PurchaseCategoryEntity(@PrimaryKey val id:String,val name:String,val defaultUnit:String="lần",val sortOrder:Int=0,val active:Boolean=true)
 @Entity(indices=[Index("purchaseId"),Index("categoryId")]) data class PurchaseItemEntity(@PrimaryKey val id:String,val purchaseId:String,val categoryId:String="pc_production",val name:String,val qty:Double,val unit:String,val unitPrice:Long,val amount:Long)
-@Entity(indices=[Index("batchId")]) data class PrintJobEntity(@PrimaryKey val id:String,val batchId:String?,val billId:String?,val type:String,val status:String="PENDING",val claimedByDeviceId:String?=null,val attempts:Int=0,val createdAt:Long,val printedAt:Long?=null,val error:String?=null)
+@Entity(indices=[Index("batchId"),Index(value=["batchId","type"],unique=true)]) data class PrintJobEntity(@PrimaryKey val id:String,val batchId:String?,val billId:String?,val type:String,val status:String="PENDING",val claimedByDeviceId:String?=null,val attempts:Int=0,val createdAt:Long,val printedAt:Long?=null,val error:String?=null)
 @Entity(indices=[Index("entityId")]) data class AuditEventEntity(@PrimaryKey val id:String,val entityType:String,val entityId:String,val action:String,val actorId:String?,val deviceId:String?,val occurredAt:Long,val payload:String="")
 @Entity data class AppSettingEntity(@PrimaryKey val key:String,val value:String)
 
@@ -33,3 +33,5 @@ data class PurchaseCostRow(val categoryId:String,val amount:Long,val purchasedAt
 data class PricingPreview(val subtotal:Long,val surcharge:Long,val discount:Long,val total:Long,val surchargeRules:List<PricingRuleEntity>,val discountRule:PricingRuleEntity?,val message:String="")
 
 data class CustomerItemStatRow(val customerId:String,val name:String,val qty:Int)
+
+data class PaymentCommitResult(val bill:BillEntity,val customer:CustomerEntity?,val pointsBefore:Int,val pointsEarned:Int,val pointsAfter:Int,val tier:String?)
