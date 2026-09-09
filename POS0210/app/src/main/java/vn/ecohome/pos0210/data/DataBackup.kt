@@ -6,11 +6,15 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 
 object DataBackup {
     private const val DB_NAME = "pos0210.db"
     private const val LATEST_NAME = "POS0210_DATA_LATEST.db"
     private const val TEMP_NAME = "POS0210_DATA_TEMP.db"
+    private const val MEDIA_LATEST_NAME = "POS0210_MEDIA_LATEST.0210"
 
     private fun checkpoint(context: Context): File {
         val db = PosDatabase.get(context)
@@ -47,6 +51,12 @@ object DataBackup {
         return SafPosStorage.findFile(context, structure.data, LATEST_NAME)
     }
 
+    fun findMediaLatest(context: Context, rootTreeUriString: String): Uri? {
+        if (rootTreeUriString.isBlank()) return null
+        val structure = SafPosStorage.ensureSelectedRoot(context, rootTreeUriString).getOrNull() ?: return null
+        return SafPosStorage.findFile(context, structure.data, MEDIA_LATEST_NAME)
+    }
+
     fun exportDatabase(context: Context, uri: Uri): Result<Unit> = runCatching {
         val source = checkpoint(context)
         context.contentResolver.openOutputStream(uri, "wt").use { out ->
@@ -55,8 +65,19 @@ object DataBackup {
         }
     }
 
-    fun backupLatest(context: Context, rootTreeUriString: String): Result<Uri> = runCatching {
+    fun backupLatest(
+        context: Context,
+        rootTreeUriString: String,
+        includeMedia: Boolean = true
+    ): Result<Uri> = runCatching {
         val structure = SafPosStorage.ensureSelectedRoot(context, rootTreeUriString).getOrThrow()
+
+        if (includeMedia) {
+            kotlinx.coroutines.runBlocking {
+                ManagedMedia.migrateLegacy(context, PosDatabase.get(context).dao())
+            }
+        }
+
         val existing = SafPosStorage.findFile(context, structure.data, LATEST_NAME)
         val target = existing ?: SafPosStorage.createFile(context, structure.data, LATEST_NAME)
         val source = checkpoint(context)
@@ -64,7 +85,59 @@ object DataBackup {
             source.inputStream().use { input -> input.copyTo(out) }
         }
         validateSqlite(context, target)
+
+        if (includeMedia) backupMediaLatest(context, rootTreeUriString).getOrThrow()
         target
+    }
+
+    fun backupMediaLatest(context: Context, rootTreeUriString: String): Result<Uri> = runCatching {
+        val structure = SafPosStorage.ensureSelectedRoot(context, rootTreeUriString).getOrThrow()
+        val existing = SafPosStorage.findFile(context, structure.data, MEDIA_LATEST_NAME)
+        val target = existing ?: SafPosStorage.createFile(context, structure.data, MEDIA_LATEST_NAME)
+        val dir = File(context.filesDir, "managed_media").apply { mkdirs() }
+
+        SafPosStorage.overwrite(context, target) { raw ->
+            ZipOutputStream(raw).use { zip ->
+                dir.listFiles()
+                    ?.filter { it.isFile }
+                    ?.sortedBy { it.name }
+                    ?.forEach { file ->
+                        zip.putNextEntry(ZipEntry(file.name))
+                        file.inputStream().use { input -> input.copyTo(zip) }
+                        zip.closeEntry()
+                    }
+            }
+        }
+        validateMediaArchive(context, target)
+        target
+    }
+
+    private fun validateMediaArchive(context: Context, uri: Uri) {
+        context.contentResolver.openInputStream(uri).use { raw ->
+            requireNotNull(raw)
+            ZipInputStream(raw).use { zip ->
+                while (zip.nextEntry != null) zip.closeEntry()
+            }
+        }
+    }
+
+    fun restoreMediaLatest(context: Context, rootTreeUriString: String): Result<Unit> = runCatching {
+        val uri = findMediaLatest(context, rootTreeUriString) ?: return@runCatching
+        val dir = File(context.filesDir, "managed_media").apply { mkdirs() }
+
+        context.contentResolver.openInputStream(uri).use { raw ->
+            requireNotNull(raw)
+            ZipInputStream(raw).use { zip ->
+                while (true) {
+                    val entry = zip.nextEntry ?: break
+                    val safeName = entry.name.substringAfterLast('/').replace(Regex("[^A-Za-z0-9._-]"), "_")
+                    if (safeName.isNotBlank()) {
+                        File(dir, safeName).outputStream().use { output -> zip.copyTo(output) }
+                    }
+                    zip.closeEntry()
+                }
+            }
+        }
     }
 
     fun archiveSnapshot(context: Context, rootTreeUriString: String): Result<Uri> = runCatching {
@@ -80,6 +153,7 @@ object DataBackup {
     fun restoreLatest(context: Context, rootTreeUriString: String): Result<Unit> = runCatching {
         val uri = findLatest(context, rootTreeUriString) ?: error("Không tìm thấy POS0210_DATA_LATEST.db")
         restoreDatabase(context, uri).getOrThrow()
+        restoreMediaLatest(context, rootTreeUriString).getOrThrow()
         val master = ConfigBackup.findMaster(context, rootTreeUriString)
         if (master != null) {
             ConfigBackup.importConfig(context, master).getOrThrow()
@@ -90,7 +164,7 @@ object DataBackup {
     }
 
     fun autoBackup(context: Context, rootTreeUriString: String): Result<Unit> =
-        backupLatest(context, rootTreeUriString).map { Unit }
+        backupLatest(context, rootTreeUriString, includeMedia = false).map { Unit }
 
     fun restoreDatabase(context: Context, uri: Uri): Result<Unit> = runCatching {
         val temp = File(context.cacheDir, "pos0210-restore.tmp")
@@ -110,6 +184,7 @@ object DataBackup {
     }
     fun restoreDatabaseAndApplyMaster(context: Context, uri: Uri, rootTreeUriString: String): Result<Unit> = runCatching {
         restoreDatabase(context, uri).getOrThrow()
+        restoreMediaLatest(context, rootTreeUriString).getOrThrow()
         val master = ConfigBackup.findMaster(context, rootTreeUriString)
         if (master != null) {
             ConfigBackup.importConfig(context, master).getOrThrow()
