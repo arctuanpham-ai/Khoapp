@@ -526,6 +526,10 @@ fun BackupCenter(vm: PosViewModel) {
 
     val chooseRoot = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
+            if (!SafPosStorage.isPosRoot(context, uri)) {
+                message = "Hãy mở Download → POS0210 và chọn chính thư mục POS0210."
+                return@rememberLauncherForActivityResult
+            }
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
                     uri,
@@ -536,7 +540,7 @@ fun BackupCenter(vm: PosViewModel) {
             if (result.isSuccess) {
                 vm.saveSetting("storage_root_uri", uri.toString())
                 refreshTick++
-                message = "Đã gắn nơi lưu POS0210. App sẽ dùng đúng cây thư mục này, không tự tạo file trùng."
+                message = "Đã gắn đúng thư mục POS0210."
             } else {
                 message = "Không gắn được thư mục: ${result.exceptionOrNull()?.message}"
             }

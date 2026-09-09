@@ -10,6 +10,9 @@ object SafPosStorage {
     const val DATA_NAME = "DATA"
     const val ARCHIVE_NAME = "ARCHIVE"
 
+    fun isPosRoot(context: Context, uri: Uri): Boolean =
+        documentName(context, uri).equals(ROOT_NAME, ignoreCase = true)
+
     fun ensureStructure(context: Context, parentTreeUriString: String): Result<Structure> = runCatching {
         require(parentTreeUriString.isNotBlank()) { "Chưa chọn nơi lưu POS0210" }
         val tree = Uri.parse(parentTreeUriString)
