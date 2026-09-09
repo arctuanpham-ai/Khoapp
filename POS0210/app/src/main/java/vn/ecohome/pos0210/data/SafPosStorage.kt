@@ -136,6 +136,11 @@ object SafPosStorage {
      * Không tự ghép URI bằng chuỗi; luôn chuyển qua API DocumentsContract.
      */
     private fun asDocumentUri(uri: Uri): Uri {
+        // URI con tạo bằng buildDocumentUriUsingTree vẫn chứa segment "tree",
+        // nên DocumentsContract.isTreeUri(uri) có thể trả true. Nếu đã có
+        // segment "document" thì phải giữ nguyên documentId của thư mục con,
+        // không được quy ngược về tree root POS0210.
+        if (uri.pathSegments.contains("document")) return uri
         if (!DocumentsContract.isTreeUri(uri)) return uri
         val treeId = DocumentsContract.getTreeDocumentId(uri)
         return DocumentsContract.buildDocumentUriUsingTree(uri, treeId)
