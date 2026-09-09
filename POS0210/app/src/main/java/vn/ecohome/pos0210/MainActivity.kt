@@ -1909,6 +1909,14 @@ fun Report(vm: PosViewModel) {
         .sortedByDescending { it.second }
         .take(8)
 
+    val hourlyBillCounts = (5..23).associateWith { hour ->
+        filteredBills.count { bill ->
+            Calendar.getInstance().apply { timeInMillis = bill.openedAt }
+                .get(Calendar.HOUR_OF_DAY) == hour
+        }
+    }
+    val peakHour = hourlyBillCounts.maxByOrNull { it.value }?.takeIf { it.value > 0 }
+
     val exactDayRange = runCatching {
         if (historyDateText.isBlank()) null else {
             val fmt = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).apply { isLenient = false }
@@ -1959,6 +1967,13 @@ fun Report(vm: PosViewModel) {
                     item { MetricCard("Chuyển khoản", money(transfer)) }
                     item { MetricCard("Tổng chi phí đầu vào", money(purchaseTotal)) }
                     item { MetricCard("Chênh lệch thu - chi đầu vào", money(revenue - purchaseTotal)) }
+                    item {
+                        PeakHoursChart(
+                            hourlyCounts = hourlyBillCounts,
+                            peakHour = peakHour,
+                            periodDays = periodDays
+                        )
+                    }
                     item {
                         Text(
                             "Chi phí đầu vào theo phân mục",
@@ -2170,6 +2185,78 @@ fun Report(vm: PosViewModel) {
             },
             dismissButton = { TextButton(onClick = { showBulkDelete = false }) { Text("HỦY") } }
         )
+    }
+}
+
+@Composable
+fun PeakHoursChart(
+    hourlyCounts: Map<Int, Int>,
+    peakHour: Map.Entry<Int, Int>?,
+    periodDays: Int
+) {
+    val maxCount = (hourlyCounts.values.maxOrNull() ?: 0).coerceAtLeast(1)
+    val periodLabel = when (periodDays) {
+        1 -> "Hôm nay"
+        7 -> "7 ngày"
+        30 -> "30 ngày"
+        else -> "$periodDays ngày"
+    }
+
+    Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Column(Modifier.padding(16.dp)) {
+            Text("GIỜ CAO ĐIỂM", fontWeight = FontWeight.Black, fontSize = 18.sp)
+            if (peakHour == null) {
+                Text("Chưa đủ dữ liệu bill trong kỳ $periodLabel.", Modifier.padding(top = 6.dp))
+            } else {
+                Text(
+                    "Cao điểm: %02d:00–%02d:00 · %d bill".format(
+                        peakHour.key,
+                        (peakHour.key + 1) % 24,
+                        peakHour.value
+                    ),
+                    Modifier.padding(top = 4.dp),
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "Biểu đồ theo giờ mở bàn · $periodLabel",
+                    fontSize = 11.sp
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.Bottom
+            ) {
+                hourlyCounts.forEach { (hour, count) ->
+                    val ratio = count.toFloat() / maxCount.toFloat()
+                    val barHeight = if (count == 0) 2.dp else (18f + 92f * ratio).dp
+                    Column(
+                        Modifier.width(36.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Bottom
+                    ) {
+                        Text(
+                            count.toString(),
+                            fontSize = 10.sp,
+                            fontWeight = if (count == maxCount && count > 0) FontWeight.Black else FontWeight.Normal
+                        )
+                        Surface(
+                            modifier = Modifier.width(24.dp).height(barHeight),
+                            color = if (count == maxCount && count > 0) Coffee else Tint,
+                            shape = RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp)
+                        ) {}
+                        Text("%02d".format(hour), fontSize = 10.sp)
+                    }
+                }
+            }
+            Text(
+                "Trục ngang: giờ · Trục đứng: số bill",
+                Modifier.padding(top = 8.dp),
+                fontSize = 10.sp
+            )
+        }
     }
 }
 
