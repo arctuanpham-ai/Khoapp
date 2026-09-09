@@ -29,7 +29,11 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  private suspend fun audit(type:String,id:String,action:String,payload:String=""){dao.audit(AuditEventEntity(UUID.randomUUID().toString(),type,id,action,currentEmployee.value?.id,"ANDROID",System.currentTimeMillis(),payload))}
  private fun autoBackup(){
   val root=setting("storage_root_uri")
-  if(root.isNotBlank()) DataBackup.backupLatest(getApplication(),root)
+  if(root.isNotBlank()) DataBackup.backupLatest(getApplication(),root,includeMedia=false)
+ }
+ private fun autoBackupMedia(){
+  val root=setting("storage_root_uri")
+  if(root.isNotBlank()) DataBackup.backupMediaLatest(getApplication(),root)
  }
  private suspend fun autoMasterConfig(){
   val root=dao.allSettingsSnapshot().firstOrNull{it.key=="storage_root_uri"}?.value.orEmpty()
@@ -118,7 +122,7 @@ class PosViewModel(app:Application):AndroidViewModel(app){
    val id=UUID.randomUUID().toString()
    val managed=runCatching{ManagedMedia.importImage(getApplication(),imageUri,"menu_"+id)}.getOrNull()
    repo.saveMenuItem(MenuItemEntity(id,cat,name,price,managed,menu.value.size+1))
-   audit("MENU",id,"CREATE",name);autoBackup();autoMasterConfig()
+   audit("MENU",id,"CREATE",name);autoBackup();autoBackupMedia();autoMasterConfig()
   }
  }
  fun setMenuImage(i:MenuItemEntity,uri:String?){
@@ -126,7 +130,7 @@ class PosViewModel(app:Application):AndroidViewModel(app){
   viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
    val managed=runCatching{ManagedMedia.importImage(getApplication(),uri,"menu_"+i.id)}.getOrNull()
    repo.saveMenuItem(i.copy(imageUri=managed))
-   audit("MENU",i.id,"IMAGE");autoBackup();autoMasterConfig()
+   audit("MENU",i.id,"IMAGE");autoBackup();autoBackupMedia();autoMasterConfig()
   }
  }
  fun toggleMenu(i:MenuItemEntity){if(!canManageMenu())return;viewModelScope.launch{dao.setMenuActive(i.id,!i.active);audit("MENU",i.id,"ACTIVE",(!i.active).toString());autoBackup();autoMasterConfig()}}
@@ -177,7 +181,7 @@ class PosViewModel(app:Application):AndroidViewModel(app){
     dao.saveComboItem(ComboItemEntity(UUID.randomUUID().toString(),id,menuItemId,qty))
    }
    audit("COMBO",id,"CREATE","name=${name.trim()},price=$price,items=${items.size}")
-   autoBackup();autoMasterConfig()
+   autoBackup();autoBackupMedia();autoMasterConfig()
   }
  }
  fun toggleCombo(combo:ComboEntity){
@@ -241,7 +245,7 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
     PurchaseEntity(id,supplierId,e.id,at,amount,note,managed),
     listOf(PurchaseItemEntity(UUID.randomUUID().toString(),id,categoryId,name.trim(),qty,unit.ifBlank{"lần"},unitPrice,amount))
    )
-   audit("PURCHASE",id,"CREATE","${name.trim()}:$qty:$unit:$unitPrice:$amount");autoBackup()
+   audit("PURCHASE",id,"CREATE","${name.trim()}:$qty:$unit:$unitPrice:$amount");autoBackup();autoBackupMedia()
   }
  }
  fun sendBatch(){
