@@ -150,7 +150,7 @@ fun Tables(vm: PosViewModel) {
                 else -> 5
             }
             val rows = ((count + columns - 1) / columns).coerceAtLeast(1)
-            val rawHeight = (maxHeight - (rows - 1) * 8.dp) / rows
+            val rawHeight = (maxHeight - 8.dp * (rows - 1).toFloat()) / rows.toFloat()
             val cardHeight = rawHeight.coerceIn(76.dp, 150.dp)
 
             LazyVerticalGrid(
