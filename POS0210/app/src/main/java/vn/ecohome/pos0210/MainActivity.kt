@@ -82,6 +82,8 @@ fun App(vm: PosViewModel = viewModel()) {
         "REPORT" -> Report(vm)
         "MANAGE" -> Manage(vm)
         "MENU" -> MenuManager(vm)
+        "COMBO" -> ComboManager(vm)
+        "PRICING" -> PricingManager(vm)
         "EMP" -> Employees(vm)
         "PURCHASE" -> Purchases(vm)
         "VIETQR" -> VietQr(vm)
@@ -227,27 +229,32 @@ fun Tables(vm: PosViewModel) {
 @Composable
 fun Order(vm: PosViewModel, t: DiningTableEntity) {
     val ms by vm.menu.collectAsState()
+    val combos by vm.combos.collectAsState()
     val cats by vm.categories.collectAsState()
     val cart by vm.cart.collectAsState()
     var selectedCat by remember(cats) { mutableStateOf(cats.firstOrNull()?.id ?: "") }
     val visible = ms.filter { it.active && (selectedCat.isBlank() || it.categoryId == selectedCat) }
+    val activeCombos = combos.filter { it.active }
     val itemCount = cart.values.sum()
-    val total = cart.entries.sumOf { (id, q) -> (ms.firstOrNull { it.id == id }?.price ?: 0L) * q }
+    val total = cart.entries.sumOf { (id, q) ->
+        if (id.startsWith("combo:")) {
+            val comboId = id.removePrefix("combo:")
+            (combos.firstOrNull { it.id == comboId }?.price ?: 0L) * q
+        } else {
+            (ms.firstOrNull { it.id == id }?.price ?: 0L) * q
+        }
+    }
 
     Column {
         Header(t.name) { vm.screen.value = "TABLES" }
-
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp).horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            cats.take(5).forEach { c ->
-                FilterChip(
-                    selected = selectedCat == c.id,
-                    onClick = { selectedCat = c.id },
-                    label = { Text(c.name, fontSize = 11.sp) }
-                )
+            cats.forEach { cat ->
+                FilterChip(selectedCat == cat.id, { selectedCat = cat.id }, { Text(cat.name, fontSize = 11.sp) })
             }
+            FilterChip(selectedCat == "__COMBO__", { selectedCat = "__COMBO__" }, { Text("COMBO", fontSize = 11.sp) })
         }
 
         LazyVerticalGrid(
@@ -256,37 +263,50 @@ fun Order(vm: PosViewModel, t: DiningTableEntity) {
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            gridItems(visible, key = { it.id }) { m ->
-                val q = cart[m.id] ?: 0
-                Card(
-                    Modifier.fillMaxWidth().clickable { vm.add(m) },
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFBF8F2))
-                ) {
-                    Column {
-                        if (!m.imageUri.isNullOrBlank()) {
-                            AsyncImage(
-                                model = m.imageUri,
-                                contentDescription = m.name,
-                                modifier = Modifier.fillMaxWidth().height(92.dp)
-                            )
-                        } else {
-                            Box(
-                                Modifier.fillMaxWidth().height(70.dp),
-                                contentAlignment = Alignment.Center
-                            ) { Text("0210", fontWeight = FontWeight.Black) }
+            if (selectedCat == "__COMBO__") {
+                gridItems(activeCombos, key = { "combo:" + it.id }) { combo ->
+                    val key = "combo:" + combo.id
+                    val q = cart[key] ?: 0
+                    Card(Modifier.fillMaxWidth().clickable { vm.addCombo(combo) }) {
+                        Column {
+                            if (!combo.imageUri.isNullOrBlank()) {
+                                AsyncImage(model = combo.imageUri, contentDescription = combo.name, modifier = Modifier.fillMaxWidth().height(92.dp))
+                            } else {
+                                Box(Modifier.fillMaxWidth().height(70.dp), contentAlignment = Alignment.Center) { Text("COMBO", fontWeight = FontWeight.Black) }
+                            }
+                            Column(Modifier.padding(8.dp)) {
+                                Text(combo.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text(money(combo.price), fontSize = 12.sp)
+                                if (q > 0) {
+                                    Row(Modifier.fillMaxWidth().padding(top = 5.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                        Text("−", Modifier.clickable { vm.subCombo(combo) }.padding(5.dp), fontWeight = FontWeight.Bold)
+                                        Text(q.toString(), fontWeight = FontWeight.Black)
+                                        Text("+", Modifier.clickable { vm.addCombo(combo) }.padding(5.dp), fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
                         }
-                        Column(Modifier.padding(8.dp)) {
-                            Text(m.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                            Text(money(m.price), fontSize = 12.sp)
-                            if (q > 0) {
-                                Row(
-                                    Modifier.fillMaxWidth().padding(top = 5.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text("−", Modifier.clickable { vm.sub(m) }.padding(5.dp), fontWeight = FontWeight.Bold)
-                                    Text(q.toString(), fontWeight = FontWeight.Black)
-                                    Text("+", Modifier.clickable { vm.add(m) }.padding(5.dp), fontWeight = FontWeight.Bold)
+                    }
+                }
+            } else {
+                gridItems(visible, key = { it.id }) { m ->
+                    val q = cart[m.id] ?: 0
+                    Card(Modifier.fillMaxWidth().clickable { vm.add(m) }, colors = CardDefaults.cardColors(containerColor = Color(0xFFFBF8F2))) {
+                        Column {
+                            if (!m.imageUri.isNullOrBlank()) {
+                                AsyncImage(model = m.imageUri, contentDescription = m.name, modifier = Modifier.fillMaxWidth().height(92.dp))
+                            } else {
+                                Box(Modifier.fillMaxWidth().height(70.dp), contentAlignment = Alignment.Center) { Text("0210", fontWeight = FontWeight.Black) }
+                            }
+                            Column(Modifier.padding(8.dp)) {
+                                Text(m.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text(money(m.price), fontSize = 12.sp)
+                                if (q > 0) {
+                                    Row(Modifier.fillMaxWidth().padding(top = 5.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                        Text("−", Modifier.clickable { vm.sub(m) }.padding(5.dp), fontWeight = FontWeight.Bold)
+                                        Text(q.toString(), fontWeight = FontWeight.Black)
+                                        Text("+", Modifier.clickable { vm.add(m) }.padding(5.dp), fontWeight = FontWeight.Bold)
+                                    }
                                 }
                             }
                         }
@@ -294,25 +314,14 @@ fun Order(vm: PosViewModel, t: DiningTableEntity) {
                 }
             }
         }
-
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("$itemCount món", fontWeight = FontWeight.Bold)
             Spacer(Modifier.weight(1f))
             Text(money(total), fontWeight = FontWeight.Black)
         }
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = {}, modifier = Modifier.weight(1f)) { Text("XEM GIỎ HÀNG") }
-            Button(
-                onClick = { vm.sendBatch() },
-                modifier = Modifier.weight(1f),
-                enabled = cart.isNotEmpty()
-            ) { Text("GỬI LÀM HÀNG") }
+            Button(onClick = { vm.sendBatch() }, modifier = Modifier.weight(1f), enabled = cart.isNotEmpty()) { Text("GỬI LÀM HÀNG") }
         }
     }
 }
@@ -436,55 +445,111 @@ fun Sent(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
     }
 }
 
+private fun pricingRuleInTime(rule: PricingRuleEntity, now: Long): Boolean {
+    if (!rule.active) return false
+    if (rule.startAt != null && now < rule.startAt) return false
+    if (rule.endAt != null && now > rule.endAt) return false
+    val cal = Calendar.getInstance().apply { timeInMillis = now }
+    val minute = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+    val start = rule.startMinute
+    val end = rule.endMinute
+    if (start != null && end != null) {
+        val ok = if (start <= end) minute in start..end else minute >= start || minute <= end
+        if (!ok) return false
+    }
+    return true
+}
+
+private fun calculatePricing(subtotal: Long, rules: List<PricingRuleEntity>, enteredCode: String, now: Long = System.currentTimeMillis()): PricingPreview {
+    val code = enteredCode.trim().uppercase()
+    val eligible = rules.filter { pricingRuleInTime(it, now) }
+    val codeMatches = if (code.isBlank()) emptyList() else eligible.filter { it.code.isNotBlank() && it.code.equals(code, true) }
+    val surchargeRules = eligible.filter { it.kind == "SURCHARGE" && (it.autoApply || it in codeMatches) }
+    val surcharge = surchargeRules.sumOf { subtotal * it.percent / 100L }
+    val afterSurcharge = subtotal + surcharge
+    val discountCandidates = eligible.filter { it.kind == "DISCOUNT" && (it.autoApply || it in codeMatches) }
+    val bestDiscount = discountCandidates.maxByOrNull { afterSurcharge * it.percent / 100L }
+    val discount = bestDiscount?.let { afterSurcharge * it.percent / 100L } ?: 0L
+    val total = (afterSurcharge - discount).coerceAtLeast(0L)
+    val message = when {
+        code.isNotBlank() && codeMatches.isEmpty() -> "Mã không hợp lệ hoặc đã hết thời gian áp dụng."
+        code.isNotBlank() && bestDiscount != null && bestDiscount !in codeMatches -> "Mã hợp lệ nhưng hệ thống đang áp dụng ưu đãi lớn hơn: ${bestDiscount.name}."
+        code.isNotBlank() && bestDiscount != null -> "Đã áp dụng ưu đãi tốt nhất: ${bestDiscount.name}."
+        else -> ""
+    }
+    return PricingPreview(subtotal, surcharge, discount, total, surchargeRules, bestDiscount, message)
+}
+
 @Composable
 fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
-    val total by vm.total(s.id).collectAsState(initial = 0)
+    val subtotal by vm.total(s.id).collectAsState(initial = 0)
+    val rules by vm.pricingRules.collectAsState()
     val e by vm.currentEmployee.collectAsState()
     val settings by vm.settings.collectAsState()
     fun setting(key: String) = settings.firstOrNull { it.key == key }?.value ?: ""
     var method by remember { mutableStateOf("CASH") }
+    var codeText by remember { mutableStateOf("") }
+    var appliedCode by remember { mutableStateOf("") }
+    val preview = calculatePricing(subtotal, rules, appliedCode)
     val qrInfo = "${setting("qr_prefix").ifBlank { "0210" }} ${t.name}"
     val qrUrl = if (setting("bank_name").isNotBlank() && setting("bank_account").isNotBlank()) {
-        vietQrUrl(setting("bank_name"), setting("bank_account"), setting("bank_holder"), total, qrInfo)
+        vietQrUrl(setting("bank_name"), setting("bank_account"), setting("bank_holder"), preview.total, qrInfo)
     } else ""
 
     Column {
         Header("Thanh toán") { vm.screen.value = "SENT" }
-        Column(Modifier.weight(1f).padding(18.dp)) {
-            Text("TỔNG CỘNG")
-            Text(money(total), fontSize = 38.sp, fontWeight = FontWeight.Black)
+        Column(Modifier.weight(1f).padding(18.dp).verticalScroll(rememberScrollState())) {
+            Text("TẠM TÍNH")
+            Text(money(preview.subtotal), fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            if (preview.surcharge > 0) Text("Phụ thu: +${money(preview.surcharge)}", fontWeight = FontWeight.Bold)
+            preview.surchargeRules.forEach { Text("• ${it.name} +${it.percent}%", fontSize = 12.sp) }
+            if (preview.discount > 0) {
+                Text("Ưu đãi: -${money(preview.discount)}", fontWeight = FontWeight.Bold)
+                preview.discountRule?.let { Text("• ${it.name} -${it.percent}%", fontSize = 12.sp) }
+            }
+            HorizontalDivider(Modifier.padding(vertical = 10.dp))
+            Text("THÀNH TIỀN")
+            Text(money(preview.total), fontSize = 38.sp, fontWeight = FontWeight.Black)
+
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = codeText,
+                    onValueChange = { codeText = it.uppercase().take(30) },
+                    modifier = Modifier.weight(1f),
+                    label = { Text("Mã ưu đãi") },
+                    singleLine = true
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = { appliedCode = codeText.trim().uppercase() }) { Text("ÁP DỤNG") }
+            }
+            if (appliedCode.isNotBlank()) {
+                TextButton(onClick = { appliedCode = ""; codeText = "" }) { Text("BỎ MÃ") }
+            }
+            if (preview.message.isNotBlank()) Text(preview.message, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("Các ưu đãi giảm giá không cộng dồn; hệ thống chỉ chọn mức giảm lớn nhất.", fontSize = 11.sp)
+
             Row {
                 FilterChip(method == "CASH", { method = "CASH" }, { Text("TIỀN MẶT") })
+                Spacer(Modifier.width(8.dp))
                 FilterChip(method == "TRANSFER", { method = "TRANSFER" }, { Text("CHUYỂN KHOẢN") })
             }
             Text("🔒 Thu tiền: ${e?.name}", Modifier.padding(vertical = 14.dp))
             if (method == "TRANSFER") {
                 Card {
-                    Column(
-                        Modifier.fillMaxWidth().padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("VIETQR", fontWeight = FontWeight.Bold)
-                        if (qrUrl.isBlank()) {
-                            Text("Chưa cấu hình tài khoản VietQR")
-                        } else {
-                            AsyncImage(
-                                model = qrUrl,
-                                contentDescription = "Mã VietQR thanh toán",
-                                modifier = Modifier.size(280.dp)
-                            )
+                        if (qrUrl.isBlank()) Text("Chưa cấu hình tài khoản VietQR") else {
+                            AsyncImage(model = qrUrl, contentDescription = "Mã VietQR thanh toán", modifier = Modifier.size(280.dp))
                             Text("${setting("bank_name")} · ${setting("bank_account")}")
-                            Text("${money(total)} · $qrInfo")
+                            Text("${money(preview.total)} · $qrInfo")
                         }
                     }
                 }
             }
         }
-        Button(
-            onClick = { vm.close(method, total) },
-            modifier = Modifier.fillMaxWidth().padding(18.dp),
-            enabled = total > 0
-        ) { Text("XÁC NHẬN THANH TOÁN") }
+        Button(onClick = { vm.close(method, preview) }, modifier = Modifier.fillMaxWidth().padding(18.dp), enabled = preview.total > 0) {
+            Text("XÁC NHẬN THANH TOÁN")
+        }
     }
 }
 
@@ -498,6 +563,10 @@ fun Manage(vm: PosViewModel) {
         ) {
             if (employee?.role == "ADMIN" || employee?.canManageMenu == true) {
                 Rowx("Quản lý menu", "Thêm món · ảnh · nhóm món") { vm.screen.value = "MENU" }
+                Rowx("Combo", "Tạo combo từ các món đang có · giá combo · bật/tắt") { vm.screen.value = "COMBO" }
+            }
+            if (employee?.role == "ADMIN") {
+                Rowx("Ưu đãi & điều chỉnh giá", "Mã giảm giá · Happy Hour · phụ thu ngày lễ · thời hạn") { vm.screen.value = "PRICING" }
             }
             if (employee?.role == "ADMIN") {
                 Rowx("Nhân viên", "Thêm · khóa · phân quyền") { vm.screen.value = "EMP" }
