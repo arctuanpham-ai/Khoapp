@@ -355,7 +355,24 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
     val info="0210 ${table?.name ?: bill.billNo}"
     val qr=qrUrl(preview.total,info).takeIf{it.isNotBlank()}?.let{BluetoothPrinter.downloadBitmap(it)}
     val period="${java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date(session.openedAt))}–${java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date(bill.closedAt ?: System.currentTimeMillis()))}"
-    val bmp=ReceiptRenderer.bill(table?.name ?: "Bàn",period,lines,preview.total,if(method=="CASH")"TIỀN MẶT" else "CHUYỂN KHOẢN",qr)
+    val receiptAdjustments=buildList {
+     preview.surchargeRules.forEach{rule->add("PHỤ THU ${rule.name}  +${rule.percent}%")}
+     preview.discountRule?.let{rule->
+      add("ƯU ĐÃI ${rule.name}${if(rule.code.isNotBlank()) " · ${rule.code}" else ""}  -${rule.percent}%")
+     }
+    }
+    val bmp=ReceiptRenderer.bill(
+     table=table?.name ?: "Bàn",
+     period=period,
+     items=lines,
+     subtotal=preview.subtotal,
+     surcharge=preview.surcharge,
+     discount=preview.discount,
+     total=preview.total,
+     adjustmentLines=receiptAdjustments,
+     method=if(method=="CASH")"TIỀN MẶT" else "CHUYỂN KHOẢN",
+     qr=qr
+    )
     val job=PrintJobEntity(java.util.UUID.randomUUID().toString(),null,bill.id,"BILL",createdAt=System.currentTimeMillis())
     dao.insertPrintJob(job)
     val pr=BluetoothPrinter.printBitmap(getApplication(),printerMac(),bmp)
