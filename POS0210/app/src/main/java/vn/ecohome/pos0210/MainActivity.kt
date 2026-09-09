@@ -1816,6 +1816,8 @@ fun Report(vm: PosViewModel) {
     val bills by vm.bills.collectAsState()
     val payments by vm.payments.collectAsState()
     val purchases by vm.purchases.collectAsState()
+    val purchaseCosts by vm.purchaseCosts.collectAsState()
+    val purchaseCategories by vm.purchaseCategories.collectAsState()
     val itemSales by vm.itemSales.collectAsState()
     val current by vm.currentEmployee.collectAsState()
     var section by remember { mutableStateOf("OVERVIEW") }
@@ -1846,6 +1848,15 @@ fun Report(vm: PosViewModel) {
     val filteredPayments = payments.filter { it.billId in billIds }
     val revenue = filteredBills.sumOf { it.total }
     val purchaseTotal = filteredPurchases.sumOf { it.total }
+    val categorizedCosts = purchaseCosts
+        .filter { it.purchasedAt >= from }
+        .groupBy { it.categoryId }
+        .map { (categoryId, rows) ->
+            val categoryName = purchaseCategories.firstOrNull { it.id == categoryId }?.name ?: "Phân mục khác"
+            Triple(categoryId, categoryName, rows.sumOf { it.amount })
+        }
+        .sortedByDescending { it.third }
+    val categorizedCostTotal = categorizedCosts.sumOf { it.third }
     val cash = filteredPayments.filter { it.method == "CASH" }.sumOf { it.amount }
     val transfer = filteredPayments.filter { it.method == "TRANSFER" }.sumOf { it.amount }
     val avgBill = if (filteredBills.isEmpty()) 0L else revenue / filteredBills.size
@@ -1906,8 +1917,36 @@ fun Report(vm: PosViewModel) {
                     item { MetricCard("Bill trung bình", money(avgBill)) }
                     item { MetricCard("Tiền mặt", money(cash)) }
                     item { MetricCard("Chuyển khoản", money(transfer)) }
-                    item { MetricCard("Tổng nhập hàng", money(purchaseTotal)) }
-                    item { MetricCard("Chênh lệch thu - nhập", money(revenue - purchaseTotal)) }
+                    item { MetricCard("Tổng chi phí đầu vào", money(purchaseTotal)) }
+                    item { MetricCard("Chênh lệch thu - chi đầu vào", money(revenue - purchaseTotal)) }
+                    item {
+                        Text(
+                            "Chi phí đầu vào theo phân mục",
+                            Modifier.padding(start = 8.dp, top = 16.dp, bottom = 6.dp),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                    }
+                    if (categorizedCosts.isEmpty()) {
+                        item { Text("Chưa có chi phí đầu vào trong kỳ.", Modifier.padding(8.dp)) }
+                    } else {
+                        items(categorizedCosts) { row ->
+                            val pct = if (categorizedCostTotal == 0L) 0
+                            else ((row.third * 100.0 / categorizedCostTotal) + 0.5).toInt()
+                            Card(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(row.second, fontWeight = FontWeight.Bold)
+                                        Text("$pct% tổng chi phí", fontSize = 11.sp)
+                                    }
+                                    Text(money(row.third), fontWeight = FontWeight.Black)
+                                }
+                            }
+                        }
+                    }
                     item {
                         Text("Món khách chọn nhiều", Modifier.padding(start = 8.dp, top = 16.dp, bottom = 6.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     }
@@ -2012,7 +2051,34 @@ fun Report(vm: PosViewModel) {
                     Text("Chưa có phiếu nhập trong kỳ đã chọn", Modifier.padding(20.dp))
                 } else {
                     LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
-                        item { Text("Tổng nhập: ${money(purchaseTotal)}", fontSize = 22.sp, fontWeight = FontWeight.Bold) }
+                        item { Text("Tổng chi phí đầu vào: ${money(purchaseTotal)}", fontSize = 22.sp, fontWeight = FontWeight.Bold) }
+                        if (categorizedCosts.isNotEmpty()) {
+                            item {
+                                Text(
+                                    "Theo phân mục",
+                                    Modifier.padding(top = 12.dp, bottom = 4.dp),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 17.sp
+                                )
+                            }
+                            items(categorizedCosts) { row ->
+                                val pct = if (categorizedCostTotal == 0L) 0
+                                else ((row.third * 100.0 / categorizedCostTotal) + 0.5).toInt()
+                                Card(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(row.second, Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                                        Text("${money(row.third)} · $pct%")
+                                    }
+                                }
+                            }
+                            item {
+                                Text(
+                                    "Phiếu nhập trong kỳ",
+                                    Modifier.padding(top = 14.dp, bottom = 4.dp),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
                         items(filteredPurchases) { p ->
                             Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { selectedPurchase = p }) {
                                 Column(Modifier.padding(14.dp)) {
