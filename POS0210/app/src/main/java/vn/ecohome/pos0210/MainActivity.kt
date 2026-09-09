@@ -152,6 +152,8 @@ fun Tables(vm: PosViewModel) {
     val ss by vm.sessions.collectAsState()
     val waiting by vm.waitingBatches.collectAsState()
     val areas by vm.areas.collectAsState()
+    val current by vm.currentEmployee.collectAsState()
+    val canReport = current?.role == "ADMIN" || current?.canViewReport == true
 
     Column {
         Header()
@@ -161,8 +163,10 @@ fun Tables(vm: PosViewModel) {
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             FilterChip(true, {}, { Text("BÁN HÀNG") })
-            FilterChip(false, { vm.screen.value = "REPORT" }, { Text("LỊCH SỬ") })
-            FilterChip(false, { vm.screen.value = "REPORT" }, { Text("BÁO CÁO") })
+            if (canReport) {
+                FilterChip(false, { vm.screen.value = "REPORT" }, { Text("LỊCH SỬ") })
+                FilterChip(false, { vm.screen.value = "REPORT" }, { Text("BÁO CÁO") })
+            }
         }
 
         BoxWithConstraints(
@@ -240,7 +244,9 @@ fun Tables(vm: PosViewModel) {
         }
         Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button({ vm.screen.value = "MANAGE" }, Modifier.weight(1f)) { Text("QUẢN LÝ") }
-            Button({ vm.screen.value = "REPORT" }, Modifier.weight(1f)) { Text("BÁO CÁO") }
+            if (canReport) {
+                Button({ vm.screen.value = "REPORT" }, Modifier.weight(1f)) { Text("BÁO CÁO") }
+            }
         }
     }
 }
@@ -1011,13 +1017,18 @@ fun Manage(vm: PosViewModel) {
             if (employee?.role == "ADMIN" || employee?.canManageSystem == true) {
                 Rowx("Bàn & khu vực", "Thêm · sửa · Trong nhà / Ngoài trời") { vm.screen.value = "TABLE_ADMIN" }
             }
-            Rowx("Nhập đầu vào", "Lương · vật tư cố định · vật tư sản xuất") { vm.screen.value = "PURCHASE" }
+            if (employee?.role == "ADMIN" || employee?.canPurchase == true) {
+                Rowx("Nhập đầu vào", "Lương · vật tư cố định · vật tư sản xuất") { vm.screen.value = "PURCHASE" }
+            }
             if (employee?.role == "ADMIN" || employee?.role == "MANAGER") {
                 Rowx("VietQR", "Lưu tài khoản · tạo QR") { vm.screen.value = "VIETQR" }
             }
             Rowx("Máy in", "XP-N58H · Bluetooth · ESC/POS") { vm.screen.value = "PRINTER" }
             if (employee?.role == "ADMIN" || employee?.canManageSystem == true) {
                 Rowx("Dữ liệu & Backup", "MASTER · Autobackup · Backup/Restore") { vm.screen.value = "BACKUP" }
+            }
+            if (employee?.role == "ADMIN") {
+                Rowx("Nhật ký hệ thống", "Audit thao tác · người thực hiện · thời điểm · dữ liệu thay đổi") { vm.screen.value = "SETTINGS" }
             }
             Spacer(Modifier.height(30.dp))
         }
@@ -1976,6 +1987,14 @@ fun MenuAddDialog(
 
 @Composable
 fun Purchases(vm: PosViewModel) {
+    val currentGuard by vm.currentEmployee.collectAsState()
+    if (currentGuard?.role != "ADMIN" && currentGuard?.canPurchase != true) {
+        Column {
+            Header("Nhập đầu vào") { vm.screen.value = "MANAGE" }
+            Text("Bạn không có quyền nhập đầu vào.", Modifier.padding(20.dp), fontWeight = FontWeight.Bold)
+        }
+        return
+    }
     val purchases by vm.purchases.collectAsState()
     val purchaseCategories by vm.purchaseCategories.collectAsState()
     val context = LocalContext.current
@@ -2587,6 +2606,14 @@ fun PrintLine(label: String, value: String, bold: Boolean, large: Boolean = fals
 
 @Composable
 fun Report(vm: PosViewModel) {
+    val currentGuard by vm.currentEmployee.collectAsState()
+    if (currentGuard?.role != "ADMIN" && currentGuard?.canViewReport != true) {
+        Column {
+            Header("Báo cáo") { vm.screen.value = "TABLES" }
+            Text("Bạn không có quyền xem báo cáo.", Modifier.padding(20.dp), fontWeight = FontWeight.Bold)
+        }
+        return
+    }
     val bills by vm.bills.collectAsState()
     val payments by vm.payments.collectAsState()
     val purchases by vm.purchases.collectAsState()
@@ -3099,11 +3126,31 @@ fun BillBatchDetail(vm: PosViewModel, batch: OrderBatchEntity, employees: List<E
 @Composable
 fun Settings(vm: PosViewModel) {
     val a by vm.audits.collectAsState()
+    val employees by vm.employees.collectAsState()
+    val current by vm.currentEmployee.collectAsState()
+    if (current?.role != "ADMIN") {
+        Column {
+            Header("Nhật ký hệ thống") { vm.screen.value = "MANAGE" }
+            Text("Chỉ Admin được xem audit log.", Modifier.padding(20.dp), fontWeight = FontWeight.Bold)
+        }
+        return
+    }
     Column {
-        Header("Nhật ký") { vm.screen.value = "MANAGE" }
-        LazyColumn {
-            items(a.take(30)) { event ->
-                Text("${time(event.occurredAt)} · ${event.action}", Modifier.padding(8.dp))
+        Header("Nhật ký hệ thống") { vm.screen.value = "MANAGE" }
+        Text("Các thao tác gần nhất · không sửa/xóa từ giao diện", Modifier.padding(horizontal = 16.dp), fontSize = 11.sp)
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+            items(a) { event ->
+                val actor = employees.firstOrNull { it.id == event.actorId }?.name ?: event.actorId ?: "SYSTEM"
+                Card(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text("${time(event.occurredAt)} · ${event.action}", fontWeight = FontWeight.Black)
+                        Text("Người thực hiện: $actor", fontSize = 12.sp)
+                        Text("${event.entityType} · ${event.entityId}", fontSize = 11.sp)
+                        if (event.payload.isNotBlank()) {
+                            Text(event.payload, Modifier.padding(top = 3.dp), fontSize = 11.sp)
+                        }
+                    }
+                }
             }
         }
     }
