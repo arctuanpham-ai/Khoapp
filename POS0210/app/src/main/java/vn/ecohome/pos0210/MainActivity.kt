@@ -2067,48 +2067,54 @@ fun SimplePrintPreview(title: String, body: String) {
 fun BillPrintPreview(vm: PosViewModel) {
     val settings by vm.settings.collectAsState()
     fun setting(key: String) = settings.firstOrNull { it.key == key }?.value ?: ""
-    val amount = 135000L
+    val subtotal = 135000L
+    val discount = 13500L
+    val amount = subtotal - discount
     val qrUrl = if (setting("bank_name").isNotBlank() && setting("bank_account").isNotBlank()) {
         vietQrUrl(setting("bank_name"), setting("bank_account"), setting("bank_holder"), amount, "0210 BAN 02")
     } else ""
 
     Column(
-        Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 18.dp),
+        Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text("0210", fontSize = 30.sp, fontWeight = FontWeight.Black)
-        Text("BREAKFAST · COFFEE · DRINKS", fontSize = 18.sp, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(12.dp))
+        Text("BREAKFAST · COFFEE · DRINKS", fontSize = 17.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(10.dp))
         Text("BILL THANH TOÁN", fontSize = 24.sp, fontWeight = FontWeight.Black)
-        Text("BÀN 02  ·  08:32–09:25", fontSize = 18.sp, fontWeight = FontWeight.Medium)
-        HorizontalDivider(Modifier.padding(vertical = 10.dp))
+        Text("BÀN 02  ·  08:32–09:25", fontSize = 17.sp, fontWeight = FontWeight.Medium)
+        HorizontalDivider(Modifier.padding(vertical = 9.dp))
 
         PrintLine("2 × Bún gà", "80.000đ", bold = false)
         PrintLine("1 × Bạc xỉu", "30.000đ", bold = false)
         PrintLine("1 × Đen đá", "25.000đ", bold = false)
 
-        HorizontalDivider(Modifier.padding(vertical = 10.dp))
-        PrintLine("TỔNG CỘNG", "135.000đ", bold = true, large = true)
-        Text("Thanh toán: TIỀN MẶT / CHUYỂN KHOẢN", Modifier.fillMaxWidth(), fontSize = 18.sp)
+        HorizontalDivider(Modifier.padding(vertical = 9.dp))
+        PrintLine("TẠM TÍNH", money(subtotal), bold = true)
+        PrintLine("ƯU ĐÃI HAPPY10 · -10%", "-${money(discount)}", bold = true)
+        HorizontalDivider(Modifier.padding(vertical = 9.dp))
+        PrintLine("THÀNH TIỀN", money(amount), bold = true, large = true)
+        Text("Thanh toán: CHUYỂN KHOẢN", Modifier.fillMaxWidth(), fontSize = 17.sp)
 
-        HorizontalDivider(Modifier.padding(vertical = 10.dp))
+        HorizontalDivider(Modifier.padding(vertical = 9.dp))
         Text("QUÉT MÃ THANH TOÁN", fontSize = 20.sp, fontWeight = FontWeight.Black)
         if (qrUrl.isNotBlank()) {
             AsyncImage(
                 model = qrUrl,
                 contentDescription = "VietQR trên bill",
-                modifier = Modifier.size(180.dp).padding(top = 6.dp)
+                modifier = Modifier.fillMaxWidth(0.78f).aspectRatio(1f).padding(top = 4.dp)
             )
-            Text("${setting("bank_name")} · ${setting("bank_account")}", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Text("Nội dung: 0210 BAN 02", fontSize = 18.sp)
+            Text("SỐ TIỀN: ${money(amount)}", fontSize = 17.sp, fontWeight = FontWeight.Black)
+            Text("${setting("bank_name")} · ${setting("bank_account")}", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text("Nội dung: 0210 BAN 02", fontSize = 14.sp)
         } else {
             Box(
-                Modifier.size(150.dp).padding(10.dp),
+                Modifier.fillMaxWidth(0.78f).aspectRatio(1f).padding(10.dp),
                 contentAlignment = Alignment.Center
             ) { Text("CHƯA CẤU HÌNH VIETQR", textAlign = TextAlign.Center, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
         }
 
-        HorizontalDivider(Modifier.padding(vertical = 10.dp))
+        HorizontalDivider(Modifier.padding(vertical = 9.dp))
         Text("CẢM ƠN QUÝ KHÁCH!", fontWeight = FontWeight.Black, fontSize = 18.sp)
         Text("Good Food · Good Coffee · Brighter Day", fontSize = 10.sp)
     }
