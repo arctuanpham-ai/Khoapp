@@ -66,4 +66,5 @@ import kotlinx.coroutines.flow.Flow
 @Query("UPDATE PrintJobEntity SET status='PRINTED',printedAt=:printedAt,error=NULL WHERE id=:id") suspend fun markPrintSuccess(id:String,printedAt:Long)
 @Query("UPDATE PrintJobEntity SET status='FAILED',error=:error WHERE id=:id") suspend fun markPrintFailed(id:String,error:String)
 @Query("UPDATE BillEntity SET status='DELETED' WHERE id=:id AND status='PAID'") suspend fun softDeleteBill(id:String):Int
+@Query("UPDATE BillEntity SET status='DELETED' WHERE id IN (:ids) AND status='PAID'") suspend fun softDeleteBills(ids:List<String>):Int
 }

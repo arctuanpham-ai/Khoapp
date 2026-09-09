@@ -491,31 +491,12 @@ fun Manage(vm: PosViewModel) {
     val context = LocalContext.current
     var backupMessage by remember { mutableStateOf("") }
 
-    val exportMasterConfig = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/octet-stream")
-    ) { uri ->
-        if (uri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                )
-            }
-            val result = ConfigBackup.exportConfig(context, uri)
-            if (result.isSuccess) {
-                vm.saveSetting("master_config_uri", uri.toString())
-                ConfigBackup.copyMasterToDownloads(context, uri)
-            }
-            backupMessage = if (result.isSuccess) "Đã lưu MASTER CONFIG .0210 + bản tự nhận trong Downloads" else "MASTER lỗi: ${result.exceptionOrNull()?.message}"
-        }
-    }
-
     val importMasterConfig = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val result = ConfigBackup.importConfig(context, uri)
             if (result.isSuccess) {
-                ConfigBackup.copyMasterToDownloads(context, uri)
-                Toast.makeText(context, "Đã khôi phục MASTER CONFIG và đặt làm MASTER chuẩn.", Toast.LENGTH_LONG).show()
+                val copy = ConfigBackup.copyMasterToDownloads(context, uri)
+                Toast.makeText(context, if(copy.isSuccess) "Đã khôi phục và ghi đè MASTER chuẩn." else "Đã khôi phục cấu hình nhưng lỗi ghi MASTER.", Toast.LENGTH_LONG).show()
                 android.os.Process.killProcess(android.os.Process.myPid())
             } else {
                 backupMessage = "Restore MASTER lỗi: ${result.exceptionOrNull()?.message}"
@@ -585,14 +566,17 @@ fun Manage(vm: PosViewModel) {
                         Text("MASTER CONFIG", fontWeight = FontWeight.Black, fontSize = 18.sp)
                         Text("Menu · ảnh món · bàn · nhân viên · VietQR · cấu hình máy in", fontSize = 12.sp)
                         Text(
-                            if (vm.setting("master_config_uri").isBlank()) "Chưa gắn file MASTER" else "MASTER tự cập nhật: ĐÃ BẬT",
+                            "File chuẩn: Download/POS0210/POS0210_MASTER.0210 · tự ghi đè",
                             Modifier.padding(vertical = 6.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold
                         )
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(
-                                onClick = { exportMasterConfig.launch("POS0210_MASTER.0210") },
+                                onClick = {
+                                    val result = ConfigBackup.saveMasterToDownloads(context)
+                                    backupMessage = if (result.isSuccess) "Đã ghi đè MASTER chuẩn." else "MASTER lỗi: ${result.exceptionOrNull()?.message}"
+                                },
                                 modifier = Modifier.weight(1f)
-                            ) { Text("XUẤT MASTER") }
+                            ) { Text("GHI MASTER") }
                             Button(
                                 onClick = { importMasterConfig.launch(arrayOf("*/*")) },
                                 modifier = Modifier.weight(1f)
@@ -1674,20 +1658,29 @@ fun Report(vm: PosViewModel) {
     val payments by vm.payments.collectAsState()
     val purchases by vm.purchases.collectAsState()
     val itemSales by vm.itemSales.collectAsState()
+    val current by vm.currentEmployee.collectAsState()
     var section by remember { mutableStateOf("OVERVIEW") }
     var periodDays by remember { mutableStateOf(1) }
     var selectedBill by remember { mutableStateOf<BillEntity?>(null) }
     var selectedPurchase by remember { mutableStateOf<PurchaseEntity?>(null) }
+    var paymentFilter by remember { mutableStateOf("ALL") }
+    var historyDateText by remember { mutableStateOf("") }
+    var selectedBillIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showBulkDelete by remember { mutableStateOf(false) }
+    var bulkDeleteReason by remember { mutableStateOf("") }
 
-    val cal = Calendar.getInstance().apply {
-        timeInMillis = System.currentTimeMillis()
-        set(Calendar.HOUR_OF_DAY, 0)
-        set(Calendar.MINUTE, 0)
-        set(Calendar.SECOND, 0)
-        set(Calendar.MILLISECOND, 0)
-        if (periodDays > 1) add(Calendar.DAY_OF_YEAR, -(periodDays - 1))
+    fun periodStart(days: Int): Long {
+        return Calendar.getInstance().apply {
+            timeInMillis = System.currentTimeMillis()
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+            if (days > 1) add(Calendar.DAY_OF_YEAR, -(days - 1))
+        }.timeInMillis
     }
-    val from = cal.timeInMillis
+
+    val from = periodStart(periodDays)
     val filteredBills = bills.filter { (it.closedAt ?: 0L) >= from }
     val filteredPurchases = purchases.filter { it.purchasedAt >= from }
     val billIds = filteredBills.map { it.id }.toSet()
@@ -1705,6 +1698,27 @@ fun Report(vm: PosViewModel) {
         .map { (name, rows) -> name to rows.sumOf { it.qty } }
         .sortedByDescending { it.second }
         .take(8)
+
+    val exactDayRange = runCatching {
+        if (historyDateText.isBlank()) null else {
+            val fmt = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).apply { isLenient = false }
+            val start = fmt.parse(historyDateText)?.time ?: return@runCatching null
+            start until (start + 24L * 60L * 60L * 1000L)
+        }
+    }.getOrNull()
+    val historyTimeBills = if (exactDayRange != null) {
+        bills.filter { (it.closedAt ?: 0L) in exactDayRange }
+    } else filteredBills
+    val historyBills = historyTimeBills.filter { bill ->
+        val method = payments.firstOrNull { it.billId == bill.id }?.method
+        when (paymentFilter) {
+            "CASH" -> method == "CASH"
+            "TRANSFER" -> method == "TRANSFER"
+            else -> true
+        }
+    }
+    val selectedBills = bills.filter { it.id in selectedBillIds }
+    val selectedTotal = selectedBills.sumOf { it.total }
 
     Column {
         Header("Báo cáo") { vm.screen.value = "TABLES" }
@@ -1736,12 +1750,7 @@ fun Report(vm: PosViewModel) {
                     item { MetricCard("Tổng nhập hàng", money(purchaseTotal)) }
                     item { MetricCard("Chênh lệch thu - nhập", money(revenue - purchaseTotal)) }
                     item {
-                        Text(
-                            "Món khách chọn nhiều",
-                            Modifier.padding(start = 8.dp, top = 16.dp, bottom = 6.dp),
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp
-                        )
+                        Text("Món khách chọn nhiều", Modifier.padding(start = 8.dp, top = 16.dp, bottom = 6.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp)
                     }
                     if (favoriteRows.isEmpty()) {
                         item { Text("Chưa đủ dữ liệu món trong kỳ.", Modifier.padding(8.dp)) }
@@ -1756,30 +1765,83 @@ fun Report(vm: PosViewModel) {
                             }
                         }
                     }
-                    item {
-                        Text(
-                            "Dữ liệu lấy trực tiếp từ bill đã thanh toán và phiếu nhập.",
-                            Modifier.padding(8.dp),
-                            fontSize = 12.sp
-                        )
-                    }
                 }
             }
             "BILLS" -> {
-                if (filteredBills.isEmpty()) {
-                    Text("Chưa có bill trong kỳ đã chọn", Modifier.padding(20.dp))
-                } else {
-                    LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
-                        items(filteredBills) { b ->
-                            val p = payments.firstOrNull { it.billId == b.id }
-                            Card(
-                                Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { selectedBill = b }
-                            ) {
-                                Column(Modifier.padding(14.dp)) {
-                                    Text(b.billNo, fontWeight = FontWeight.Bold)
-                                    Text("${b.closedAt?.let { time(it) } ?: "--"} · ${money(b.total)}")
-                                    Text(if (p?.method == "TRANSFER") "Chuyển khoản" else "Tiền mặt", fontSize = 12.sp)
-                                    Text("Chạm để xem chi tiết bill", fontSize = 12.sp)
+                Column(Modifier.fillMaxSize()) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        FilterChip(periodDays == 1 && historyDateText.isBlank(), { periodDays = 1; historyDateText = ""; selectedBillIds = emptySet() }, { Text("Hôm nay") })
+                        FilterChip(periodDays == 7 && historyDateText.isBlank(), { periodDays = 7; historyDateText = ""; selectedBillIds = emptySet() }, { Text("7 ngày") })
+                        FilterChip(periodDays == 30 && historyDateText.isBlank(), { periodDays = 30; historyDateText = ""; selectedBillIds = emptySet() }, { Text("30 ngày") })
+                    }
+                    OutlinedTextField(
+                        value = historyDateText,
+                        onValueChange = { historyDateText = it.take(10); selectedBillIds = emptySet() },
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
+                        label = { Text("Lọc đúng ngày dd/MM/yyyy") },
+                        singleLine = true
+                    )
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        FilterChip(paymentFilter == "ALL", { paymentFilter = "ALL"; selectedBillIds = emptySet() }, { Text("TẤT CẢ") })
+                        FilterChip(paymentFilter == "CASH", { paymentFilter = "CASH"; selectedBillIds = emptySet() }, { Text("TIỀN MẶT") })
+                        FilterChip(paymentFilter == "TRANSFER", { paymentFilter = "TRANSFER"; selectedBillIds = emptySet() }, { Text("CHUYỂN KHOẢN") })
+                    }
+                    if (current?.role == "ADMIN" && historyBills.isNotEmpty()) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    val ids = historyBills.map { it.id }.toSet()
+                                    selectedBillIds = if (ids.all { it in selectedBillIds }) selectedBillIds - ids else selectedBillIds + ids
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) { Text(if (historyBills.all { it.id in selectedBillIds }) "BỎ CHỌN TẤT CẢ" else "CHỌN TẤT CẢ") }
+                            Button(
+                                onClick = { showBulkDelete = true },
+                                enabled = selectedBillIds.isNotEmpty(),
+                                modifier = Modifier.weight(1f)
+                            ) { Text("XÓA ${selectedBillIds.size} BILL") }
+                        }
+                        if (selectedBillIds.isNotEmpty()) {
+                            Text("Đã chọn ${selectedBillIds.size} bill · ${money(selectedTotal)}", Modifier.padding(horizontal = 16.dp, vertical = 2.dp), fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    if (historyBills.isEmpty()) {
+                        Text("Không có bill theo bộ lọc", Modifier.padding(20.dp))
+                    } else {
+                        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+                            items(historyBills, key = { it.id }) { bill ->
+                                val p = payments.firstOrNull { it.billId == bill.id }
+                                Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        if (current?.role == "ADMIN") {
+                                            Checkbox(
+                                                checked = bill.id in selectedBillIds,
+                                                onCheckedChange = { checked ->
+                                                    selectedBillIds = if (checked) selectedBillIds + bill.id else selectedBillIds - bill.id
+                                                }
+                                            )
+                                        }
+                                        Column(
+                                            Modifier.weight(1f).clickable { selectedBill = bill }.padding(4.dp)
+                                        ) {
+                                            Text(bill.billNo, fontWeight = FontWeight.Bold)
+                                            Text("${bill.closedAt?.let { time(it) } ?: "--"} · ${money(bill.total)}")
+                                            Text(if (p?.method == "TRANSFER") "Chuyển khoản" else "Tiền mặt", fontSize = 12.sp)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1791,13 +1853,9 @@ fun Report(vm: PosViewModel) {
                     Text("Chưa có phiếu nhập trong kỳ đã chọn", Modifier.padding(20.dp))
                 } else {
                     LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
-                        item {
-                            Text("Tổng nhập: ${money(purchaseTotal)}", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                        }
+                        item { Text("Tổng nhập: ${money(purchaseTotal)}", fontSize = 22.sp, fontWeight = FontWeight.Bold) }
                         items(filteredPurchases) { p ->
-                            Card(
-                                Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { selectedPurchase = p }
-                            ) {
+                            Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { selectedPurchase = p }) {
                                 Column(Modifier.padding(14.dp)) {
                                     Text(time(p.purchasedAt), fontWeight = FontWeight.Bold)
                                     Text(money(p.total))
@@ -1816,6 +1874,37 @@ fun Report(vm: PosViewModel) {
     }
     selectedPurchase?.let { p ->
         PurchaseDetailDialog(vm, p) { selectedPurchase = null }
+    }
+
+    if (showBulkDelete) {
+        AlertDialog(
+            onDismissRequest = { showBulkDelete = false },
+            title = { Text("XÓA ${selectedBills.size} BILL") },
+            text = {
+                Column {
+                    Text("Tổng giá trị sẽ loại khỏi doanh thu: ${money(selectedTotal)}", fontWeight = FontWeight.Black)
+                    Text("Bill sẽ chuyển sang DELETED, không còn tính doanh thu/tiền mặt/chuyển khoản/thống kê món.")
+                    OutlinedTextField(
+                        value = bulkDeleteReason,
+                        onValueChange = { bulkDeleteReason = it },
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                        label = { Text("Lý do xóa bắt buộc") }
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.deleteBills(selectedBills, bulkDeleteReason)
+                        selectedBillIds = emptySet()
+                        bulkDeleteReason = ""
+                        showBulkDelete = false
+                    },
+                    enabled = selectedBills.isNotEmpty() && bulkDeleteReason.isNotBlank()
+                ) { Text("XÁC NHẬN XÓA") }
+            },
+            dismissButton = { TextButton(onClick = { showBulkDelete = false }) { Text("HỦY") } }
+        )
     }
 }
 
