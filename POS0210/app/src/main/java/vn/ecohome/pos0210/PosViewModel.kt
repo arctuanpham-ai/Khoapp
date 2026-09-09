@@ -261,30 +261,55 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
   val e=currentEmployee.value?:return
   if(!e.canSendKitchen&&e.role!="ADMIN")return
   viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
-   if(printerMode()!="BLUETOOTH"){
-    val job=repo.queueKitchenPrint(b)
-    dao.markPrintSuccess(job.id,System.currentTimeMillis())
-    dao.transitionBatch(b.id,"DRAFT","WAITING",System.currentTimeMillis())
-    audit("PRINT",b.id,"KITCHEN_TEST_CONFIRMED","operator=${e.name}")
-    printerMessage.value="TEST · Đã xác nhận phiếu bếp"
+   val job=repo.queueKitchenPrint(b)
+   if(job.status=="PRINTED"){
+    printerMessage.value="ĐƠN #${b.sequence} ĐÃ IN · Không in lặp"
+    if(b.status=="DRAFT") dao.transitionBatch(b.id,"DRAFT","WAITING",job.printedAt ?: System.currentTimeMillis())
     return@launch
    }
+   if(job.status=="CLAIMED"){
+    printerMessage.value="ĐƠN #${b.sequence} ĐANG ĐƯỢC XỬ LÝ"
+    return@launch
+   }
+   val expected=if(job.status=="FAILED")"FAILED" else "PENDING"
+   if(!repo.claimPrint(job.id,"ANDROID",expected)){
+    printerMessage.value="ĐƠN #${b.sequence} ĐÃ ĐƯỢC THIẾT BỊ KHÁC NHẬN IN"
+    return@launch
+   }
+
+   if(printerMode()!="BLUETOOTH"){
+    val now=System.currentTimeMillis()
+    if(repo.finalizeKitchenPrint(job.id,b.id,now)){
+     audit("PRINT",b.id,"KITCHEN_TEST_CONFIRMED","operator=${e.name},job=${job.id}")
+     printerMessage.value="TEST · Đã xác nhận phiếu bếp #${b.serviceNo.toString().padStart(3,'0')}"
+     autoBackup()
+    }
+    return@launch
+   }
+
    val mac=printerMac()
-   if(mac.isBlank()){printerMessage.value="Chưa chọn máy in XP-N58H";return@launch}
+   if(mac.isBlank()){
+    repo.failKitchenPrint(job.id,"NO_PRINTER_SELECTED")
+    printerMessage.value="Chưa chọn máy in XP-N58H"
+    return@launch
+   }
    val table=currentTable.value?.name ?: "Bàn"
    val items=dao.batchItems(b.id).first().map{it.itemNameSnapshot to it.qty}
-   val job=repo.queueKitchenPrint(b)
-   printerMessage.value="Đang in Đơn #${b.sequence}..."
+   printerMessage.value="Đang in #${b.serviceNo.toString().padStart(3,'0')} · Đơn #${b.sequence}..."
    val result=BluetoothPrinter.printBitmap(getApplication(),mac,ReceiptRenderer.kitchen(table,b.sequence,b.serviceNo,e.name,items))
    if(result.isSuccess){
-    dao.markPrintSuccess(job.id,System.currentTimeMillis())
-    dao.transitionBatch(b.id,"DRAFT","WAITING",System.currentTimeMillis())
-    audit("PRINT",b.id,"KITCHEN_PRINTED","printer=${printerName()},operator=${e.name}")
-    printerMessage.value="ĐÃ IN · Đơn #${b.sequence}"
+    val now=System.currentTimeMillis()
+    if(repo.finalizeKitchenPrint(job.id,b.id,now)){
+     audit("PRINT",b.id,"KITCHEN_PRINTED","printer=${printerName()},operator=${e.name},job=${job.id}")
+     printerMessage.value="ĐÃ IN #${b.serviceNo.toString().padStart(3,'0')} · Đơn #${b.sequence}"
+     autoBackup()
+    }else{
+     printerMessage.value="Máy đã in nhưng không chốt được trạng thái PrintJob · Kiểm tra nhật ký"
+    }
    }else{
-    dao.markPrintFailed(job.id,result.exceptionOrNull()?.message ?: "UNKNOWN")
-    audit("PRINT",b.id,"KITCHEN_PRINT_FAILED","printer=${printerName()}")
-    printerMessage.value="IN THẤT BẠI · ${result.exceptionOrNull()?.message ?: "Thử lại"}"
+    repo.failKitchenPrint(job.id,result.exceptionOrNull()?.message ?: "UNKNOWN")
+    audit("PRINT",b.id,"KITCHEN_PRINT_FAILED","printer=${printerName()},job=${job.id}")
+    printerMessage.value="IN THẤT BẠI · Có thể bấm lại để retry"
    }
   }
  }
@@ -431,38 +456,31 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
   val table=currentTable.value
   if(!employee.canCheckout&&employee.role!="ADMIN")return
   viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
-   val normalizedPhone=customerPhone.filter(Char::isDigit).take(15)
-   val customer=if(normalizedPhone.isBlank())null else{
-    dao.customerByPhone(normalizedPhone) ?: CustomerEntity(UUID.randomUUID().toString(),normalizedPhone,customerName.trim(),"MEMBER",0,0,0,null,true,false).also{dao.saveCustomer(it)}
+   val commit=runCatching {
+    repo.completePayment(
+     session=session,
+     preview=preview,
+     method=method,
+     cashierId=employee.id,
+     billNo="0210-${System.currentTimeMillis().toString().takeLast(6)}",
+     customerPhone=customerPhone,
+     customerName=customerName,
+     autoTier=setting("loyalty_auto_tier").ifBlank{"true"}.toBoolean(),
+     vipMinPoints=setting("vip_min_points").toIntOrNull() ?: 200,
+     vvipMinPoints=setting("vvip_min_points").toIntOrNull() ?: 500
+    )
+   }.getOrElse { err ->
+    printerMessage.value=if(err.message=="SESSION_ALREADY_CLOSED_OR_CHANGED")
+     "BILL ĐÃ ĐƯỢC THANH TOÁN / BÀN ĐÃ ĐÓNG · Không ghi bill lần 2"
+    else "THANH TOÁN LỖI · ${err.message ?: "UNKNOWN"}"
+    return@launch
    }
-   val bill=repo.closeAndPay(session,preview.subtotal,preview.total,method,employee.id,"0210-${System.currentTimeMillis().toString().takeLast(6)}",customer?.id)
-   var pointsBefore=customer?.points ?: 0
-   var pointsEarned=0
-   var pointsAfter=pointsBefore
-   var receiptTier:String?=customer?.tier
-   customer?.let{cu->
-    pointsEarned=(preview.total/10000L).toInt()
-    pointsAfter=pointsBefore+pointsEarned
-    val autoTier=setting("loyalty_auto_tier").ifBlank{"true"}.toBoolean()
-    val newTier=if(cu.tierManual||!autoTier)cu.tier else autoTierFor(pointsAfter)
-    dao.updateCustomerStats(cu.id,pointsEarned,preview.total,1,System.currentTimeMillis())
-    if(newTier!=cu.tier)dao.saveCustomer(cu.copy(tier=newTier,points=pointsAfter,totalSpend=cu.totalSpend+preview.total,visitCount=cu.visitCount+1,lastVisitAt=System.currentTimeMillis()))
-    receiptTier=newTier
-    if(pointsEarned>0){
-     dao.insertCustomerPoint(CustomerPointTransactionEntity(UUID.randomUUID().toString(),cu.id,bill.id,pointsEarned,"TÍCH ĐIỂM ${bill.billNo}",System.currentTimeMillis(),employee.id))
-    }
-    audit("CUSTOMER",cu.id,"VISIT","bill=${bill.billNo},spend=${preview.total},points=$pointsEarned,tier=$newTier")
-   }
-   val now=System.currentTimeMillis()
-   val adjustments=mutableListOf<BillAdjustmentEntity>()
-   preview.surchargeRules.forEach{rule->
-    val amount=(preview.subtotal*rule.percent/100L)
-    adjustments.add(BillAdjustmentEntity(UUID.randomUUID().toString(),bill.id,rule.id,rule.name,"SURCHARGE",rule.percent,amount,rule.code,now,employee.id))
-   }
-   preview.discountRule?.let{rule->
-    adjustments.add(BillAdjustmentEntity(UUID.randomUUID().toString(),bill.id,rule.id,rule.name,"DISCOUNT",rule.percent,preview.discount,rule.code,now,employee.id))
-   }
-   if(adjustments.isNotEmpty())dao.insertBillAdjustments(adjustments)
+   val bill=commit.bill
+   val customer=commit.customer
+   val pointsBefore=commit.pointsBefore
+   val pointsEarned=commit.pointsEarned
+   val pointsAfter=commit.pointsAfter
+   val receiptTier=commit.tier
    autoBackup()
    if(printerMode()=="BLUETOOTH"&&printerMac().isNotBlank()){
     val bs=dao.batches(session.id).first().filter{it.status!="CANCELLED"}
@@ -496,15 +514,17 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
     )
     val job=PrintJobEntity(java.util.UUID.randomUUID().toString(),null,bill.id,"BILL",createdAt=System.currentTimeMillis())
     dao.insertPrintJob(job)
-    val pr=BluetoothPrinter.printBitmap(getApplication(),printerMac(),bmp)
-    if(pr.isSuccess){
-     dao.markPrintSuccess(job.id,System.currentTimeMillis())
-     audit("PRINT",bill.id,"BILL_PRINTED","printer=${printerName()}")
-     printerMessage.value="ĐÃ IN BILL · ${bill.billNo}"
-    }else{
-     dao.markPrintFailed(job.id,pr.exceptionOrNull()?.message ?: "UNKNOWN")
-     audit("PRINT",bill.id,"BILL_PRINT_FAILED","printer=${printerName()}")
-     printerMessage.value="ĐÃ THANH TOÁN · IN BILL LỖI: ${pr.exceptionOrNull()?.message ?: "Thử in lại"}"
+    if(repo.claimPrint(job.id,"ANDROID")){
+     val pr=BluetoothPrinter.printBitmap(getApplication(),printerMac(),bmp)
+     if(pr.isSuccess){
+      dao.markPrintSuccess(job.id,System.currentTimeMillis())
+      audit("PRINT",bill.id,"BILL_PRINTED","printer=${printerName()},job=${job.id}")
+      printerMessage.value="ĐÃ IN BILL · ${bill.billNo}"
+     }else{
+      dao.markPrintFailed(job.id,pr.exceptionOrNull()?.message ?: "UNKNOWN")
+      audit("PRINT",bill.id,"BILL_PRINT_FAILED","printer=${printerName()},job=${job.id}")
+      printerMessage.value="ĐÃ THANH TOÁN · IN BILL LỖI: ${pr.exceptionOrNull()?.message ?: "Thử in lại"}"
+     }
     }
    }
    currentSession.value=null
