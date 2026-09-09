@@ -167,13 +167,14 @@ object ReceiptRenderer {
         return crop(b,(y+28).toInt())
     }
 
-    fun kitchen(table:String,sequence:Int,orderer:String,items:List<Pair<String,Int>>):Bitmap{
+    fun kitchen(table:String,sequence:Int,serviceNo:Int,orderer:String,items:List<Pair<String,Int>>):Bitmap{
         val h=260+items.size*55
         val (b,c)=canvas(h)
         var y=45f
         c.drawText("0210",W/2f,y,paint(38f,true,Paint.Align.CENTER));y+=30
         c.drawText("PHIẾU LÀM HÀNG",W/2f,y,paint(30f,true,Paint.Align.CENTER));y+=28
-        c.drawText("${table.uppercase()}  ·  ĐƠN #$sequence",W/2f,y,paint(20f,true,Paint.Align.CENTER));y+=22
+        c.drawText("STT PHỤC VỤ #${serviceNo.toString().padStart(3,'0')}",W/2f,y,paint(24f,true,Paint.Align.CENTER));y+=26
+        c.drawText("${table.uppercase()}  ·  ĐƠN #$sequence",W/2f,y,paint(18f,true,Paint.Align.CENTER));y+=22
         line(c,y);y+=32
         items.forEach{(name,qty)->
             c.drawText("$qty × $name",PAD,y,paint(24f,true));y+=42
