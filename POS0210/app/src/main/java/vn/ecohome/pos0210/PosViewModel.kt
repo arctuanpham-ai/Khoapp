@@ -36,7 +36,37 @@ class PosViewModel(app:Application):AndroidViewModel(app){
   }
  }
  fun addMore(){if(currentSession.value==null||currentTable.value==null)return;cart.value=emptyMap();screen.value="ORDER"}
- fun addTable(a:String){viewModelScope.launch{val n=tables.value.size+1;repo.saveTable(DiningTableEntity(UUID.randomUUID().toString(),a,"Bàn %02d".format(n),n));audit("TABLE",a,"CREATE")}}
+ fun addTable(areaId:String,name:String=""){
+  val e=currentEmployee.value?:return
+  if(e.role!="ADMIN"&&!e.canManageSystem)return
+  viewModelScope.launch{
+   val n=tables.value.size+1
+   val id=UUID.randomUUID().toString()
+   val tableName=name.trim().ifBlank{"Bàn %02d".format(n)}
+   repo.saveTable(DiningTableEntity(id,areaId,tableName,n,true))
+   audit("TABLE",id,"CREATE","name=$tableName,area=$areaId")
+   autoBackup()
+  }
+ }
+ fun updateTable(t:DiningTableEntity,name:String,areaId:String){
+  val e=currentEmployee.value?:return
+  if(e.role!="ADMIN"&&!e.canManageSystem)return
+  viewModelScope.launch{
+   repo.saveTable(t.copy(name=name.trim().ifBlank{t.name},areaId=areaId))
+   audit("TABLE",t.id,"UPDATE","name=$name,area=$areaId")
+   autoBackup()
+  }
+ }
+ fun hideTable(t:DiningTableEntity){
+  val e=currentEmployee.value?:return
+  if(e.role!="ADMIN"&&!e.canManageSystem)return
+  viewModelScope.launch{
+   if(dao.openSessionForTable(t.id)!=null)return@launch
+   repo.saveTable(t.copy(active=false))
+   audit("TABLE",t.id,"HIDE",t.name)
+   autoBackup()
+  }
+ }
  private fun canManageMenu():Boolean{val e=currentEmployee.value?:return false;return e.role=="ADMIN"||e.canManageMenu}
  fun saveMenu(name:String,price:Long,cat:String,imageUri:String?=null){if(!canManageMenu())return;viewModelScope.launch{val id=UUID.randomUUID().toString();repo.saveMenuItem(MenuItemEntity(id,cat,name,price,imageUri,menu.value.size+1));audit("MENU",id,"CREATE",name);autoBackup()}}
  fun setMenuImage(i:MenuItemEntity,uri:String?){if(!canManageMenu())return;viewModelScope.launch{repo.saveMenuItem(i.copy(imageUri=uri));audit("MENU",i.id,"IMAGE");autoBackup()}}

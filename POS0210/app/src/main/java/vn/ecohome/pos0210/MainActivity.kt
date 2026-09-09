@@ -13,6 +13,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -73,6 +76,7 @@ fun App(vm: PosViewModel = viewModel()) {
         "PURCHASE" -> Purchases(vm)
         "VIETQR" -> VietQr(vm)
         "PRINTER" -> Printer(vm)
+        "TABLE_ADMIN" -> TableManager(vm)
         "SETTINGS" -> Settings(vm)
     }
 }
@@ -129,28 +133,72 @@ fun Operator(vm: PosViewModel) {
 fun Tables(vm: PosViewModel) {
     val ts by vm.tables.collectAsState()
     val ss by vm.sessions.collectAsState()
+    val areas by vm.areas.collectAsState()
+
     Column {
         Header()
         Operator(vm)
-        LazyColumn(Modifier.weight(1f).padding(12.dp)) {
-            items(ts) { tb ->
-                val open = ss.firstOrNull { it.tableId == tb.id }
-                Card(
-                    Modifier.fillMaxWidth().height(92.dp).padding(5.dp).clickable { vm.selectTable(tb) },
-                    colors = CardDefaults.cardColors(containerColor = if (open == null) Tint else Occupied)
-                ) {
-                    Column(
-                        Modifier.fillMaxSize(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
+
+        BoxWithConstraints(
+            Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            val count = ts.size.coerceAtLeast(1)
+            val columns = when {
+                count <= 4 -> 2
+                count <= 9 -> 3
+                count <= 16 -> 4
+                else -> 5
+            }
+            val rows = ((count + columns - 1) / columns).coerceAtLeast(1)
+            val rawHeight = (maxHeight - (rows - 1) * 8.dp) / rows
+            val cardHeight = rawHeight.coerceIn(76.dp, 150.dp)
+
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(columns),
+                modifier = Modifier.fillMaxSize(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                gridItems(ts, key = { it.id }) { tb ->
+                    val open = ss.firstOrNull { it.tableId == tb.id }
+                    val areaName = areas.firstOrNull { it.id == tb.areaId }?.name ?: tb.areaId
+                    Card(
+                        Modifier.fillMaxWidth().height(cardHeight).clickable { vm.selectTable(tb) },
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (open == null) Tint else Occupied
+                        )
                     ) {
-                        Text(tb.name, fontWeight = FontWeight.Bold)
-                        Text(if (open == null) "Trống" else "● ĐANG CÓ KHÁCH · ${time(open.openedAt)}")
+                        Column(
+                            Modifier.fillMaxSize().padding(8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                tb.name,
+                                fontWeight = FontWeight.Black,
+                                fontSize = if (columns >= 4) 16.sp else 19.sp
+                            )
+                            Text(areaName, fontSize = if (columns >= 4) 10.sp else 11.sp)
+                            Spacer(Modifier.height(4.dp))
+                            if (open == null) {
+                                Text("Trống", fontSize = if (columns >= 4) 12.sp else 14.sp)
+                            } else {
+                                Text(
+                                    "● CÓ KHÁCH",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = if (columns >= 4) 11.sp else 13.sp
+                                )
+                                if (cardHeight > 95.dp) {
+                                    Text(time(open.openedAt), fontSize = 10.sp)
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
-        Row(Modifier.padding(12.dp)) {
+
+        Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button({ vm.screen.value = "MANAGE" }, Modifier.weight(1f)) { Text("QUẢN LÝ") }
             Button({ vm.screen.value = "REPORT" }, Modifier.weight(1f)) { Text("BÁO CÁO") }
         }
@@ -411,6 +459,9 @@ fun Manage(vm: PosViewModel) {
             if (employee?.role == "ADMIN") {
                 Rowx("Nhân viên", "Thêm · khóa · phân quyền") { vm.screen.value = "EMP" }
             }
+            if (employee?.role == "ADMIN" || employee?.canManageSystem == true) {
+                Rowx("Bàn & khu vực", "Thêm · sửa · Trong nhà / Ngoài trời") { vm.screen.value = "TABLE_ADMIN" }
+            }
             Rowx("Nhập đầu vào", "Ngày giờ thủ công") { vm.screen.value = "PURCHASE" }
             Rowx("VietQR", "Lưu tài khoản · tạo QR") { vm.screen.value = "VIETQR" }
             Rowx("Máy in", "Cấu hình") { vm.screen.value = "PRINTER" }
@@ -453,6 +504,139 @@ fun Manage(vm: PosViewModel) {
             }
         }
     }
+}
+
+@Composable
+fun TableManager(vm: PosViewModel) {
+    val tables by vm.tables.collectAsState()
+    val areas by vm.areas.collectAsState()
+    val sessions by vm.sessions.collectAsState()
+    var editing by remember { mutableStateOf<DiningTableEntity?>(null) }
+    var adding by remember { mutableStateOf(false) }
+
+    Column {
+        Header("Bàn & khu vực") { vm.screen.value = "MANAGE" }
+        Button(
+            onClick = { adding = true },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
+        ) { Text("＋ THÊM BÀN") }
+
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+            items(tables) { t ->
+                val areaName = areas.firstOrNull { it.id == t.areaId }?.name ?: t.areaId
+                val occupied = sessions.any { it.tableId == t.id }
+                Card(
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { editing = t }
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(t.name, fontWeight = FontWeight.Bold)
+                            Text(areaName, fontSize = 12.sp)
+                        }
+                        if (occupied) Text("ĐANG CÓ KHÁCH", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        else Text("SỬA", fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+    }
+
+    if (adding) {
+        TableEditorDialog(
+            initial = null,
+            areas = areas,
+            onDismiss = { adding = false },
+            onSave = { name, areaId ->
+                vm.addTable(areaId, name)
+                adding = false
+            },
+            onHide = null
+        )
+    }
+
+    editing?.let { t ->
+        val occupied = sessions.any { it.tableId == t.id }
+        TableEditorDialog(
+            initial = t,
+            areas = areas,
+            onDismiss = { editing = null },
+            onSave = { name, areaId ->
+                vm.updateTable(t, name, areaId)
+                editing = null
+            },
+            onHide = if (occupied) null else {
+                {
+                    vm.hideTable(t)
+                    editing = null
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun TableEditorDialog(
+    initial: DiningTableEntity?,
+    areas: List<AreaEntity>,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit,
+    onHide: (() -> Unit)?
+) {
+    var name by remember(initial?.id) { mutableStateOf(initial?.name ?: "") }
+    var areaId by remember(initial?.id, areas) {
+        mutableStateOf(initial?.areaId ?: areas.firstOrNull()?.id.orEmpty())
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (initial == null) "Thêm bàn" else "Sửa bàn") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Tên bàn") },
+                    placeholder = { Text("Để trống sẽ tự đặt Bàn xx") }
+                )
+                Spacer(Modifier.height(10.dp))
+                Text("Khu vực", fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    areas.forEach { a ->
+                        FilterChip(
+                            selected = areaId == a.id,
+                            onClick = { areaId = a.id },
+                            label = { Text(a.name) }
+                        )
+                    }
+                }
+                if (initial != null && onHide == null) {
+                    Text(
+                        "Bàn đang có khách nên chưa thể ẩn.",
+                        Modifier.padding(top = 10.dp),
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSave(name, areaId) },
+                enabled = areaId.isNotBlank()
+            ) { Text("LƯU") }
+        },
+        dismissButton = {
+            Row {
+                if (onHide != null) {
+                    TextButton(onClick = onHide) { Text("ẨN BÀN") }
+                }
+                TextButton(onClick = onDismiss) { Text("HỦY") }
+            }
+        }
+    )
 }
 
 @Composable
