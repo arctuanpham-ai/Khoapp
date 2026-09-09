@@ -256,6 +256,17 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  fun deleteBill(bill:BillEntity,reason:String){
   deleteBills(listOf(bill),reason)
  }
+ fun deletePurchase(p:PurchaseEntity,reason:String){
+  val e=currentEmployee.value?:return
+  if(e.role!="ADMIN"||reason.isBlank())return
+  viewModelScope.launch{
+   val changed=dao.softDeletePurchase(p.id)
+   if(changed>0){
+    audit("PURCHASE",p.id,"DELETE_SOFT","reason=${reason.trim()},total=${p.total},admin=${e.name}")
+    autoBackup()
+   }
+  }
+ }
  fun deleteBills(targets:List<BillEntity>,reason:String){
   val e=currentEmployee.value?:return
   if(e.role!="ADMIN"||reason.isBlank()||targets.isEmpty())return
