@@ -1836,6 +1836,10 @@ fun BillDetailDialog(vm: PosViewModel, bill: BillEntity, onDismiss: () -> Unit) 
     val tables by vm.tables.collectAsState()
     val employees by vm.employees.collectAsState()
     val payments by vm.payments.collectAsState()
+    val current by vm.currentEmployee.collectAsState()
+    var showDelete by remember { mutableStateOf(false) }
+    var deleteReason by remember { mutableStateOf("") }
+
     val payment = payments.firstOrNull { it.billId == bill.id }
     val tableName = tables.firstOrNull { it.id == session?.tableId }?.name ?: session?.tableId ?: "?"
     val cashier = employees.firstOrNull { it.id == payment?.cashierId }?.name ?: payment?.cashierId ?: "?"
@@ -1844,6 +1848,11 @@ fun BillDetailDialog(vm: PosViewModel, bill: BillEntity, onDismiss: () -> Unit) 
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { Button(onClick = onDismiss) { Text("ĐÓNG") } },
+        dismissButton = {
+            if (current?.role == "ADMIN") {
+                TextButton(onClick = { showDelete = true }) { Text("XÓA BILL · ADMIN") }
+            }
+        },
         title = { Text("$tableName · ${bill.billNo}") },
         text = {
             LazyColumn {
@@ -1861,6 +1870,37 @@ fun BillDetailDialog(vm: PosViewModel, bill: BillEntity, onDismiss: () -> Unit) 
             }
         }
     )
+
+    if (showDelete) {
+        AlertDialog(
+            onDismissRequest = { showDelete = false },
+            title = { Text("XÓA BILL ${bill.billNo}") },
+            text = {
+                Column {
+                    Text("Bill sẽ bị loại khỏi lịch sử và báo cáo doanh thu nhưng vẫn giữ dấu vết audit.")
+                    OutlinedTextField(
+                        value = deleteReason,
+                        onValueChange = { deleteReason = it },
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                        label = { Text("Lý do xóa bắt buộc") }
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.deleteBill(bill, deleteReason)
+                        showDelete = false
+                        onDismiss()
+                    },
+                    enabled = deleteReason.isNotBlank()
+                ) { Text("XÁC NHẬN XÓA BILL") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDelete = false }) { Text("HỦY") }
+            }
+        )
+    }
 }
 
 @Composable
