@@ -46,6 +46,7 @@ private val Cream = Color(0xFFF6F0E6)
 private val Coffee = Color(0xFF6E432D)
 private val Tint = Color(0xFFF1ECE3)
 private val Occupied = Color(0xFFE7C4AA)
+private val WaitingDelivery = Color(0xFFF2B777)
 
 private fun money(v: Long) = "%,dđ".format(v).replace(',', '.')
 private fun time(v: Long) = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date(v))
@@ -84,6 +85,8 @@ fun App(vm: PosViewModel = viewModel()) {
         "MENU" -> MenuManager(vm)
         "COMBO" -> ComboManager(vm)
         "PRICING" -> PricingManager(vm)
+        "DELIVERY" -> DeliveryQueue(vm)
+        "CUSTOMERS" -> Customers(vm)
         "EMP" -> Employees(vm)
         "PURCHASE" -> Purchases(vm)
         "VIETQR" -> VietQr(vm)
@@ -146,6 +149,7 @@ fun Operator(vm: PosViewModel) {
 fun Tables(vm: PosViewModel) {
     val ts by vm.tables.collectAsState()
     val ss by vm.sessions.collectAsState()
+    val waiting by vm.waitingBatches.collectAsState()
     val areas by vm.areas.collectAsState()
 
     Column {
@@ -183,10 +187,16 @@ fun Tables(vm: PosViewModel) {
                 gridItems(ts, key = { it.id }) { tb ->
                     val open = ss.firstOrNull { it.tableId == tb.id }
                     val areaName = areas.firstOrNull { it.id == tb.areaId }?.name ?: tb.areaId
+                    val waitingForTable = open?.let { s -> waiting.filter { it.sessionId == s.id } } ?: emptyList()
+                    val nextService = waitingForTable.minByOrNull { it.serviceNo }
                     Card(
                         Modifier.fillMaxWidth().height(cardHeight).clickable { vm.selectTable(tb) },
                         colors = CardDefaults.cardColors(
-                            containerColor = if (open == null) Tint else Occupied
+                            containerColor = when {
+                                nextService != null -> WaitingDelivery
+                                open == null -> Tint
+                                else -> Occupied
+                            }
                         )
                     ) {
                         Column(
@@ -209,7 +219,9 @@ fun Tables(vm: PosViewModel) {
                                     fontWeight = FontWeight.Bold,
                                     fontSize = if (columns >= 4) 11.sp else 13.sp
                                 )
-                                if (cardHeight > 95.dp) {
+                                if (nextService != null) {
+                                    Text("#${nextService.serviceNo.toString().padStart(3,'0')} · CHỜ GIAO", fontWeight = FontWeight.Black, fontSize = 11.sp)
+                                } else if (cardHeight > 95.dp) {
                                     Text(time(open.openedAt), fontSize = 10.sp)
                                 }
                             }
@@ -219,6 +231,12 @@ fun Tables(vm: PosViewModel) {
             }
         }
 
+        if (waiting.isNotEmpty()) {
+            Button(
+                onClick = { vm.screen.value = "DELIVERY" },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+            ) { Text("CHỜ GIAO · ${waiting.size} ĐƠN") }
+        }
         Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button({ vm.screen.value = "MANAGE" }, Modifier.weight(1f)) { Text("QUẢN LÝ") }
             Button({ vm.screen.value = "REPORT" }, Modifier.weight(1f)) { Text("BÁO CÁO") }
@@ -352,7 +370,8 @@ fun Sent(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
                         Text(
                             when (b.status) {
                                 "CANCELLED" -> "ĐÃ HỦY"
-                                "SENT" -> "ĐÃ GỬI BẾP"
+                                "WAITING" -> "CHỜ GIAO · #${b.serviceNo.toString().padStart(3,'0')}"
+                                "DELIVERED" -> "ĐÃ GIAO ĐỦ · #${b.serviceNo.toString().padStart(3,'0')}"
                                 else -> b.status
                             }
                         )
@@ -402,8 +421,15 @@ fun Sent(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
             text = {
                 Column {
                     Text("0210 · ${t.name}")
+                    Text("STT phục vụ: #${b.serviceNo.toString().padStart(3,'0')}", fontWeight = FontWeight.Black)
                     its.forEach { Text("${it.qty} × ${it.itemNameSnapshot}") }
-                    if (b.status != "CANCELLED" && (current?.role == "ADMIN" || current?.role == "MANAGER")) {
+                    if (b.status == "WAITING") {
+                        Button(
+                            onClick = { vm.markDelivered(b); pv = null },
+                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                        ) { Text("✓ ĐÃ GIAO ĐỦ") }
+                    }
+                    if (b.status != "CANCELLED" && b.status != "DELIVERED" && (current?.role == "ADMIN" || current?.role == "MANAGER")) {
                         Spacer(Modifier.height(14.dp))
                         OutlinedButton(
                             onClick = { cancelTarget = b; cancelReason = ""; pv = null },
@@ -490,6 +516,11 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
     var method by remember { mutableStateOf("CASH") }
     var codeText by remember { mutableStateOf("") }
     var appliedCode by remember { mutableStateOf("") }
+    val customers by vm.customers.collectAsState()
+    var customerPhone by remember { mutableStateOf("") }
+    var customerName by remember { mutableStateOf("") }
+    val normalizedPhone = customerPhone.filter(Char::isDigit)
+    val matchedCustomer = customers.firstOrNull { it.phone == normalizedPhone }
     val preview = calculatePricing(subtotal, rules, appliedCode)
     val qrInfo = "${setting("qr_prefix").ifBlank { "0210" }} ${t.name}"
     val qrUrl = if (setting("bank_name").isNotBlank() && setting("bank_account").isNotBlank()) {
@@ -528,6 +559,29 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
             if (preview.message.isNotBlank()) Text(preview.message, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Text("Các ưu đãi giảm giá không cộng dồn; hệ thống chỉ chọn mức giảm lớn nhất.", fontSize = 11.sp)
 
+            HorizontalDivider(Modifier.padding(vertical = 10.dp))
+            Text("KHÁCH HÀNG / TÍCH ĐIỂM", fontWeight = FontWeight.Bold)
+            OutlinedTextField(
+                value = customerPhone,
+                onValueChange = { customerPhone = it.filter(Char::isDigit).take(15) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Số điện thoại khách · không bắt buộc") },
+                singleLine = true
+            )
+            if (matchedCustomer != null) {
+                Text("${matchedCustomer.tier} · ${matchedCustomer.points} điểm · ${matchedCustomer.visitCount} lần ghé", fontWeight = FontWeight.Bold)
+                if (matchedCustomer.name.isNotBlank()) Text(matchedCustomer.name)
+            } else if (normalizedPhone.length >= 9) {
+                OutlinedTextField(
+                    value = customerName,
+                    onValueChange = { customerName = it.take(40) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Tên khách mới · tùy chọn") }
+                )
+                Text("Khách mới · sau thanh toán sẽ tạo Member", fontSize = 11.sp)
+            }
+            Text("Tích điểm: 10.000đ thực trả = 1 điểm", fontSize = 11.sp)
+
             Row {
                 FilterChip(method == "CASH", { method = "CASH" }, { Text("TIỀN MẶT") })
                 Spacer(Modifier.width(8.dp))
@@ -547,12 +601,81 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
                 }
             }
         }
-        Button(onClick = { vm.close(method, preview) }, modifier = Modifier.fillMaxWidth().padding(18.dp), enabled = preview.total > 0) {
+        Button(onClick = { vm.close(method, preview, customerPhone, customerName) }, modifier = Modifier.fillMaxWidth().padding(18.dp), enabled = preview.total > 0) {
             Text("XÁC NHẬN THANH TOÁN")
         }
     }
 }
 
+@Composable
+fun DeliveryQueue(vm: PosViewModel) {
+    val waiting by vm.waitingBatches.collectAsState()
+    val sessions by vm.sessions.collectAsState()
+    val tables by vm.tables.collectAsState()
+    Column {
+        Header("Đơn chờ giao") { vm.screen.value = "TABLES" }
+        if (waiting.isEmpty()) {
+            Text("Không còn đơn chờ giao.", Modifier.padding(20.dp))
+        } else {
+            LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
+                items(waiting) { b ->
+                    val session = sessions.firstOrNull { it.id == b.sessionId }
+                    val table = session?.let { s -> tables.firstOrNull { it.id == s.tableId } }
+                    Card(Modifier.fillMaxWidth().padding(vertical = 5.dp), colors = CardDefaults.cardColors(containerColor = WaitingDelivery)) {
+                        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("#${b.serviceNo.toString().padStart(3,'0')} · ${table?.name ?: "Bàn"}", fontSize = 20.sp, fontWeight = FontWeight.Black)
+                                Text("Đơn #${b.sequence} · ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(b.createdAt))}")
+                            }
+                            Button(onClick = { vm.markDelivered(b) }) { Text("ĐÃ GIAO ĐỦ") }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun Customers(vm: PosViewModel) {
+    val customers by vm.customers.collectAsState()
+    var selected by remember { mutableStateOf<CustomerEntity?>(null) }
+    Column {
+        Header("Khách hàng") { vm.screen.value = "MANAGE" }
+        Text("Member · VIP · VVIP", Modifier.padding(horizontal = 16.dp), fontWeight = FontWeight.Bold)
+        LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
+            items(customers) { c ->
+                Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { selected = c }) {
+                    Column(Modifier.padding(14.dp)) {
+                        Text("${c.phone} · ${c.tier}", fontWeight = FontWeight.Black)
+                        if (c.name.isNotBlank()) Text(c.name)
+                        Text("${c.points} điểm · ${c.visitCount} lần ghé · ${money(c.totalSpend)}")
+                    }
+                }
+            }
+        }
+    }
+    selected?.let { c ->
+        AlertDialog(
+            onDismissRequest = { selected = null },
+            title = { Text(c.phone) },
+            text = {
+                Column {
+                    Text("Tổng chi tiêu: ${money(c.totalSpend)}")
+                    Text("Điểm: ${c.points}")
+                    Text("Lượt ghé: ${c.visitCount}")
+                    Text("Hạng khách", Modifier.padding(top = 10.dp), fontWeight = FontWeight.Bold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("MEMBER","VIP","VVIP").forEach { tier ->
+                            FilterChip(c.tier == tier, { vm.setCustomerTier(c,tier); selected = c.copy(tier=tier) }, { Text(tier) })
+                        }
+                    }
+                }
+            },
+            confirmButton = { Button(onClick = { selected = null }) { Text("ĐÓNG") } }
+        )
+    }
+}
 @Composable
 fun Manage(vm: PosViewModel) {
     val employee by vm.currentEmployee.collectAsState()
@@ -569,6 +692,7 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Ưu đãi & điều chỉnh giá", "Mã giảm giá · Happy Hour · phụ thu ngày lễ · thời hạn") { vm.screen.value = "PRICING" }
             }
             if (employee?.role == "ADMIN") {
+                Rowx("Khách hàng", "Member · VIP · VVIP · điểm · tổng chi tiêu") { vm.screen.value = "CUSTOMERS" }
                 Rowx("Nhân viên", "Thêm · khóa · phân quyền") { vm.screen.value = "EMP" }
             }
             if (employee?.role == "ADMIN" || employee?.canManageSystem == true) {
