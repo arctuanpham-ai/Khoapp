@@ -761,12 +761,14 @@ fun LoyaltyConfig(vm: PosViewModel) {
             TierConfigCard("VVIP", vvipPoints, vvipDiscount, { vvipDiscount = it }, vvipPoints) { vvipPoints = it }
             Button(
                 onClick = {
-                    vm.saveSetting("loyalty_auto_tier",autoTier.toString())
-                    vm.saveSetting("member_discount_percent",(memberDiscount.toIntOrNull() ?: 0).coerceIn(0,100).toString())
-                    vm.saveSetting("vip_min_points",(vipPoints.toIntOrNull() ?: 200).coerceAtLeast(0).toString())
-                    vm.saveSetting("vip_discount_percent",(vipDiscount.toIntOrNull() ?: 0).coerceIn(0,100).toString())
-                    vm.saveSetting("vvip_min_points",(vvipPoints.toIntOrNull() ?: 500).coerceAtLeast(0).toString())
-                    vm.saveSetting("vvip_discount_percent",(vvipDiscount.toIntOrNull() ?: 0).coerceIn(0,100).toString())
+                    vm.saveLoyaltyConfig(
+                        autoTier,
+                        memberDiscount.toIntOrNull() ?: 0,
+                        vipPoints.toIntOrNull() ?: 200,
+                        vipDiscount.toIntOrNull() ?: 0,
+                        vvipPoints.toIntOrNull() ?: 500,
+                        vvipDiscount.toIntOrNull() ?: 0
+                    )
                     saved = true
                 },
                 modifier = Modifier.fillMaxWidth().padding(top = 14.dp)
@@ -2355,9 +2357,13 @@ fun BillPrintPreview(vm: PosViewModel) {
 
         HorizontalDivider(Modifier.padding(vertical = 9.dp))
         PrintLine("TẠM TÍNH", money(subtotal), bold = true)
-        PrintLine("ƯU ĐÃI HAPPY10 · -10%", "-${money(discount)}", bold = true)
+        PrintLine("ƯU ĐÃI HẠNG VIP · -10%", "-${money(discount)}", bold = true)
         HorizontalDivider(Modifier.padding(vertical = 9.dp))
         PrintLine("THÀNH TIỀN", money(amount), bold = true, large = true)
+        HorizontalDivider(Modifier.padding(vertical = 9.dp))
+        Text("KHÁCH: ANH NAM", Modifier.fillMaxWidth(), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Text("HẠNG: VIP", Modifier.fillMaxWidth(), fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Text("ĐIỂM: 188 + 12 = 200", Modifier.fillMaxWidth(), fontSize = 16.sp, fontWeight = FontWeight.Bold)
         Text("Thanh toán: CHUYỂN KHOẢN", Modifier.fillMaxWidth(), fontSize = 17.sp)
 
         HorizontalDivider(Modifier.padding(vertical = 9.dp))
