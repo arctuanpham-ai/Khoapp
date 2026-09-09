@@ -31,3 +31,5 @@ data class ItemSaleRow(val name:String,val qty:Int,val sessionId:String)
 data class PurchaseCostRow(val categoryId:String,val amount:Long,val purchasedAt:Long)
 
 data class PricingPreview(val subtotal:Long,val surcharge:Long,val discount:Long,val total:Long,val surchargeRules:List<PricingRuleEntity>,val discountRule:PricingRuleEntity?,val message:String="")
+
+data class CustomerItemStatRow(val customerId:String,val name:String,val qty:Int)
