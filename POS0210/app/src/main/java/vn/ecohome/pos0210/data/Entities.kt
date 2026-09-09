@@ -6,12 +6,16 @@ import androidx.room.PrimaryKey
 @Entity data class AreaEntity(@PrimaryKey val id:String,val name:String,val sortOrder:Int=0,val active:Boolean=true)
 @Entity(indices=[Index("areaId")]) data class DiningTableEntity(@PrimaryKey val id:String,val areaId:String,val name:String,val sortOrder:Int=0,val active:Boolean=true)
 @Entity data class MenuCategoryEntity(@PrimaryKey val id:String,val name:String,val sortOrder:Int=0,val active:Boolean=true)
+@Entity data class ComboEntity(@PrimaryKey val id:String,val name:String,val price:Long,val imageUri:String?=null,val sortOrder:Int=0,val active:Boolean=true)
+@Entity(indices=[Index("comboId"),Index("menuItemId")]) data class ComboItemEntity(@PrimaryKey val id:String,val comboId:String,val menuItemId:String,val qty:Int=1)
 @Entity(indices=[Index("categoryId")]) data class MenuItemEntity(@PrimaryKey val id:String,val categoryId:String,val name:String,val price:Long,val imageUri:String?=null,val sortOrder:Int=0,val active:Boolean=true)
 @Entity(indices=[Index(value=["tableId","status"])]) data class TableSessionEntity(@PrimaryKey val id:String,val tableId:String,val openedAt:Long,val openedBy:String,val status:String="OPEN",val version:Long=1)
 @Entity(indices=[Index("sessionId")]) data class OrderBatchEntity(@PrimaryKey val id:String,val sessionId:String,val sequence:Int,val ordererId:String,val createdAt:Long,val sentAt:Long?=null,val status:String="DRAFT")
 @Entity(indices=[Index("batchId")]) data class OrderItemEntity(@PrimaryKey val id:String,val batchId:String,val menuItemId:String?,val itemNameSnapshot:String,val unitPriceSnapshot:Long,val qty:Int,val note:String="",val adjustmentOfItemId:String?=null)
 @Entity(indices=[Index("sessionId")]) data class BillEntity(@PrimaryKey val id:String,val sessionId:String,val billNo:String,val openedAt:Long,val closedAt:Long?,val subtotal:Long,val total:Long,val status:String)
 @Entity(indices=[Index(value=["billId"],unique=true)]) data class PaymentEntity(@PrimaryKey val id:String,val billId:String,val method:String,val amount:Long,val cashierId:String,val paidAt:Long,val reference:String?=null)
+@Entity(indices=[Index("code"),Index("active")]) data class PricingRuleEntity(@PrimaryKey val id:String,val name:String,val code:String="",val kind:String="DISCOUNT",val percent:Int=0,val startAt:Long?=null,val endAt:Long?=null,val startMinute:Int?=null,val endMinute:Int?=null,val autoApply:Boolean=false,val active:Boolean=true)
+@Entity(indices=[Index("billId"),Index("ruleId")]) data class BillAdjustmentEntity(@PrimaryKey val id:String,val billId:String,val ruleId:String?,val name:String,val kind:String,val percent:Int,val amount:Long,val code:String="",val appliedAt:Long,val actorId:String?)
 @Entity data class SupplierEntity(@PrimaryKey val id:String,val name:String,val phone:String="",val note:String="",val active:Boolean=true)
 @Entity(indices=[Index("supplierId"),Index("status")]) data class PurchaseEntity(@PrimaryKey val id:String,val supplierId:String?,val enteredBy:String,val purchasedAt:Long,val total:Long,val note:String="",val invoiceImageUri:String?=null,val status:String="ACTIVE")
 @Entity data class PurchaseCategoryEntity(@PrimaryKey val id:String,val name:String,val defaultUnit:String="lần",val sortOrder:Int=0,val active:Boolean=true)
@@ -23,3 +27,5 @@ import androidx.room.PrimaryKey
 data class ItemSaleRow(val name:String,val qty:Int,val sessionId:String)
 
 data class PurchaseCostRow(val categoryId:String,val amount:Long,val purchasedAt:Long)
+
+data class PricingPreview(val subtotal:Long,val surcharge:Long,val discount:Long,val total:Long,val surchargeRules:List<PricingRuleEntity>,val discountRule:PricingRuleEntity?,val message:String="")
