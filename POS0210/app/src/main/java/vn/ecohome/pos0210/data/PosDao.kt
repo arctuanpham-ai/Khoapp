@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.Flow
 @Query("SELECT COALESCE(SUM(delta),0) FROM CustomerPointTransactionEntity WHERE billId=:billId") suspend fun pointDeltaForBill(billId:String):Int
 @Query("SELECT * FROM PricingRuleEntity ORDER BY name") fun pricingRules():Flow<List<PricingRuleEntity>>
 @Query("SELECT * FROM PricingRuleEntity WHERE active=1") suspend fun activePricingRulesSnapshot():List<PricingRuleEntity>
+@Query("SELECT * FROM PricingRuleEntity ORDER BY name") suspend fun allPricingRulesSnapshot():List<PricingRuleEntity>
 @Query("SELECT * FROM BillAdjustmentEntity ORDER BY appliedAt DESC") fun billAdjustments():Flow<List<BillAdjustmentEntity>>
 @Query("SELECT oi.itemNameSnapshot AS name, oi.qty AS qty, ob.sessionId AS sessionId FROM OrderItemEntity oi INNER JOIN OrderBatchEntity ob ON ob.id=oi.batchId INNER JOIN BillEntity b ON b.sessionId=ob.sessionId WHERE b.status='PAID' AND ob.status!='CANCELLED'") fun paidItemSales():Flow<List<ItemSaleRow>>
 @Query("SELECT * FROM PurchaseEntity WHERE status='ACTIVE' ORDER BY purchasedAt DESC") fun purchases():Flow<List<PurchaseEntity>>
