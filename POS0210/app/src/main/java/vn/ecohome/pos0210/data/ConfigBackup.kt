@@ -12,7 +12,7 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 object ConfigBackup {
-    private const val CONFIG_VERSION = 2
+    private const val CONFIG_VERSION = 3
     private const val MASTER_NAME = "POS0210_MASTER.0210"
 
     fun exportConfig(context: Context, uri: Uri): Result<Unit> = runCatching {
@@ -28,7 +28,7 @@ object ConfigBackup {
                 dao.allComboItemsSnapshot(),
                 dao.allEmployeesSnapshot(),
                 dao.allPurchaseCategoriesSnapshot(),
-                dao.activePricingRulesSnapshot(),
+                dao.allPricingRulesSnapshot(),
                 dao.allSettingsSnapshot()
             )
         }
@@ -80,10 +80,18 @@ object ConfigBackup {
         root.put("menu", menuArray)
         root.put("combos", JSONArray().apply {
             snapshot.combos.forEach { combo ->
-                put(JSONObject().apply {
+                val obj = JSONObject().apply {
                     put("id", combo.id); put("name", combo.name); put("price", combo.price)
-                    put("imageUri", combo.imageUri ?: ""); put("sortOrder", combo.sortOrder); put("active", combo.active)
-                })
+                    put("sortOrder", combo.sortOrder); put("active", combo.active)
+                }
+                if (!combo.imageUri.isNullOrBlank()) {
+                    val imageUri = Uri.parse(combo.imageUri)
+                    val ext = imageUri.lastPathSegment?.substringAfterLast('.', "")?.takeIf { it.length in 2..5 } ?: "jpg"
+                    val entry = "images/combo_${combo.id}.$ext"
+                    obj.put("imageEntry", entry)
+                    imageEntries[entry] = imageUri
+                }
+                put(obj)
             }
         })
         root.put("comboItems", JSONArray().apply {
@@ -240,12 +248,15 @@ object ConfigBackup {
                     )
                 }
                 root.optJSONArray("combos")?.forEachObject { o ->
+                    val entry = o.optString("imageEntry", "")
+                    val localUri = extracted[entry]?.let { Uri.fromFile(it).toString() }
+                        ?: o.optString("imageUri", "").ifBlank { null }
                     dao.saveCombo(
                         ComboEntity(
                             id = o.getString("id"),
                             name = o.getString("name"),
                             price = o.getLong("price"),
-                            imageUri = o.optString("imageUri", "").ifBlank { null },
+                            imageUri = localUri,
                             sortOrder = o.optInt("sortOrder"),
                             active = o.optBoolean("active", true)
                         )
