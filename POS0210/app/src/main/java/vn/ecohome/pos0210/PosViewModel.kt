@@ -7,11 +7,13 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import vn.ecohome.pos0210.data.*
 import vn.ecohome.pos0210.printing.PrinterText
+import vn.ecohome.pos0210.printing.BluetoothPrinter
+import vn.ecohome.pos0210.printing.ReceiptRenderer
 import java.util.UUID
 class PosViewModel(app:Application):AndroidViewModel(app){
  private val db=PosDatabase.get(app);private val repo=PosRepository(db);private val dao=db.dao()
  val areas=repo.areas().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val tables=repo.tables().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val categories=repo.categories().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val menu=repo.menuItems().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val employees=repo.employees().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val sessions=repo.openSessions().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val bills=repo.paidBills().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val suppliers=dao.suppliers().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val purchases=dao.purchases().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val purchaseCategories=dao.purchaseCategories().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val payments=dao.payments().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val settings=dao.settings().stateIn(viewModelScope,SharingStarted.Eagerly,emptyList());val printJobs=dao.printJobs().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val audits=dao.audits().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val itemSales=dao.paidItemSales().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList())
- val cart=MutableStateFlow<Map<String,Int>>(emptyMap());val currentTable=MutableStateFlow<DiningTableEntity?>(null);val currentSession=MutableStateFlow<TableSessionEntity?>(null);val currentEmployee=MutableStateFlow<EmployeeEntity?>(null);val authError=MutableStateFlow("");val screen=MutableStateFlow("LOGIN");val printerPreview=MutableStateFlow("")
+ val cart=MutableStateFlow<Map<String,Int>>(emptyMap());val currentTable=MutableStateFlow<DiningTableEntity?>(null);val currentSession=MutableStateFlow<TableSessionEntity?>(null);val currentEmployee=MutableStateFlow<EmployeeEntity?>(null);val authError=MutableStateFlow("");val screen=MutableStateFlow("LOGIN");val printerPreview=MutableStateFlow("");val printerMessage=MutableStateFlow("")
  init{viewModelScope.launch{bootstrap()}}
  private suspend fun bootstrap(){
   if(dao.areas().first().isNotEmpty())return
@@ -37,6 +39,25 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  fun previewBill(){printerPreview.value="BILL"}
  fun previewCancel(){printerPreview.value="CANCEL"}
  fun clearPrinterPreview(){printerPreview.value=""}
+ private fun printerMode()=setting("printer_mode").ifBlank{"TEST"}
+ private fun printerMac()=setting("printer_mac")
+ private fun printerName()=setting("printer_name").ifBlank{BluetoothPrinter.PROFILE_NAME}
+ private fun qrUrl(amount:Long,info:String):String{
+  val bank=setting("bank_name").trim().replace(" ","")
+  val account=setting("bank_account").trim()
+  if(bank.isBlank()||account.isBlank())return ""
+  return "https://img.vietqr.io/image/${Uri.encode(bank)}-${Uri.encode(account)}-compact2.png?amount=$amount&addInfo=${Uri.encode(info.take(50))}&accountName=${Uri.encode(setting("bank_holder").trim())}"
+ }
+ fun testBluetoothPrint(){
+  viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
+   if(printerMode()!="BLUETOOTH"){printerMessage.value="Hãy chọn chế độ BLUETOOTH trước";return@launch}
+   if(printerMac().isBlank()){printerMessage.value="Chưa chọn máy in Bluetooth";return@launch}
+   printerMessage.value="Đang in thử..."
+   val qr=qrUrl(135000,"0210 TEST").takeIf{it.isNotBlank()}?.let{BluetoothPrinter.downloadBitmap(it)}
+   val result=BluetoothPrinter.printBitmap(getApplication(),printerMac(),ReceiptRenderer.sampleBill(qr))
+   printerMessage.value=if(result.isSuccess)"IN THỬ THÀNH CÔNG · ${printerName()}" else "IN THỬ LỖI: ${result.exceptionOrNull()?.message}"
+  }
+ }
  fun add(i:MenuItemEntity){cart.value=cart.value.toMutableMap().apply{put(i.id,(get(i.id)?:0)+1)}};fun sub(i:MenuItemEntity){cart.value=cart.value.toMutableMap().apply{val q=get(i.id)?:0;if(q<=1)remove(i.id)else put(i.id,q-1)}}
  fun selectTable(t:DiningTableEntity){
   val e=currentEmployee.value?:return
@@ -159,9 +180,54 @@ class PosViewModel(app:Application):AndroidViewModel(app){
    screen.value="SENT"
   }
  }
- fun markBatchSent(b:OrderBatchEntity){val e=currentEmployee.value?:return;if(!e.canSendKitchen&&e.role!="ADMIN")return;viewModelScope.launch{repo.queueKitchenPrint(b);dao.transitionBatch(b.id,"DRAFT","SENT",System.currentTimeMillis());audit("PRINT",b.id,"KITCHEN_CONFIRMED","operator=${e.name}")}}
+ fun markBatchSent(b:OrderBatchEntity){
+  val e=currentEmployee.value?:return
+  if(!e.canSendKitchen&&e.role!="ADMIN")return
+  viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
+   if(printerMode()!="BLUETOOTH"){
+    val job=repo.queueKitchenPrint(b)
+    dao.markPrintSuccess(job.id,System.currentTimeMillis())
+    dao.transitionBatch(b.id,"DRAFT","SENT",System.currentTimeMillis())
+    audit("PRINT",b.id,"KITCHEN_TEST_CONFIRMED","operator=${e.name}")
+    printerMessage.value="TEST · Đã xác nhận phiếu bếp"
+    return@launch
+   }
+   val mac=printerMac()
+   if(mac.isBlank()){printerMessage.value="Chưa chọn máy in XP-N58H";return@launch}
+   val table=currentTable.value?.name ?: "Bàn"
+   val items=dao.batchItems(b.id).first().map{it.itemNameSnapshot to it.qty}
+   val job=repo.queueKitchenPrint(b)
+   printerMessage.value="Đang in Đơn #${b.sequence}..."
+   val result=BluetoothPrinter.printBitmap(getApplication(),mac,ReceiptRenderer.kitchen(table,b.sequence,e.name,items))
+   if(result.isSuccess){
+    dao.markPrintSuccess(job.id,System.currentTimeMillis())
+    dao.transitionBatch(b.id,"DRAFT","SENT",System.currentTimeMillis())
+    audit("PRINT",b.id,"KITCHEN_PRINTED","printer=${printerName()},operator=${e.name}")
+    printerMessage.value="ĐÃ IN · Đơn #${b.sequence}"
+   }else{
+    dao.markPrintFailed(job.id,result.exceptionOrNull()?.message ?: "UNKNOWN")
+    audit("PRINT",b.id,"KITCHEN_PRINT_FAILED","printer=${printerName()}")
+    printerMessage.value="IN THẤT BẠI · ${result.exceptionOrNull()?.message ?: "Thử lại"}"
+   }
+  }
+ }
  fun canCancelOrder():Boolean{val r=currentEmployee.value?.role?:return false;return r=="ADMIN"||r=="MANAGER"}
- fun cancelBatch(b:OrderBatchEntity,reason:String){val e=currentEmployee.value?:return;if(e.role!="ADMIN"&&e.role!="MANAGER")return;if(reason.isBlank())return;viewModelScope.launch{if(dao.cancelBatch(b.id)>0){audit("BATCH",b.id,"CANCELLED","reason=${reason.trim()},operator=${e.name}");autoBackup()}}}
+ fun cancelBatch(b:OrderBatchEntity,reason:String){
+  val e=currentEmployee.value?:return
+  if(e.role!="ADMIN"&&e.role!="MANAGER")return
+  if(reason.isBlank())return
+  viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
+   if(dao.cancelBatch(b.id)>0){
+    audit("BATCH",b.id,"CANCELLED","reason=${reason.trim()},operator=${e.name}")
+    autoBackup()
+    if(printerMode()=="BLUETOOTH"&&printerMac().isNotBlank()){
+     val table=currentTable.value?.name ?: "Bàn"
+     val pr=BluetoothPrinter.printBitmap(getApplication(),printerMac(),ReceiptRenderer.cancel(table,b.sequence,e.name,reason.trim()))
+     printerMessage.value=if(pr.isSuccess)"ĐÃ IN PHIẾU HỦY · Đơn #${b.sequence}" else "ĐÃ HỦY ĐƠN · In phiếu hủy lỗi: ${pr.exceptionOrNull()?.message}"
+    }
+   }
+  }
+ }
  fun releaseCancelledTable(){
   val s=currentSession.value?:return
   val e=currentEmployee.value?:return
