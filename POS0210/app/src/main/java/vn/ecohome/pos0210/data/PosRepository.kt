@@ -21,9 +21,20 @@ class PosRepository(private val db:PosDatabase){
     }
 
     suspend fun createBatch(sessionId:String,sequence:Int,ordererId:String,items:List<OrderItemEntity>):OrderBatchEntity {
-        val now=System.currentTimeMillis(); val b=OrderBatchEntity(UUID.randomUUID().toString(),sessionId,sequence,ordererId,now)
-        val fixed=items.map{it.copy(id=if(it.id.isBlank()) UUID.randomUUID().toString() else it.id,batchId=b.id)}
-        db.withTransaction { dao.insertBatch(b); dao.insertItems(fixed); dao.audit(AuditEventEntity(UUID.randomUUID().toString(),"BATCH",b.id,"CREATE",ordererId,null,now,"items=${fixed.size}")) }
+        val now=System.currentTimeMillis()
+        val cal=java.util.Calendar.getInstance().apply{
+            timeInMillis=now
+            set(java.util.Calendar.HOUR_OF_DAY,0);set(java.util.Calendar.MINUTE,0);set(java.util.Calendar.SECOND,0);set(java.util.Calendar.MILLISECOND,0)
+        }
+        lateinit var b:OrderBatchEntity
+        db.withTransaction {
+            val serviceNo=dao.maxServiceNoSince(cal.timeInMillis)+1
+            b=OrderBatchEntity(UUID.randomUUID().toString(),sessionId,sequence,ordererId,now,serviceNo=serviceNo)
+            val fixed=items.map{it.copy(id=if(it.id.isBlank()) UUID.randomUUID().toString() else it.id,batchId=b.id)}
+            dao.insertBatch(b)
+            dao.insertItems(fixed)
+            dao.audit(AuditEventEntity(UUID.randomUUID().toString(),"BATCH",b.id,"CREATE",ordererId,null,now,"serviceNo=$serviceNo,items=${fixed.size}"))
+        }
         return b
     }
 
@@ -34,8 +45,8 @@ class PosRepository(private val db:PosDatabase){
 
     suspend fun claimPrint(jobId:String,deviceId:String)=dao.claimPrint(jobId,"PENDING","CLAIMED",deviceId)==1
 
-    suspend fun closeAndPay(session:TableSessionEntity,subtotal:Long,total:Long,method:String,cashierId:String,billNo:String):BillEntity {
-        val now=System.currentTimeMillis(); val bill=BillEntity(UUID.randomUUID().toString(),session.id,billNo,session.openedAt,now,subtotal,total,"PAID")
+    suspend fun closeAndPay(session:TableSessionEntity,subtotal:Long,total:Long,method:String,cashierId:String,billNo:String,customerId:String?=null):BillEntity {
+        val now=System.currentTimeMillis(); val bill=BillEntity(UUID.randomUUID().toString(),session.id,billNo,session.openedAt,now,subtotal,total,"PAID",customerId)
         db.withTransaction {
             if(dao.closeSession(session.id,session.version)!=1) error("SESSION_ALREADY_CLOSED_OR_CHANGED")
             dao.insertBill(bill)
