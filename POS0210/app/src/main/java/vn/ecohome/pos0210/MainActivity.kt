@@ -599,14 +599,23 @@ fun BackupCenter(vm: PosViewModel) {
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        "Sau cài mới/reinstall, chọn Download một lần. App sẽ tìm/tạo chính xác:\n" +
-                        "POS0210/CONFIG\nPOS0210/DATA\nPOS0210/ARCHIVE",
+                        "Android không cho chọn trực tiếp thư mục gốc Download. App sẽ tự tạo trước:\n" +
+                        "Download/POS0210/CONFIG\nDownload/POS0210/DATA\nDownload/POS0210/ARCHIVE\n" +
+                        "Sau đó hãy mở Download → POS0210 và chọn chính thư mục POS0210.",
                         fontSize = 13.sp
                     )
                     Button(
-                        onClick = { chooseRoot.launch(null) },
+                        onClick = {
+                            val prep = PosStorage.ensureFolders(context)
+                            if (prep.isSuccess) {
+                                message = "Đã tạo/kiểm tra cây Download/POS0210. Hãy chọn chính thư mục POS0210."
+                                chooseRoot.launch(null)
+                            } else {
+                                message = "Không tạo được cây POS0210: ${prep.exceptionOrNull()?.message}"
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                    ) { Text(if (rootUri.isBlank()) "CHỌN NƠI LƯU POS0210" else "ĐỔI / GẮN LẠI NƠI LƯU") }
+                    ) { Text(if (rootUri.isBlank()) "TẠO & GẮN THƯ MỤC POS0210" else "ĐỔI / GẮN LẠI POS0210") }
                 }
             }
 
