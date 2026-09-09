@@ -2,12 +2,15 @@ package vn.ecohome.pos0210.data
 
 import android.content.Context
 import android.net.Uri
-import android.provider.DocumentsContract
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 object DataBackup {
     private const val DB_NAME = "pos0210.db"
-    private const val AUTO_NAME = "POS0210_autoback_latest.db"
+    private const val LATEST_NAME = "POS0210_DATA_LATEST.db"
+    private const val TEMP_NAME = "POS0210_DATA_TEMP.db"
 
     private fun checkpoint(context: Context): File {
         val db = PosDatabase.get(context)
@@ -17,6 +20,28 @@ object DataBackup {
         return source
     }
 
+    private fun validateSqlite(file: File) {
+        val header = ByteArray(16)
+        file.inputStream().use { input -> require(input.read(header) == 16) }
+        require(String(header, Charsets.US_ASCII).startsWith("SQLite format 3")) {
+            "File DATA không hợp lệ"
+        }
+    }
+
+    private fun validateSqlite(context: Context, uri: Uri) {
+        val temp = File(context.cacheDir, "pos0210-validate.tmp")
+        context.contentResolver.openInputStream(uri).use { input ->
+            requireNotNull(input)
+            temp.outputStream().use { output -> input.copyTo(output) }
+        }
+        validateSqlite(temp)
+        temp.delete()
+    }
+
+    fun ensureFolders(context: Context): Result<Unit> = PosStorage.ensureFolders(context)
+
+    fun findLatest(context: Context): Uri? = PosStorage.find(context, PosStorage.DATA_PATH, LATEST_NAME)
+
     fun exportDatabase(context: Context, uri: Uri): Result<Unit> = runCatching {
         val source = checkpoint(context)
         context.contentResolver.openOutputStream(uri, "w").use { out ->
@@ -25,45 +50,37 @@ object DataBackup {
         }
     }
 
-    fun autoBackup(context: Context, treeUriString: String): Result<Unit> = runCatching {
-        require(treeUriString.isNotBlank()) { "Chưa chọn thư mục Autobackup" }
-        val resolver = context.contentResolver
-        val treeUri = Uri.parse(treeUriString)
-        val treeId = DocumentsContract.getTreeDocumentId(treeUri)
-        val parent = DocumentsContract.buildDocumentUriUsingTree(treeUri, treeId)
-        val children = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, treeId)
-
-        resolver.query(
-            children,
-            arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME),
-            null,
-            null,
-            null
-        )?.use { cursor ->
-            val idIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-            val nameIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-            while (cursor.moveToNext()) {
-                if (cursor.getString(nameIndex) == AUTO_NAME) {
-                    val oldUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, cursor.getString(idIndex))
-                    runCatching { DocumentsContract.deleteDocument(resolver, oldUri) }
-                    break
-                }
-            }
-        }
-
-        val target = DocumentsContract.createDocument(
-            resolver,
-            parent,
-            "application/octet-stream",
-            AUTO_NAME
-        ) ?: error("Không tạo được file Autobackup")
-
+    fun backupLatest(context: Context): Result<Uri> = runCatching {
+        PosStorage.ensureFolders(context).getOrThrow()
+        PosStorage.delete(context, PosStorage.find(context, PosStorage.DATA_PATH, TEMP_NAME))
+        val tempUri = PosStorage.create(context, PosStorage.DATA_PATH, TEMP_NAME)
         val source = checkpoint(context)
-        resolver.openOutputStream(target, "w").use { out ->
+        context.contentResolver.openOutputStream(tempUri, "w").use { out ->
             requireNotNull(out)
             source.inputStream().use { input -> input.copyTo(out) }
         }
+        validateSqlite(context, tempUri)
+        PosStorage.delete(context, PosStorage.find(context, PosStorage.DATA_PATH, LATEST_NAME))
+        PosStorage.rename(context, tempUri, LATEST_NAME)
     }
+
+    fun archiveSnapshot(context: Context): Result<Uri> = runCatching {
+        PosStorage.ensureFolders(context).getOrThrow()
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val name = "POS0210_DATA_$stamp.db"
+        val target = PosStorage.create(context, PosStorage.ARCHIVE_PATH, name)
+        exportDatabase(context, target).getOrThrow()
+        validateSqlite(context, target)
+        target
+    }
+
+    fun restoreLatest(context: Context): Result<Unit> = runCatching {
+        val uri = findLatest(context) ?: error("Không tìm thấy POS0210_DATA_LATEST.db")
+        restoreDatabase(context, uri).getOrThrow()
+    }
+
+    fun autoBackup(context: Context, ignored: String = ""): Result<Unit> =
+        backupLatest(context).map { Unit }
 
     fun restoreDatabase(context: Context, uri: Uri): Result<Unit> = runCatching {
         val temp = File(context.cacheDir, "pos0210-restore.tmp")
@@ -71,11 +88,7 @@ object DataBackup {
             requireNotNull(input)
             temp.outputStream().use { output -> input.copyTo(output) }
         }
-        val header = ByteArray(16)
-        temp.inputStream().use { input -> require(input.read(header) == 16) }
-        require(String(header, Charsets.US_ASCII).startsWith("SQLite format 3")) {
-            "File backup không hợp lệ"
-        }
+        validateSqlite(temp)
 
         PosDatabase.closeForRestore()
         val target = context.getDatabasePath(DB_NAME)

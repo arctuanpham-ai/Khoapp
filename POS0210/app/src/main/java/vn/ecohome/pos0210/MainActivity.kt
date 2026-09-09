@@ -521,6 +521,7 @@ fun Manage(vm: PosViewModel) {
 fun BackupCenter(vm: PosViewModel) {
     val context = LocalContext.current
     var message by remember { mutableStateOf("") }
+    var refreshTick by remember { mutableStateOf(0) }
 
     val importMaster = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -529,22 +530,13 @@ fun BackupCenter(vm: PosViewModel) {
                 val copy = ConfigBackup.copyMasterToDownloads(context, uri)
                 Toast.makeText(
                     context,
-                    if (copy.isSuccess) "Đã LOAD MASTER và ghi đè file chuẩn." else "Đã LOAD MASTER nhưng lỗi ghi file chuẩn.",
+                    if (copy.isSuccess) "Đã LOAD MASTER và thay file chuẩn." else "Đã LOAD MASTER nhưng lỗi ghi file chuẩn.",
                     Toast.LENGTH_LONG
                 ).show()
                 android.os.Process.killProcess(android.os.Process.myPid())
             } else {
                 message = "LOAD MASTER lỗi: ${result.exceptionOrNull()?.message}"
             }
-        }
-    }
-
-    val exportBackup = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/octet-stream")
-    ) { uri ->
-        if (uri != null) {
-            val result = DataBackup.exportDatabase(context, uri)
-            message = if (result.isSuccess) "Đã xuất DATA backup thủ công." else "BACKUP lỗi: ${result.exceptionOrNull()?.message}"
         }
     }
 
@@ -560,21 +552,13 @@ fun BackupCenter(vm: PosViewModel) {
         }
     }
 
-    val chooseAutoFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                )
-            }
-            vm.saveSetting("autoback_tree_uri", uri.toString())
-            val result = DataBackup.autoBackup(context, uri.toString())
-            message = if (result.isSuccess) "Autobackup đã bật và vừa ghi DATA mới." else "Autobackup lỗi: ${result.exceptionOrNull()?.message}"
-        }
+    LaunchedEffect(Unit) {
+        PosStorage.ensureFolders(context)
+        refreshTick++
     }
 
-    val autoFolder = vm.setting("autoback_tree_uri")
+    val masterFound = remember(refreshTick) { ConfigBackup.findMasterInDownloads(context) != null }
+    val dataFound = remember(refreshTick) { DataBackup.findLatest(context) != null }
 
     Column {
         Header("Dữ liệu & Backup") { vm.screen.value = "MANAGE" }
@@ -583,24 +567,64 @@ fun BackupCenter(vm: PosViewModel) {
         ) {
             Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                 Column(Modifier.padding(16.dp)) {
+                    Text("HỆ THỐNG THƯ MỤC", fontWeight = FontWeight.Black, fontSize = 20.sp)
+                    Text("App tự tạo thư mục, KHÔNG tự tạo file dữ liệu trắng.", fontSize = 13.sp)
+                    Text(
+                        "Download/POS0210/CONFIG/\nDownload/POS0210/DATA/\nDownload/POS0210/ARCHIVE/",
+                        Modifier.padding(vertical = 8.dp),
+                        fontWeight = FontWeight.Bold
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            val result = PosStorage.ensureFolders(context)
+                            refreshTick++
+                            message = if (result.isSuccess) "Đã kiểm tra/tạo đủ hệ thư mục POS0210." else "Tạo thư mục lỗi: ${result.exceptionOrNull()?.message}"
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("KIỂM TRA / TẠO THƯ MỤC") }
+                }
+            }
+
+            Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                Column(Modifier.padding(16.dp)) {
                     Text("MASTER CONFIG", fontWeight = FontWeight.Black, fontSize = 20.sp)
                     Text("Menu · ảnh món · bàn · nhân viên · VietQR · máy in · phân mục nhập", fontSize = 13.sp)
                     Text(
-                        "File chuẩn duy nhất:\nDownload/POS0210/POS0210_MASTER.0210",
+                        "CONFIG/POS0210_MASTER.0210\nTrạng thái: ${if (masterFound) "ĐÃ TÌM THẤY" else "CHƯA CÓ FILE"}",
                         Modifier.padding(vertical = 8.dp),
                         fontWeight = FontWeight.Bold
                     )
                     Button(
                         onClick = {
                             val result = ConfigBackup.saveMasterToDownloads(context)
-                            message = if (result.isSuccess) "Đã GHI ĐÈ MASTER chuẩn." else "GHI MASTER lỗi: ${result.exceptionOrNull()?.message}"
+                            refreshTick++
+                            message = if (result.isSuccess) "Đã ghi MASTER theo cơ chế TEMP → validate → replace." else "GHI MASTER lỗi: ${result.exceptionOrNull()?.message}"
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("GHI MASTER NGAY") }
+
+                    if (masterFound) {
+                        OutlinedButton(
+                            onClick = {
+                                val uri = ConfigBackup.findMasterInDownloads(context)
+                                if (uri != null) {
+                                    val result = ConfigBackup.importConfig(context, uri)
+                                    if (result.isSuccess) {
+                                        Toast.makeText(context, "Đã LOAD MASTER chuẩn. App sẽ mở lại.", Toast.LENGTH_LONG).show()
+                                        android.os.Process.killProcess(android.os.Process.myPid())
+                                    } else {
+                                        message = "LOAD MASTER chuẩn lỗi: ${result.exceptionOrNull()?.message}"
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                        ) { Text("LOAD MASTER CHUẨN") }
+                    }
+
                     OutlinedButton(
                         onClick = { importMaster.launch(arrayOf("*/*")) },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                    ) { Text("LOAD MASTER TỪ FILE") }
+                    ) { Text("LOAD MASTER TỪ FILE KHÁC") }
                 }
             }
 
@@ -609,39 +633,61 @@ fun BackupCenter(vm: PosViewModel) {
                     Text("DATA VẬN HÀNH", fontWeight = FontWeight.Black, fontSize = 20.sp)
                     Text("Bill · order · thanh toán · nhập hàng · lịch sử · audit", fontSize = 13.sp)
                     Text(
-                        if (autoFolder.isBlank()) "Autobackup: CHƯA BẬT" else "Autobackup: ĐÃ BẬT",
+                        "DATA/POS0210_DATA_LATEST.db\nTrạng thái: ${if (dataFound) "ĐÃ TÌM THẤY" else "CHƯA CÓ FILE"}",
                         Modifier.padding(vertical = 8.dp),
                         fontWeight = FontWeight.Bold
                     )
-                    OutlinedButton(
-                        onClick = { chooseAutoFolder.launch(null) },
+
+                    Button(
+                        onClick = {
+                            val result = DataBackup.backupLatest(context)
+                            refreshTick++
+                            message = if (result.isSuccess) "BACKUP NGAY thành công · DATA_LATEST đã được thay an toàn." else "BACKUP NGAY lỗi: ${result.exceptionOrNull()?.message}"
+                        },
                         modifier = Modifier.fillMaxWidth()
-                    ) { Text("CHỌN THƯ MỤC AUTOBACKUP") }
-
-                    Button(
-                        onClick = {
-                            if (autoFolder.isBlank()) {
-                                message = "Chưa chọn thư mục Autobackup."
-                            } else {
-                                val result = DataBackup.autoBackup(context, autoFolder)
-                                message = if (result.isSuccess) "BACKUP NGAY thành công · POS0210_autoback_latest.db" else "BACKUP NGAY lỗi: ${result.exceptionOrNull()?.message}"
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                    ) { Text("BACKUP NGAY") }
+                    ) { Text("BACKUP NGAY → DATA_LATEST") }
 
                     OutlinedButton(
                         onClick = {
-                            val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
-                            exportBackup.launch("POS0210_backup_$stamp.db")
+                            val result = DataBackup.archiveSnapshot(context)
+                            refreshTick++
+                            message = if (result.isSuccess) "Đã tạo snapshot trong ARCHIVE." else "ARCHIVE lỗi: ${result.exceptionOrNull()?.message}"
                         },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                    ) { Text("LƯU DATA RA FILE...") }
+                    ) { Text("TẠO SNAPSHOT ARCHIVE") }
 
-                    Button(
+                    if (dataFound) {
+                        Button(
+                            onClick = {
+                                val result = DataBackup.restoreLatest(context)
+                                if (result.isSuccess) {
+                                    Toast.makeText(context, "Đã RESTORE DATA_LATEST. App sẽ mở lại.", Toast.LENGTH_LONG).show()
+                                    android.os.Process.killProcess(android.os.Process.myPid())
+                                } else {
+                                    message = "RESTORE DATA_LATEST lỗi: ${result.exceptionOrNull()?.message}"
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                        ) { Text("RESTORE DATA_LATEST") }
+                    }
+
+                    OutlinedButton(
                         onClick = { restoreBackup.launch(arrayOf("application/octet-stream", "*/*")) },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                    ) { Text("RESTORE DATA TỪ FILE") }
+                    ) { Text("RESTORE DATA TỪ FILE KHÁC") }
+                }
+            }
+
+            Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("CÁCH CHUYỂN SANG MÁY KHÁC", fontWeight = FontWeight.Black)
+                    Text(
+                        "1. Cài app để app tạo thư mục.\n" +
+                        "2. Copy MASTER cũ vào CONFIG và DATA cũ vào DATA, ghi đè nếu có.\n" +
+                        "3. Mở Dữ liệu & Backup → LOAD MASTER CHUẨN → RESTORE DATA_LATEST.\n" +
+                        "App không ghi file trắng vào các file này khi khởi động.",
+                        Modifier.padding(top = 8.dp)
+                    )
                 }
             }
 

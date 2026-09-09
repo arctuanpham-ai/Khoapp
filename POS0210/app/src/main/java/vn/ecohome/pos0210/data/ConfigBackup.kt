@@ -16,7 +16,8 @@ import java.util.zip.ZipOutputStream
 object ConfigBackup {
     private const val CONFIG_VERSION = 1
     private const val MASTER_NAME = "POS0210_MASTER.0210"
-    private const val MASTER_PATH = "Download/POS0210/"
+    private const val MASTER_PATH = PosStorage.CONFIG_PATH
+    private const val MASTER_TEMP = "POS0210_MASTER_TEMP.0210"
 
     fun exportConfig(context: Context, uri: Uri): Result<Unit> = runCatching {
         val db = PosDatabase.get(context)
@@ -124,66 +125,33 @@ object ConfigBackup {
     }
 
     fun saveMasterToDownloads(context: Context): Result<Uri> = runCatching {
-        require(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) { "Android này chưa hỗ trợ auto MASTER Downloads" }
-        val resolver = context.contentResolver
-        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        val projection = arrayOf(MediaStore.Downloads._ID)
-        val selection = MediaStore.Downloads.DISPLAY_NAME + "=? AND " + MediaStore.Downloads.RELATIVE_PATH + "=?"
-        val args = arrayOf(MASTER_NAME, MASTER_PATH)
-        var target: Uri? = null
-        resolver.query(collection, projection, selection, args, MediaStore.Downloads.DATE_MODIFIED + " DESC")?.use { c ->
-            if (c.moveToFirst()) target = Uri.withAppendedPath(collection, c.getLong(0).toString())
-        }
-        val outUri = target ?: resolver.insert(
-            collection,
-            android.content.ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, MASTER_NAME)
-                put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
-                put(MediaStore.Downloads.RELATIVE_PATH, MASTER_PATH)
-            }
-        ) ?: error("Không tạo được MASTER chuẩn")
-        exportConfig(context, outUri).getOrThrow()
-        outUri
+        PosStorage.ensureFolders(context).getOrThrow()
+        PosStorage.delete(context, PosStorage.find(context, MASTER_PATH, MASTER_TEMP))
+        val temp = PosStorage.create(context, MASTER_PATH, MASTER_TEMP)
+        exportConfig(context, temp).getOrThrow()
+        validateMaster(context, temp)
+        PosStorage.delete(context, PosStorage.find(context, MASTER_PATH, MASTER_NAME))
+        PosStorage.rename(context, temp, MASTER_NAME)
     }
 
     fun copyMasterToDownloads(context: Context, source: Uri): Result<Uri> = runCatching {
-        require(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) { "Android này chưa hỗ trợ MASTER Downloads" }
-        val resolver = context.contentResolver
-        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        val selection = MediaStore.Downloads.DISPLAY_NAME + "=? AND " + MediaStore.Downloads.RELATIVE_PATH + "=?"
-        val args = arrayOf(MASTER_NAME, MASTER_PATH)
-        var target: Uri? = null
-        resolver.query(collection, arrayOf(MediaStore.Downloads._ID), selection, args, MediaStore.Downloads.DATE_MODIFIED + " DESC")?.use { c ->
-            if (c.moveToFirst()) target = Uri.withAppendedPath(collection, c.getLong(0).toString())
-        }
-        val outUri = target ?: resolver.insert(
-            collection,
-            android.content.ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, MASTER_NAME)
-                put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
-                put(MediaStore.Downloads.RELATIVE_PATH, MASTER_PATH)
-            }
-        ) ?: error("Không tạo được MASTER chuẩn")
-        resolver.openInputStream(source).use { input ->
+        PosStorage.ensureFolders(context).getOrThrow()
+        PosStorage.delete(context, PosStorage.find(context, MASTER_PATH, MASTER_TEMP))
+        val temp = PosStorage.create(context, MASTER_PATH, MASTER_TEMP)
+        context.contentResolver.openInputStream(source).use { input ->
             requireNotNull(input)
-            resolver.openOutputStream(outUri, "w").use { output ->
+            context.contentResolver.openOutputStream(temp, "w").use { output ->
                 requireNotNull(output)
                 input.copyTo(output)
             }
         }
-        outUri
+        validateMaster(context, temp)
+        PosStorage.delete(context, PosStorage.find(context, MASTER_PATH, MASTER_NAME))
+        PosStorage.rename(context, temp, MASTER_NAME)
     }
 
     fun findMasterInDownloads(context: Context): Uri? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
-        val resolver = context.contentResolver
-        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-        val selection = MediaStore.Downloads.DISPLAY_NAME + "=? AND " + MediaStore.Downloads.RELATIVE_PATH + "=?"
-        val args = arrayOf(MASTER_NAME, MASTER_PATH)
-        resolver.query(collection, arrayOf(MediaStore.Downloads._ID), selection, args, MediaStore.Downloads.DATE_MODIFIED + " DESC")?.use { c ->
-            if (c.moveToFirst()) return Uri.withAppendedPath(collection, c.getLong(0).toString())
-        }
-        return null
+        return PosStorage.find(context, MASTER_PATH, MASTER_NAME)
     }
 
     fun autoImportMasterFromDownloads(context: Context): Result<Boolean> = runCatching {
@@ -278,6 +246,25 @@ object ConfigBackup {
                 }
             }
         }
+    }
+
+    private fun validateMaster(context: Context, uri: Uri) {
+        var jsonText: String? = null
+        context.contentResolver.openInputStream(uri).use { raw ->
+            requireNotNull(raw)
+            ZipInputStream(raw).use { zip ->
+                while (true) {
+                    val entry = zip.nextEntry ?: break
+                    if (entry.name == "config.json") {
+                        jsonText = zip.readBytes().toString(Charsets.UTF_8)
+                        break
+                    }
+                    zip.closeEntry()
+                }
+            }
+        }
+        val root = JSONObject(requireNotNull(jsonText) { "MASTER lỗi: thiếu config.json" })
+        require(root.optString("format") == "POS0210_MASTER_CONFIG") { "MASTER không hợp lệ" }
     }
 
     private data class ConfigSnapshot(

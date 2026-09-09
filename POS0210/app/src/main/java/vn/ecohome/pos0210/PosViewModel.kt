@@ -18,6 +18,7 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  val cart=MutableStateFlow<Map<String,Int>>(emptyMap());val currentTable=MutableStateFlow<DiningTableEntity?>(null);val currentSession=MutableStateFlow<TableSessionEntity?>(null);val currentEmployee=MutableStateFlow<EmployeeEntity?>(null);val authError=MutableStateFlow("");val screen=MutableStateFlow("LOGIN");val printerPreview=MutableStateFlow("");val printerMessage=MutableStateFlow("")
  init{viewModelScope.launch{bootstrap()}}
  private suspend fun bootstrap(){
+  PosStorage.ensureFolders(getApplication())
   if(dao.areas().first().isNotEmpty())return
   val restored=ConfigBackup.autoImportMasterFromDownloads(getApplication()).getOrDefault(false)
   if(!restored)seed()
@@ -29,14 +30,11 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  fun login(pin:String){viewModelScope.launch{val e=dao.employeeByPin(pin);if(e==null)authError.value="PIN không đúng" else{currentEmployee.value=e;authError.value="";screen.value="TABLES";audit("AUTH",e.id,"LOGIN")}}};fun logout(){val e=currentEmployee.value;viewModelScope.launch{if(e!=null)audit("AUTH",e.id,"LOGOUT")};currentEmployee.value=null;screen.value="LOGIN"}
  private suspend fun audit(type:String,id:String,action:String,payload:String=""){dao.audit(AuditEventEntity(UUID.randomUUID().toString(),type,id,action,currentEmployee.value?.id,"ANDROID",System.currentTimeMillis(),payload))}
  private fun autoBackup(){
-  val tree=settings.value.firstOrNull{it.key=="autoback_tree_uri"}?.value.orEmpty()
-  if(tree.isNotBlank()) DataBackup.autoBackup(getApplication(),tree)
+  DataBackup.backupLatest(getApplication())
  }
  private suspend fun autoMasterConfig(){
   masterMutex.withLock {
    ConfigBackup.saveMasterToDownloads(getApplication())
-   val uri=dao.allSettingsSnapshot().firstOrNull{it.key=="master_config_uri"}?.value.orEmpty()
-   if(uri.isNotBlank()) ConfigBackup.exportConfig(getApplication(),Uri.parse(uri))
   }
  }
  fun previewKitchen(){printerPreview.value="KITCHEN"}
