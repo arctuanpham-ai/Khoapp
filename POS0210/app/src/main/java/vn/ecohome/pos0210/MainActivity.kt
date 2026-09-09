@@ -522,25 +522,26 @@ fun BackupCenter(vm: PosViewModel) {
     val context = LocalContext.current
     var message by remember { mutableStateOf("") }
     var refreshTick by remember { mutableStateOf(0) }
-    val rootUri = vm.setting("storage_root_uri")
+    var rootUri by remember { mutableStateOf(vm.setting("storage_root_uri")) }
+    val savedRootUri = vm.setting("storage_root_uri")
+    LaunchedEffect(savedRootUri) {
+        if (savedRootUri.isNotBlank()) rootUri = savedRootUri
+    }
 
     val chooseRoot = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
-            if (!SafPosStorage.isPosRoot(context, uri)) {
-                message = "Hãy mở Download → POS0210 và chọn chính thư mục POS0210."
-                return@rememberLauncherForActivityResult
-            }
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
                     uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 )
             }
-            val result = SafPosStorage.ensureStructure(context, uri.toString())
+            val result = SafPosStorage.ensureSelectedRoot(context, uri.toString())
             if (result.isSuccess) {
+                rootUri = uri.toString()
                 vm.saveSetting("storage_root_uri", uri.toString())
                 refreshTick++
-                message = "Đã gắn đúng thư mục POS0210."
+                message = "Đã gắn thư mục POS0210. Nếu chưa có file, bấm GHI MASTER và BACKUP NGAY để tạo từ dữ liệu hiện tại."
             } else {
                 message = "Không gắn được thư mục: ${result.exceptionOrNull()?.message}"
             }
@@ -628,7 +629,7 @@ fun BackupCenter(vm: PosViewModel) {
                     Text("MASTER CONFIG", fontWeight = FontWeight.Black, fontSize = 20.sp)
                     Text("Menu · ảnh món · bàn · nhân viên/PIN · VietQR · máy in · phân mục", fontSize = 13.sp)
                     Text(
-                        "POS0210/CONFIG/POS0210_MASTER.0210\nTrạng thái: ${if (masterFound) "ĐÃ TÌM THẤY" else "CHƯA TÌM THẤY"}",
+                        "POS0210/CONFIG/POS0210_MASTER.0210\nTrạng thái: ${if (masterFound) "ĐÃ TÌM THẤY" else if (rootUri.isNotBlank()) "CHƯA CÓ FILE · BẤM GHI MASTER" else "CHƯA GẮN THƯ MỤC"}",
                         Modifier.padding(vertical = 8.dp),
                         fontWeight = FontWeight.Bold
                     )
@@ -678,7 +679,7 @@ fun BackupCenter(vm: PosViewModel) {
                     Text("DATA VẬN HÀNH", fontWeight = FontWeight.Black, fontSize = 20.sp)
                     Text("Bill · order · thanh toán · nhập hàng · lịch sử · audit", fontSize = 13.sp)
                     Text(
-                        "POS0210/DATA/POS0210_DATA_LATEST.db\nTrạng thái: ${if (dataFound) "ĐÃ TÌM THẤY" else "CHƯA TÌM THẤY"}",
+                        "POS0210/DATA/POS0210_DATA_LATEST.db\nTrạng thái: ${if (dataFound) "ĐÃ TÌM THẤY" else if (rootUri.isNotBlank()) "CHƯA CÓ FILE · BẤM BACKUP NGAY" else "CHƯA GẮN THƯ MỤC"}",
                         Modifier.padding(vertical = 8.dp),
                         fontWeight = FontWeight.Bold
                     )

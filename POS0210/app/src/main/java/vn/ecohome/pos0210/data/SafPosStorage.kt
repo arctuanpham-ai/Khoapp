@@ -13,6 +13,15 @@ object SafPosStorage {
     fun isPosRoot(context: Context, uri: Uri): Boolean =
         documentName(context, uri).equals(ROOT_NAME, ignoreCase = true)
 
+    fun ensureSelectedRoot(context: Context, rootTreeUriString: String): Result<Structure> = runCatching {
+        require(rootTreeUriString.isNotBlank()) { "Chưa chọn thư mục POS0210" }
+        val root = Uri.parse(rootTreeUriString)
+        val config = findChild(context, root, CONFIG_NAME) ?: createDir(context, root, CONFIG_NAME)
+        val data = findChild(context, root, DATA_NAME) ?: createDir(context, root, DATA_NAME)
+        val archive = findChild(context, root, ARCHIVE_NAME) ?: createDir(context, root, ARCHIVE_NAME)
+        Structure(root, config, data, archive)
+    }
+
     fun ensureStructure(context: Context, parentTreeUriString: String): Result<Structure> = runCatching {
         require(parentTreeUriString.isNotBlank()) { "Chưa chọn nơi lưu POS0210" }
         val tree = Uri.parse(parentTreeUriString)

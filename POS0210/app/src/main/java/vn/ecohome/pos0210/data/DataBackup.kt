@@ -39,11 +39,11 @@ object DataBackup {
     }
 
     fun ensureStructure(context: Context, rootTreeUriString: String): Result<Unit> =
-        SafPosStorage.ensureStructure(context, rootTreeUriString).map { Unit }
+        SafPosStorage.ensureSelectedRoot(context, rootTreeUriString).map { Unit }
 
     fun findLatest(context: Context, rootTreeUriString: String): Uri? {
         if (rootTreeUriString.isBlank()) return null
-        val structure = SafPosStorage.ensureStructure(context, rootTreeUriString).getOrNull() ?: return null
+        val structure = SafPosStorage.ensureSelectedRoot(context, rootTreeUriString).getOrNull() ?: return null
         return SafPosStorage.findFile(context, structure.data, LATEST_NAME)
     }
 
@@ -56,7 +56,7 @@ object DataBackup {
     }
 
     fun backupLatest(context: Context, rootTreeUriString: String): Result<Uri> = runCatching {
-        val structure = SafPosStorage.ensureStructure(context, rootTreeUriString).getOrThrow()
+        val structure = SafPosStorage.ensureSelectedRoot(context, rootTreeUriString).getOrThrow()
         val existing = SafPosStorage.findFile(context, structure.data, LATEST_NAME)
         val target = existing ?: SafPosStorage.createFile(context, structure.data, LATEST_NAME)
         val source = checkpoint(context)
@@ -68,7 +68,7 @@ object DataBackup {
     }
 
     fun archiveSnapshot(context: Context, rootTreeUriString: String): Result<Uri> = runCatching {
-        val structure = SafPosStorage.ensureStructure(context, rootTreeUriString).getOrThrow()
+        val structure = SafPosStorage.ensureSelectedRoot(context, rootTreeUriString).getOrThrow()
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val name = "POS0210_DATA_$stamp.db"
         val target = SafPosStorage.createFile(context, structure.archive, name)

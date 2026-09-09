@@ -121,7 +121,7 @@ object ConfigBackup {
     }
 
     fun saveMaster(context: Context, rootTreeUriString: String): Result<Uri> = runCatching {
-        val structure = SafPosStorage.ensureStructure(context, rootTreeUriString).getOrThrow()
+        val structure = SafPosStorage.ensureSelectedRoot(context, rootTreeUriString).getOrThrow()
         val existing = SafPosStorage.findFile(context, structure.config, MASTER_NAME)
         val target = existing ?: SafPosStorage.createFile(context, structure.config, MASTER_NAME)
         exportConfig(context, target).getOrThrow()
@@ -130,7 +130,7 @@ object ConfigBackup {
     }
 
     fun copyMaster(context: Context, rootTreeUriString: String, source: Uri): Result<Uri> = runCatching {
-        val structure = SafPosStorage.ensureStructure(context, rootTreeUriString).getOrThrow()
+        val structure = SafPosStorage.ensureSelectedRoot(context, rootTreeUriString).getOrThrow()
         val existing = SafPosStorage.findFile(context, structure.config, MASTER_NAME)
         val target = existing ?: SafPosStorage.createFile(context, structure.config, MASTER_NAME)
         context.contentResolver.openInputStream(source).use { input ->
@@ -143,7 +143,7 @@ object ConfigBackup {
 
     fun findMaster(context: Context, rootTreeUriString: String): Uri? {
         if (rootTreeUriString.isBlank()) return null
-        val structure = SafPosStorage.ensureStructure(context, rootTreeUriString).getOrNull() ?: return null
+        val structure = SafPosStorage.ensureSelectedRoot(context, rootTreeUriString).getOrNull() ?: return null
         return SafPosStorage.findFile(context, structure.config, MASTER_NAME)
     }
 
