@@ -12,7 +12,7 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 object ConfigBackup {
-    private const val CONFIG_VERSION = 1
+    private const val CONFIG_VERSION = 2
     private const val MASTER_NAME = "POS0210_MASTER.0210"
 
     fun exportConfig(context: Context, uri: Uri): Result<Unit> = runCatching {
@@ -24,8 +24,11 @@ object ConfigBackup {
                 dao.allTablesSnapshot(),
                 dao.allCategoriesSnapshot(),
                 dao.allMenuSnapshot(),
+                dao.allCombosSnapshot(),
+                dao.allComboItemsSnapshot(),
                 dao.allEmployeesSnapshot(),
                 dao.allPurchaseCategoriesSnapshot(),
+                dao.activePricingRulesSnapshot(),
                 dao.allSettingsSnapshot()
             )
         }
@@ -75,6 +78,31 @@ object ConfigBackup {
             menuArray.put(obj)
         }
         root.put("menu", menuArray)
+        root.put("combos", JSONArray().apply {
+            snapshot.combos.forEach { combo ->
+                put(JSONObject().apply {
+                    put("id", combo.id); put("name", combo.name); put("price", combo.price)
+                    put("imageUri", combo.imageUri ?: ""); put("sortOrder", combo.sortOrder); put("active", combo.active)
+                })
+            }
+        })
+        root.put("comboItems", JSONArray().apply {
+            snapshot.comboItems.forEach { item ->
+                put(JSONObject().apply {
+                    put("id", item.id); put("comboId", item.comboId); put("menuItemId", item.menuItemId); put("qty", item.qty)
+                })
+            }
+        })
+        root.put("pricingRules", JSONArray().apply {
+            snapshot.pricingRules.forEach { rule ->
+                put(JSONObject().apply {
+                    put("id", rule.id); put("name", rule.name); put("code", rule.code); put("kind", rule.kind)
+                    put("percent", rule.percent); put("startAt", rule.startAt ?: JSONObject.NULL); put("endAt", rule.endAt ?: JSONObject.NULL)
+                    put("startMinute", rule.startMinute ?: JSONObject.NULL); put("endMinute", rule.endMinute ?: JSONObject.NULL)
+                    put("autoApply", rule.autoApply); put("active", rule.active)
+                })
+            }
+        })
 
         root.put("employees", JSONArray().apply {
             snapshot.employees.forEach { e ->
@@ -182,6 +210,8 @@ object ConfigBackup {
                 dao.deactivateAllTables()
                 dao.deactivateAllMenuCategories()
                 dao.deactivateAllMenuItems()
+                dao.deactivateAllCombos()
+                dao.deactivateAllPricingRules()
                 dao.deactivateAllEmployees()
                 dao.deactivateAllPurchaseCategories()
                 dao.clearConfigSettings()
@@ -205,6 +235,45 @@ object ConfigBackup {
                             price = o.getLong("price"),
                             imageUri = localUri,
                             sortOrder = o.optInt("sortOrder"),
+                            active = o.optBoolean("active", true)
+                        )
+                    )
+                }
+                root.optJSONArray("combos")?.forEachObject { o ->
+                    dao.saveCombo(
+                        ComboEntity(
+                            id = o.getString("id"),
+                            name = o.getString("name"),
+                            price = o.getLong("price"),
+                            imageUri = o.optString("imageUri", "").ifBlank { null },
+                            sortOrder = o.optInt("sortOrder"),
+                            active = o.optBoolean("active", true)
+                        )
+                    )
+                }
+                root.optJSONArray("comboItems")?.forEachObject { o ->
+                    dao.saveComboItem(
+                        ComboItemEntity(
+                            id = o.getString("id"),
+                            comboId = o.getString("comboId"),
+                            menuItemId = o.getString("menuItemId"),
+                            qty = o.optInt("qty", 1)
+                        )
+                    )
+                }
+                root.optJSONArray("pricingRules")?.forEachObject { o ->
+                    dao.savePricingRule(
+                        PricingRuleEntity(
+                            id = o.getString("id"),
+                            name = o.getString("name"),
+                            code = o.optString("code", ""),
+                            kind = o.optString("kind", "DISCOUNT"),
+                            percent = o.optInt("percent", 0),
+                            startAt = if (o.isNull("startAt")) null else o.optLong("startAt"),
+                            endAt = if (o.isNull("endAt")) null else o.optLong("endAt"),
+                            startMinute = if (o.isNull("startMinute")) null else o.optInt("startMinute"),
+                            endMinute = if (o.isNull("endMinute")) null else o.optInt("endMinute"),
+                            autoApply = o.optBoolean("autoApply", false),
                             active = o.optBoolean("active", true)
                         )
                     )
@@ -266,8 +335,11 @@ object ConfigBackup {
         val tables: List<DiningTableEntity>,
         val categories: List<MenuCategoryEntity>,
         val menu: List<MenuItemEntity>,
+        val combos: List<ComboEntity>,
+        val comboItems: List<ComboItemEntity>,
         val employees: List<EmployeeEntity>,
         val purchaseCategories: List<PurchaseCategoryEntity>,
+        val pricingRules: List<PricingRuleEntity>,
         val settings: List<AppSettingEntity>
     )
 
