@@ -18,10 +18,8 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  val cart=MutableStateFlow<Map<String,Int>>(emptyMap());val currentTable=MutableStateFlow<DiningTableEntity?>(null);val currentSession=MutableStateFlow<TableSessionEntity?>(null);val currentEmployee=MutableStateFlow<EmployeeEntity?>(null);val authError=MutableStateFlow("");val screen=MutableStateFlow("LOGIN");val printerPreview=MutableStateFlow("");val printerMessage=MutableStateFlow("")
  init{viewModelScope.launch{bootstrap()}}
  private suspend fun bootstrap(){
-  PosStorage.ensureFolders(getApplication())
   if(dao.areas().first().isNotEmpty())return
-  val restored=ConfigBackup.autoImportMasterFromDownloads(getApplication()).getOrDefault(false)
-  if(!restored)seed()
+  seed()
  }
  private suspend fun seed(){if(dao.areas().first().isNotEmpty())return;
  repo.savePurchaseCategory(PurchaseCategoryEntity("pc_salary","Lương","ngày công",0,true))
@@ -30,11 +28,14 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  fun login(pin:String){viewModelScope.launch{val e=dao.employeeByPin(pin);if(e==null)authError.value="PIN không đúng" else{currentEmployee.value=e;authError.value="";screen.value="TABLES";audit("AUTH",e.id,"LOGIN")}}};fun logout(){val e=currentEmployee.value;viewModelScope.launch{if(e!=null)audit("AUTH",e.id,"LOGOUT")};currentEmployee.value=null;screen.value="LOGIN"}
  private suspend fun audit(type:String,id:String,action:String,payload:String=""){dao.audit(AuditEventEntity(UUID.randomUUID().toString(),type,id,action,currentEmployee.value?.id,"ANDROID",System.currentTimeMillis(),payload))}
  private fun autoBackup(){
-  DataBackup.backupLatest(getApplication())
+  val root=setting("storage_root_uri")
+  if(root.isNotBlank()) DataBackup.backupLatest(getApplication(),root)
  }
  private suspend fun autoMasterConfig(){
+  val root=dao.allSettingsSnapshot().firstOrNull{it.key=="storage_root_uri"}?.value.orEmpty()
+  if(root.isBlank())return
   masterMutex.withLock {
-   ConfigBackup.saveMasterToDownloads(getApplication())
+   ConfigBackup.saveMaster(getApplication(),root)
   }
  }
  fun previewKitchen(){printerPreview.value="KITCHEN"}
@@ -149,7 +150,7 @@ class PosViewModel(app:Application):AndroidViewModel(app){
    audit("PURCHASE_CATEGORY",c.id,"DELETE_SOFT",c.name)
    autoBackup();autoMasterConfig()
   }
- };fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(AppSettingEntity(key,value));audit("SETTING",key,"SAVE",value);if(key!="master_config_uri"&&key!="autoback_tree_uri")autoMasterConfig()}};fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
+ };fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(AppSettingEntity(key,value));audit("SETTING",key,"SAVE",value);if(key!="master_config_uri"&&key!="autoback_tree_uri"&&key!="storage_root_uri")autoMasterConfig()}};fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
  fun addPurchase(name:String,amount:Long,note:String,at:Long=System.currentTimeMillis(),imageUri:String?=null){addPurchaseDetailed(name,1.0,"lần",amount,note,at,"",imageUri)}
  fun addPurchaseDetailed(name:String,qty:Double,unit:String,unitPrice:Long,note:String,at:Long=System.currentTimeMillis(),supplierName:String="",imageUri:String?=null,categoryId:String="pc_production"){
   val e=currentEmployee.value?:return

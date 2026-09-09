@@ -2,8 +2,6 @@ package vn.ecohome.pos0210.data
 
 import android.content.Context
 import android.net.Uri
-import android.os.Build
-import android.provider.MediaStore
 import androidx.room.withTransaction
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -16,8 +14,6 @@ import java.util.zip.ZipOutputStream
 object ConfigBackup {
     private const val CONFIG_VERSION = 1
     private const val MASTER_NAME = "POS0210_MASTER.0210"
-    private const val MASTER_PATH = PosStorage.CONFIG_PATH
-    private const val MASTER_TEMP = "POS0210_MASTER_TEMP.0210"
 
     fun exportConfig(context: Context, uri: Uri): Result<Unit> = runCatching {
         val db = PosDatabase.get(context)
@@ -100,7 +96,7 @@ object ConfigBackup {
         })
         root.put("settings", JSONArray().apply {
             snapshot.settings
-                .filterNot { it.key == "autoback_tree_uri" }
+                .filterNot { it.key == "autoback_tree_uri" || it.key == "storage_root_uri" || it.key == "master_config_uri" }
                 .forEach { s -> put(JSONObject().apply { put("key", s.key); put("value", s.value) }) }
         })
 
@@ -124,40 +120,31 @@ object ConfigBackup {
         }
     }
 
-    fun saveMasterToDownloads(context: Context): Result<Uri> = runCatching {
-        PosStorage.ensureFolders(context).getOrThrow()
-        PosStorage.delete(context, PosStorage.find(context, MASTER_PATH, MASTER_TEMP))
-        val temp = PosStorage.create(context, MASTER_PATH, MASTER_TEMP)
-        exportConfig(context, temp).getOrThrow()
-        validateMaster(context, temp)
-        PosStorage.delete(context, PosStorage.find(context, MASTER_PATH, MASTER_NAME))
-        PosStorage.rename(context, temp, MASTER_NAME)
+    fun saveMaster(context: Context, rootTreeUriString: String): Result<Uri> = runCatching {
+        val structure = SafPosStorage.ensureStructure(context, rootTreeUriString).getOrThrow()
+        val existing = SafPosStorage.findFile(context, structure.config, MASTER_NAME)
+        val target = existing ?: SafPosStorage.createFile(context, structure.config, MASTER_NAME)
+        exportConfig(context, target).getOrThrow()
+        validateMaster(context, target)
+        target
     }
 
-    fun copyMasterToDownloads(context: Context, source: Uri): Result<Uri> = runCatching {
-        PosStorage.ensureFolders(context).getOrThrow()
-        PosStorage.delete(context, PosStorage.find(context, MASTER_PATH, MASTER_TEMP))
-        val temp = PosStorage.create(context, MASTER_PATH, MASTER_TEMP)
+    fun copyMaster(context: Context, rootTreeUriString: String, source: Uri): Result<Uri> = runCatching {
+        val structure = SafPosStorage.ensureStructure(context, rootTreeUriString).getOrThrow()
+        val existing = SafPosStorage.findFile(context, structure.config, MASTER_NAME)
+        val target = existing ?: SafPosStorage.createFile(context, structure.config, MASTER_NAME)
         context.contentResolver.openInputStream(source).use { input ->
             requireNotNull(input)
-            context.contentResolver.openOutputStream(temp, "w").use { output ->
-                requireNotNull(output)
-                input.copyTo(output)
-            }
+            SafPosStorage.overwrite(context, target) { output -> input.copyTo(output) }
         }
-        validateMaster(context, temp)
-        PosStorage.delete(context, PosStorage.find(context, MASTER_PATH, MASTER_NAME))
-        PosStorage.rename(context, temp, MASTER_NAME)
+        validateMaster(context, target)
+        target
     }
 
-    fun findMasterInDownloads(context: Context): Uri? {
-        return PosStorage.find(context, MASTER_PATH, MASTER_NAME)
-    }
-
-    fun autoImportMasterFromDownloads(context: Context): Result<Boolean> = runCatching {
-        val uri = findMasterInDownloads(context) ?: return@runCatching false
-        importConfig(context, uri).getOrThrow()
-        true
+    fun findMaster(context: Context, rootTreeUriString: String): Uri? {
+        if (rootTreeUriString.isBlank()) return null
+        val structure = SafPosStorage.ensureStructure(context, rootTreeUriString).getOrNull() ?: return null
+        return SafPosStorage.findFile(context, structure.config, MASTER_NAME)
     }
 
     fun importConfig(context: Context, uri: Uri): Result<Unit> = runCatching {
@@ -191,6 +178,13 @@ object ConfigBackup {
         val dao = db.dao()
         runBlocking {
             db.withTransaction {
+                dao.deactivateAllAreas()
+                dao.deactivateAllTables()
+                dao.deactivateAllMenuCategories()
+                dao.deactivateAllMenuItems()
+                dao.deactivateAllEmployees()
+                dao.deactivateAllPurchaseCategories()
+                dao.clearConfigSettings()
                 root.getJSONArray("areas").forEachObject { o ->
                     dao.saveArea(AreaEntity(o.getString("id"), o.getString("name"), o.optInt("sortOrder"), o.optBoolean("active", true)))
                 }

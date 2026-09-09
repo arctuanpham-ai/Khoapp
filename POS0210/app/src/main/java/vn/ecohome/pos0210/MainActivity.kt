@@ -522,17 +522,35 @@ fun BackupCenter(vm: PosViewModel) {
     val context = LocalContext.current
     var message by remember { mutableStateOf("") }
     var refreshTick by remember { mutableStateOf(0) }
+    val rootUri = vm.setting("storage_root_uri")
+
+    val chooseRoot = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+            val result = SafPosStorage.ensureStructure(context, uri.toString())
+            if (result.isSuccess) {
+                vm.saveSetting("storage_root_uri", uri.toString())
+                refreshTick++
+                message = "Đã gắn nơi lưu POS0210. App sẽ dùng đúng cây thư mục này, không tự tạo file trùng."
+            } else {
+                message = "Không gắn được thư mục: ${result.exceptionOrNull()?.message}"
+            }
+        }
+    }
 
     val importMaster = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val result = ConfigBackup.importConfig(context, uri)
             if (result.isSuccess) {
-                val copy = ConfigBackup.copyMasterToDownloads(context, uri)
-                Toast.makeText(
-                    context,
-                    if (copy.isSuccess) "Đã LOAD MASTER và thay file chuẩn." else "Đã LOAD MASTER nhưng lỗi ghi file chuẩn.",
-                    Toast.LENGTH_LONG
-                ).show()
+                if (rootUri.isNotBlank()) {
+                    ConfigBackup.copyMaster(context, rootUri, uri)
+                }
+                Toast.makeText(context, "Đã LOAD MASTER. App sẽ mở lại.", Toast.LENGTH_LONG).show()
                 android.os.Process.killProcess(android.os.Process.myPid())
             } else {
                 message = "LOAD MASTER lỗi: ${result.exceptionOrNull()?.message}"
@@ -542,9 +560,17 @@ fun BackupCenter(vm: PosViewModel) {
 
     val restoreBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            val result = DataBackup.restoreDatabase(context, uri)
+            val result = if (rootUri.isNotBlank()) {
+                DataBackup.restoreDatabaseAndApplyMaster(context, uri, rootUri)
+            } else {
+                DataBackup.restoreDatabase(context, uri)
+            }
             if (result.isSuccess) {
-                Toast.makeText(context, "Đã RESTORE DATA. App sẽ mở lại.", Toast.LENGTH_LONG).show()
+                Toast.makeText(
+                    context,
+                    if (rootUri.isNotBlank()) "Đã RESTORE DATA + áp lại MASTER. App sẽ mở lại." else "Đã RESTORE DATA. Chưa có MASTER root để áp lại.",
+                    Toast.LENGTH_LONG
+                ).show()
                 android.os.Process.killProcess(android.os.Process.myPid())
             } else {
                 message = "RESTORE DATA lỗi: ${result.exceptionOrNull()?.message}"
@@ -552,13 +578,12 @@ fun BackupCenter(vm: PosViewModel) {
         }
     }
 
-    LaunchedEffect(Unit) {
-        PosStorage.ensureFolders(context)
-        refreshTick++
+    val masterFound = remember(refreshTick, rootUri) {
+        rootUri.isNotBlank() && ConfigBackup.findMaster(context, rootUri) != null
     }
-
-    val masterFound = remember(refreshTick) { ConfigBackup.findMasterInDownloads(context) != null }
-    val dataFound = remember(refreshTick) { DataBackup.findLatest(context) != null }
+    val dataFound = remember(refreshTick, rootUri) {
+        rootUri.isNotBlank() && DataBackup.findLatest(context, rootUri) != null
+    }
 
     Column {
         Header("Dữ liệu & Backup") { vm.screen.value = "MANAGE" }
@@ -567,53 +592,60 @@ fun BackupCenter(vm: PosViewModel) {
         ) {
             Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("HỆ THỐNG THƯ MỤC", fontWeight = FontWeight.Black, fontSize = 20.sp)
-                    Text("App tự tạo thư mục, KHÔNG tự tạo file dữ liệu trắng.", fontSize = 13.sp)
+                    Text("NƠI LƯU POS0210", fontWeight = FontWeight.Black, fontSize = 20.sp)
                     Text(
-                        "Download/POS0210/CONFIG/\nDownload/POS0210/DATA/\nDownload/POS0210/ARCHIVE/",
-                        Modifier.padding(vertical = 8.dp),
+                        if (rootUri.isBlank()) "CHƯA GẮN THƯ MỤC" else "ĐÃ GẮN THƯ MỤC",
+                        Modifier.padding(vertical = 6.dp),
                         fontWeight = FontWeight.Bold
                     )
-                    OutlinedButton(
-                        onClick = {
-                            val result = PosStorage.ensureFolders(context)
-                            refreshTick++
-                            message = if (result.isSuccess) "Đã kiểm tra/tạo đủ hệ thư mục POS0210." else "Tạo thư mục lỗi: ${result.exceptionOrNull()?.message}"
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("KIỂM TRA / TẠO THƯ MỤC") }
+                    Text(
+                        "Sau cài mới/reinstall, chọn Download một lần. App sẽ tìm/tạo chính xác:\n" +
+                        "POS0210/CONFIG\nPOS0210/DATA\nPOS0210/ARCHIVE",
+                        fontSize = 13.sp
+                    )
+                    Button(
+                        onClick = { chooseRoot.launch(null) },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    ) { Text(if (rootUri.isBlank()) "CHỌN NƠI LƯU POS0210" else "ĐỔI / GẮN LẠI NƠI LƯU") }
                 }
             }
 
             Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                 Column(Modifier.padding(16.dp)) {
                     Text("MASTER CONFIG", fontWeight = FontWeight.Black, fontSize = 20.sp)
-                    Text("Menu · ảnh món · bàn · nhân viên · VietQR · máy in · phân mục nhập", fontSize = 13.sp)
+                    Text("Menu · ảnh món · bàn · nhân viên/PIN · VietQR · máy in · phân mục", fontSize = 13.sp)
                     Text(
-                        "CONFIG/POS0210_MASTER.0210\nTrạng thái: ${if (masterFound) "ĐÃ TÌM THẤY" else "CHƯA CÓ FILE"}",
+                        "POS0210/CONFIG/POS0210_MASTER.0210\nTrạng thái: ${if (masterFound) "ĐÃ TÌM THẤY" else "CHƯA TÌM THẤY"}",
                         Modifier.padding(vertical = 8.dp),
                         fontWeight = FontWeight.Bold
                     )
+
                     Button(
                         onClick = {
-                            val result = ConfigBackup.saveMasterToDownloads(context)
-                            refreshTick++
-                            message = if (result.isSuccess) "Đã ghi MASTER theo cơ chế TEMP → validate → replace." else "GHI MASTER lỗi: ${result.exceptionOrNull()?.message}"
+                            if (rootUri.isBlank()) {
+                                message = "Hãy chọn nơi lưu POS0210 trước."
+                            } else {
+                                val result = ConfigBackup.saveMaster(context, rootUri)
+                                refreshTick++
+                                message = if (result.isSuccess) "Đã ghi đè đúng MASTER chuẩn." else "GHI MASTER lỗi: ${result.exceptionOrNull()?.message}"
+                            }
                         },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = rootUri.isNotBlank()
                     ) { Text("GHI MASTER NGAY") }
 
                     if (masterFound) {
                         OutlinedButton(
                             onClick = {
-                                val uri = ConfigBackup.findMasterInDownloads(context)
+                                val uri = ConfigBackup.findMaster(context, rootUri)
                                 if (uri != null) {
                                     val result = ConfigBackup.importConfig(context, uri)
                                     if (result.isSuccess) {
+                                        vm.saveSetting("storage_root_uri", rootUri)
                                         Toast.makeText(context, "Đã LOAD MASTER chuẩn. App sẽ mở lại.", Toast.LENGTH_LONG).show()
                                         android.os.Process.killProcess(android.os.Process.myPid())
                                     } else {
-                                        message = "LOAD MASTER chuẩn lỗi: ${result.exceptionOrNull()?.message}"
+                                        message = "LOAD MASTER lỗi: ${result.exceptionOrNull()?.message}"
                                     }
                                 }
                             },
@@ -633,42 +665,52 @@ fun BackupCenter(vm: PosViewModel) {
                     Text("DATA VẬN HÀNH", fontWeight = FontWeight.Black, fontSize = 20.sp)
                     Text("Bill · order · thanh toán · nhập hàng · lịch sử · audit", fontSize = 13.sp)
                     Text(
-                        "DATA/POS0210_DATA_LATEST.db\nTrạng thái: ${if (dataFound) "ĐÃ TÌM THẤY" else "CHƯA CÓ FILE"}",
+                        "POS0210/DATA/POS0210_DATA_LATEST.db\nTrạng thái: ${if (dataFound) "ĐÃ TÌM THẤY" else "CHƯA TÌM THẤY"}",
                         Modifier.padding(vertical = 8.dp),
                         fontWeight = FontWeight.Bold
                     )
 
                     Button(
                         onClick = {
-                            val result = DataBackup.backupLatest(context)
-                            refreshTick++
-                            message = if (result.isSuccess) "BACKUP NGAY thành công · DATA_LATEST đã được thay an toàn." else "BACKUP NGAY lỗi: ${result.exceptionOrNull()?.message}"
+                            if (rootUri.isBlank()) {
+                                message = "Hãy chọn nơi lưu POS0210 trước."
+                            } else {
+                                val result = DataBackup.backupLatest(context, rootUri)
+                                refreshTick++
+                                message = if (result.isSuccess) "BACKUP DATA_LATEST thành công." else "BACKUP lỗi: ${result.exceptionOrNull()?.message}"
+                            }
                         },
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = rootUri.isNotBlank()
                     ) { Text("BACKUP NGAY → DATA_LATEST") }
 
                     OutlinedButton(
                         onClick = {
-                            val result = DataBackup.archiveSnapshot(context)
-                            refreshTick++
-                            message = if (result.isSuccess) "Đã tạo snapshot trong ARCHIVE." else "ARCHIVE lỗi: ${result.exceptionOrNull()?.message}"
+                            if (rootUri.isBlank()) {
+                                message = "Hãy chọn nơi lưu POS0210 trước."
+                            } else {
+                                val result = DataBackup.archiveSnapshot(context, rootUri)
+                                refreshTick++
+                                message = if (result.isSuccess) "Đã tạo snapshot trong ARCHIVE." else "ARCHIVE lỗi: ${result.exceptionOrNull()?.message}"
+                            }
                         },
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        enabled = rootUri.isNotBlank()
                     ) { Text("TẠO SNAPSHOT ARCHIVE") }
 
                     if (dataFound) {
                         Button(
                             onClick = {
-                                val result = DataBackup.restoreLatest(context)
+                                val result = DataBackup.restoreLatest(context, rootUri)
                                 if (result.isSuccess) {
-                                    Toast.makeText(context, "Đã RESTORE DATA_LATEST. App sẽ mở lại.", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, "Đã RESTORE DATA + áp MASTER mới nhất. App sẽ mở lại.", Toast.LENGTH_LONG).show()
                                     android.os.Process.killProcess(android.os.Process.myPid())
                                 } else {
                                     message = "RESTORE DATA_LATEST lỗi: ${result.exceptionOrNull()?.message}"
                                 }
                             },
                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                        ) { Text("RESTORE DATA_LATEST") }
+                        ) { Text("RESTORE DATA_LATEST + MASTER") }
                     }
 
                     OutlinedButton(
@@ -680,12 +722,11 @@ fun BackupCenter(vm: PosViewModel) {
 
             Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("CÁCH CHUYỂN SANG MÁY KHÁC", fontWeight = FontWeight.Black)
+                    Text("QUY TẮC AN TOÀN", fontWeight = FontWeight.Black)
                     Text(
-                        "1. Cài app để app tạo thư mục.\n" +
-                        "2. Copy MASTER cũ vào CONFIG và DATA cũ vào DATA, ghi đè nếu có.\n" +
-                        "3. Mở Dữ liệu & Backup → LOAD MASTER CHUẨN → RESTORE DATA_LATEST.\n" +
-                        "App không ghi file trắng vào các file này khi khởi động.",
+                        "• App không tự tạo MASTER/DATA khi chưa gắn thư mục.\n" +
+                        "• Sau reinstall phải gắn lại Download một lần vì Android xóa quyền SAF của app cũ.\n" +
+                        "• Restore DATA luôn áp MASTER lại để PIN/quyền/menu không bị snapshot DB cũ ghi đè.",
                         Modifier.padding(top = 8.dp)
                     )
                 }

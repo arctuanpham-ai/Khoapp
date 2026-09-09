@@ -38,49 +38,59 @@ object DataBackup {
         temp.delete()
     }
 
-    fun ensureFolders(context: Context): Result<Unit> = PosStorage.ensureFolders(context)
+    fun ensureStructure(context: Context, rootTreeUriString: String): Result<Unit> =
+        SafPosStorage.ensureStructure(context, rootTreeUriString).map { Unit }
 
-    fun findLatest(context: Context): Uri? = PosStorage.find(context, PosStorage.DATA_PATH, LATEST_NAME)
+    fun findLatest(context: Context, rootTreeUriString: String): Uri? {
+        if (rootTreeUriString.isBlank()) return null
+        val structure = SafPosStorage.ensureStructure(context, rootTreeUriString).getOrNull() ?: return null
+        return SafPosStorage.findFile(context, structure.data, LATEST_NAME)
+    }
 
     fun exportDatabase(context: Context, uri: Uri): Result<Unit> = runCatching {
         val source = checkpoint(context)
-        context.contentResolver.openOutputStream(uri, "w").use { out ->
+        context.contentResolver.openOutputStream(uri, "wt").use { out ->
             requireNotNull(out)
             source.inputStream().use { input -> input.copyTo(out) }
         }
     }
 
-    fun backupLatest(context: Context): Result<Uri> = runCatching {
-        PosStorage.ensureFolders(context).getOrThrow()
-        PosStorage.delete(context, PosStorage.find(context, PosStorage.DATA_PATH, TEMP_NAME))
-        val tempUri = PosStorage.create(context, PosStorage.DATA_PATH, TEMP_NAME)
+    fun backupLatest(context: Context, rootTreeUriString: String): Result<Uri> = runCatching {
+        val structure = SafPosStorage.ensureStructure(context, rootTreeUriString).getOrThrow()
+        val existing = SafPosStorage.findFile(context, structure.data, LATEST_NAME)
+        val target = existing ?: SafPosStorage.createFile(context, structure.data, LATEST_NAME)
         val source = checkpoint(context)
-        context.contentResolver.openOutputStream(tempUri, "w").use { out ->
-            requireNotNull(out)
+        SafPosStorage.overwrite(context, target) { out ->
             source.inputStream().use { input -> input.copyTo(out) }
         }
-        validateSqlite(context, tempUri)
-        PosStorage.delete(context, PosStorage.find(context, PosStorage.DATA_PATH, LATEST_NAME))
-        PosStorage.rename(context, tempUri, LATEST_NAME)
+        validateSqlite(context, target)
+        target
     }
 
-    fun archiveSnapshot(context: Context): Result<Uri> = runCatching {
-        PosStorage.ensureFolders(context).getOrThrow()
+    fun archiveSnapshot(context: Context, rootTreeUriString: String): Result<Uri> = runCatching {
+        val structure = SafPosStorage.ensureStructure(context, rootTreeUriString).getOrThrow()
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val name = "POS0210_DATA_$stamp.db"
-        val target = PosStorage.create(context, PosStorage.ARCHIVE_PATH, name)
+        val target = SafPosStorage.createFile(context, structure.archive, name)
         exportDatabase(context, target).getOrThrow()
         validateSqlite(context, target)
         target
     }
 
-    fun restoreLatest(context: Context): Result<Unit> = runCatching {
-        val uri = findLatest(context) ?: error("Không tìm thấy POS0210_DATA_LATEST.db")
+    fun restoreLatest(context: Context, rootTreeUriString: String): Result<Unit> = runCatching {
+        val uri = findLatest(context, rootTreeUriString) ?: error("Không tìm thấy POS0210_DATA_LATEST.db")
         restoreDatabase(context, uri).getOrThrow()
+        val master = ConfigBackup.findMaster(context, rootTreeUriString)
+        if (master != null) {
+            ConfigBackup.importConfig(context, master).getOrThrow()
+        }
+        kotlinx.coroutines.runBlocking {
+            PosDatabase.get(context).dao().saveSetting(AppSettingEntity("storage_root_uri", rootTreeUriString))
+        }
     }
 
-    fun autoBackup(context: Context, ignored: String = ""): Result<Unit> =
-        backupLatest(context).map { Unit }
+    fun autoBackup(context: Context, rootTreeUriString: String): Result<Unit> =
+        backupLatest(context, rootTreeUriString).map { Unit }
 
     fun restoreDatabase(context: Context, uri: Uri): Result<Unit> = runCatching {
         val temp = File(context.cacheDir, "pos0210-restore.tmp")
@@ -98,4 +108,15 @@ object DataBackup {
         File(target.path + "-shm").delete()
         temp.delete()
     }
+    fun restoreDatabaseAndApplyMaster(context: Context, uri: Uri, rootTreeUriString: String): Result<Unit> = runCatching {
+        restoreDatabase(context, uri).getOrThrow()
+        val master = ConfigBackup.findMaster(context, rootTreeUriString)
+        if (master != null) {
+            ConfigBackup.importConfig(context, master).getOrThrow()
+        }
+        kotlinx.coroutines.runBlocking {
+            PosDatabase.get(context).dao().saveSetting(AppSettingEntity("storage_root_uri", rootTreeUriString))
+        }
+    }
+
 }
