@@ -1498,12 +1498,21 @@ fun PurchaseDetailDialog(vm: PosViewModel, p: PurchaseEntity, onDismiss: () -> U
     val items by vm.purchaseItems(p.id).collectAsState(initial = emptyList())
     val suppliers by vm.suppliers.collectAsState()
     val employees by vm.employees.collectAsState()
+    val current by vm.currentEmployee.collectAsState()
+    var showDelete by remember { mutableStateOf(false) }
+    var deleteReason by remember { mutableStateOf("") }
+
     val supplierName = suppliers.firstOrNull { it.id == p.supplierId }?.name ?: "Không ghi"
     val enteredBy = employees.firstOrNull { it.id == p.enteredBy }?.name ?: p.enteredBy
 
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { Button(onClick = onDismiss) { Text("ĐÓNG") } },
+        dismissButton = {
+            if (current?.role == "ADMIN") {
+                TextButton(onClick = { showDelete = true }) { Text("XOÁ PHIẾU · ADMIN") }
+            }
+        },
         title = { Text("Phiếu nhập · ${time(p.purchasedAt)}") },
         text = {
             LazyColumn {
@@ -1536,6 +1545,37 @@ fun PurchaseDetailDialog(vm: PosViewModel, p: PurchaseEntity, onDismiss: () -> U
             }
         }
     )
+
+    if (showDelete) {
+        AlertDialog(
+            onDismissRequest = { showDelete = false },
+            title = { Text("XOÁ PHIẾU NHẬP") },
+            text = {
+                Column {
+                    Text("Phiếu ${money(p.total)} sẽ bị loại khỏi chi phí đầu vào và báo cáo, nhưng vẫn giữ dấu vết audit.")
+                    OutlinedTextField(
+                        value = deleteReason,
+                        onValueChange = { deleteReason = it },
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                        label = { Text("Lý do xoá bắt buộc") }
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.deletePurchase(p, deleteReason)
+                        showDelete = false
+                        onDismiss()
+                    },
+                    enabled = deleteReason.isNotBlank()
+                ) { Text("XÁC NHẬN XOÁ") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDelete = false }) { Text("HỦY") }
+            }
+        )
+    }
 }
 
 @Composable
