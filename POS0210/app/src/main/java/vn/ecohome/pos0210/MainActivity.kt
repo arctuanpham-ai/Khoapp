@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import vn.ecohome.pos0210.data.*
+import vn.ecohome.pos0210.printing.PrinterText
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -488,8 +489,11 @@ fun Manage(vm: PosViewModel) {
                 )
             }
             val result = ConfigBackup.exportConfig(context, uri)
-            if (result.isSuccess) vm.saveSetting("master_config_uri", uri.toString())
-            backupMessage = if (result.isSuccess) "Đã lưu MASTER CONFIG .0210" else "MASTER lỗi: ${result.exceptionOrNull()?.message}"
+            if (result.isSuccess) {
+                vm.saveSetting("master_config_uri", uri.toString())
+                ConfigBackup.saveMasterToDownloads(context)
+            }
+            backupMessage = if (result.isSuccess) "Đã lưu MASTER CONFIG .0210 + bản tự nhận trong Downloads" else "MASTER lỗi: ${result.exceptionOrNull()?.message}"
         }
     }
 
@@ -497,6 +501,7 @@ fun Manage(vm: PosViewModel) {
         if (uri != null) {
             val result = ConfigBackup.importConfig(context, uri)
             if (result.isSuccess) {
+                ConfigBackup.saveMasterToDownloads(context)
                 Toast.makeText(context, "Đã khôi phục MASTER CONFIG. Mở lại app.", Toast.LENGTH_LONG).show()
                 android.os.Process.killProcess(android.os.Process.myPid())
             } else {
@@ -1333,21 +1338,107 @@ fun Printer(vm: PosViewModel) {
                     Modifier.fillMaxWidth().weight(1f).padding(top = 12.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.White)
                 ) {
-                    Text(
-                        preview,
-                        Modifier.fillMaxSize().padding(18.dp),
-                        fontSize = 13.sp
-                    )
+                    when (preview) {
+                        "BILL" -> BillPrintPreview(vm)
+                        "KITCHEN" -> SimplePrintPreview(
+                            title = "PHIẾU LÀM HÀNG",
+                            body = PrinterText.kitchenSample()
+                        )
+                        "CANCEL" -> SimplePrintPreview(
+                            title = "PHIẾU HỦY",
+                            body = PrinterText.cancelSample()
+                        )
+                    }
                 }
             } else {
                 Card(Modifier.fillMaxWidth().padding(top = 12.dp)) {
                     Column(Modifier.padding(16.dp)) {
                         Text("Test trước khi mua máy", fontWeight = FontWeight.Bold)
-                        Text("Preview kiểm tra nội dung và bố cục phiếu. Khi có máy K80 Bluetooth ESC/POS sẽ nối transport Bluetooth vào cùng formatter.")
+                        Text("Preview kiểm tra nội dung, QR và bố cục. Khi có máy K80 Bluetooth ESC/POS sẽ dùng cùng dữ liệu này để in thật.")
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+fun SimplePrintPreview(title: String, body: String) {
+    Column(Modifier.fillMaxSize().padding(20.dp)) {
+        Text("0210", Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 25.sp, fontWeight = FontWeight.Black)
+        Text("BREAKFAST · COFFEE · DRINKS", Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(12.dp))
+        Text(title, Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 18.sp, fontWeight = FontWeight.Black)
+        Spacer(Modifier.height(10.dp))
+        Text(body.substringAfter("--------------------------------").trim(), fontSize = 13.sp, lineHeight = 20.sp)
+    }
+}
+
+@Composable
+fun BillPrintPreview(vm: PosViewModel) {
+    val settings by vm.settings.collectAsState()
+    fun setting(key: String) = settings.firstOrNull { it.key == key }?.value ?: ""
+    val amount = 135000L
+    val qrUrl = if (setting("bank_name").isNotBlank() && setting("bank_account").isNotBlank()) {
+        vietQrUrl(setting("bank_name"), setting("bank_account"), setting("bank_holder"), amount, "0210 BAN 02")
+    } else ""
+
+    Column(
+        Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 18.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text("0210", fontSize = 30.sp, fontWeight = FontWeight.Black)
+        Text("BREAKFAST · COFFEE · DRINKS", fontSize = 10.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(12.dp))
+        Text("BILL THANH TOÁN", fontSize = 17.sp, fontWeight = FontWeight.Black)
+        Text("BÀN 02  ·  08:32–09:25", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        HorizontalDivider(Modifier.padding(vertical = 10.dp))
+
+        PrintLine("2 × Bún gà", "80.000đ", bold = false)
+        PrintLine("1 × Bạc xỉu", "30.000đ", bold = false)
+        PrintLine("1 × Đen đá", "25.000đ", bold = false)
+
+        HorizontalDivider(Modifier.padding(vertical = 10.dp))
+        PrintLine("TỔNG CỘNG", "135.000đ", bold = true, large = true)
+        Text("Thanh toán: TIỀN MẶT / CHUYỂN KHOẢN", Modifier.fillMaxWidth(), fontSize = 11.sp)
+
+        HorizontalDivider(Modifier.padding(vertical = 10.dp))
+        Text("QUÉT MÃ THANH TOÁN", fontSize = 13.sp, fontWeight = FontWeight.Black)
+        if (qrUrl.isNotBlank()) {
+            AsyncImage(
+                model = qrUrl,
+                contentDescription = "VietQR trên bill",
+                modifier = Modifier.size(180.dp).padding(top = 6.dp)
+            )
+            Text("${setting("bank_name")} · ${setting("bank_account")}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Text("Nội dung: 0210 BAN 02", fontSize = 10.sp)
+        } else {
+            Box(
+                Modifier.size(150.dp).padding(10.dp),
+                contentAlignment = Alignment.Center
+            ) { Text("CHƯA CẤU HÌNH VIETQR", textAlign = TextAlign.Center, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+        }
+
+        HorizontalDivider(Modifier.padding(vertical = 10.dp))
+        Text("CẢM ƠN QUÝ KHÁCH!", fontWeight = FontWeight.Black, fontSize = 13.sp)
+        Text("Good Food · Good Coffee · Brighter Day", fontSize = 10.sp)
+    }
+}
+
+@Composable
+fun PrintLine(label: String, value: String, bold: Boolean, large: Boolean = false) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+        Text(
+            label,
+            Modifier.weight(1f),
+            fontWeight = if (bold) FontWeight.Black else FontWeight.Normal,
+            fontSize = if (large) 17.sp else 13.sp
+        )
+        Text(
+            value,
+            fontWeight = if (bold) FontWeight.Black else FontWeight.Medium,
+            fontSize = if (large) 17.sp else 13.sp
+        )
     }
 }
 
