@@ -13,8 +13,12 @@ object SafPosStorage {
     fun ensureStructure(context: Context, parentTreeUriString: String): Result<Structure> = runCatching {
         require(parentTreeUriString.isNotBlank()) { "Chưa chọn nơi lưu POS0210" }
         val tree = Uri.parse(parentTreeUriString)
-        val root = findChild(context, tree, ROOT_NAME)
-            ?: createDir(context, tree, ROOT_NAME)
+        val selectedName = documentName(context, tree)
+        val root = if (selectedName.equals(ROOT_NAME, ignoreCase = true)) {
+            tree
+        } else {
+            findChild(context, tree, ROOT_NAME) ?: createDir(context, tree, ROOT_NAME)
+        }
         val config = findChild(context, root, CONFIG_NAME) ?: createDir(context, root, CONFIG_NAME)
         val data = findChild(context, root, DATA_NAME) ?: createDir(context, root, DATA_NAME)
         val archive = findChild(context, root, ARCHIVE_NAME) ?: createDir(context, root, ARCHIVE_NAME)
@@ -37,6 +41,17 @@ object SafPosStorage {
 
     fun delete(context: Context, uri: Uri?) {
         if (uri != null) DocumentsContract.deleteDocument(context.contentResolver, uri)
+    }
+
+    private fun documentName(context: Context, uri: Uri): String {
+        context.contentResolver.query(
+            uri,
+            arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+            null, null, null
+        )?.use { c ->
+            if (c.moveToFirst()) return c.getString(0) ?: ""
+        }
+        return ""
     }
 
     private fun findChild(context: Context, parent: Uri, name: String): Uri? =
