@@ -184,6 +184,32 @@ class PosViewModel(app:Application):AndroidViewModel(app){
   if(e.role!="ADMIN")return
   viewModelScope.launch{dao.setPricingRuleActive(rule.id,!rule.active);audit("PRICING",rule.id,"ACTIVE",(!rule.active).toString());autoBackup();autoMasterConfig()}
  }
+fun saveLoyaltyConfig(auto:Boolean,memberDiscount:Int,vipPoints:Int,vipDiscount:Int,vvipPoints:Int,vvipDiscount:Int){
+  val e=currentEmployee.value?:return
+  if(e.role!="ADMIN")return
+  viewModelScope.launch{
+   val safeVip=vipPoints.coerceAtLeast(0)
+   val safeVvip=vvipPoints.coerceAtLeast(safeVip)
+   dao.saveSetting(AppSettingEntity("loyalty_auto_tier",auto.toString()))
+   dao.saveSetting(AppSettingEntity("member_discount_percent",memberDiscount.coerceIn(0,100).toString()))
+   dao.saveSetting(AppSettingEntity("vip_min_points",safeVip.toString()))
+   dao.saveSetting(AppSettingEntity("vip_discount_percent",vipDiscount.coerceIn(0,100).toString()))
+   dao.saveSetting(AppSettingEntity("vvip_min_points",safeVvip.toString()))
+   dao.saveSetting(AppSettingEntity("vvip_discount_percent",vvipDiscount.coerceIn(0,100).toString()))
+   if(auto){
+    customers.value.filter{!it.tierManual}.forEach{cu->
+     val tier=when{
+      cu.points>=safeVvip -> "VVIP"
+      cu.points>=safeVip -> "VIP"
+      else -> "MEMBER"
+     }
+     if(tier!=cu.tier)dao.saveCustomer(cu.copy(tier=tier))
+    }
+   }
+   audit("LOYALTY","CONFIG","SAVE","auto=$auto,vip=$safeVip,vvip=$safeVvip")
+   autoBackup();autoMasterConfig()
+  }
+ }
 fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(AppSettingEntity(key,value));audit("SETTING",key,"SAVE",value);if(key!="master_config_uri"&&key!="autoback_tree_uri"&&key!="storage_root_uri")autoMasterConfig()}};fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
  fun addPurchase(name:String,amount:Long,note:String,at:Long=System.currentTimeMillis(),imageUri:String?=null){addPurchaseDetailed(name,1.0,"lần",amount,note,at,"",imageUri)}
  fun addPurchaseDetailed(name:String,qty:Double,unit:String,unitPrice:Long,note:String,at:Long=System.currentTimeMillis(),supplierName:String="",imageUri:String?=null,categoryId:String="pc_production"){
