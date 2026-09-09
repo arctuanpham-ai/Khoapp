@@ -112,8 +112,23 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  }
  fun canConfigureQr():Boolean{val r=currentEmployee.value?.role?:return false;return r=="ADMIN"||r=="MANAGER"}
  private fun canManageMenu():Boolean{val e=currentEmployee.value?:return false;return e.role=="ADMIN"||e.canManageMenu}
- fun saveMenu(name:String,price:Long,cat:String,imageUri:String?=null){if(!canManageMenu())return;viewModelScope.launch{val id=UUID.randomUUID().toString();repo.saveMenuItem(MenuItemEntity(id,cat,name,price,imageUri,menu.value.size+1));audit("MENU",id,"CREATE",name);autoBackup();autoMasterConfig()}}
- fun setMenuImage(i:MenuItemEntity,uri:String?){if(!canManageMenu())return;viewModelScope.launch{repo.saveMenuItem(i.copy(imageUri=uri));audit("MENU",i.id,"IMAGE");autoBackup();autoMasterConfig()}}
+ fun saveMenu(name:String,price:Long,cat:String,imageUri:String?=null){
+  if(!canManageMenu())return
+  viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
+   val id=UUID.randomUUID().toString()
+   val managed=runCatching{ManagedMedia.importImage(getApplication(),imageUri,"menu_"+id)}.getOrNull()
+   repo.saveMenuItem(MenuItemEntity(id,cat,name,price,managed,menu.value.size+1))
+   audit("MENU",id,"CREATE",name);autoBackup();autoMasterConfig()
+  }
+ }
+ fun setMenuImage(i:MenuItemEntity,uri:String?){
+  if(!canManageMenu())return
+  viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
+   val managed=runCatching{ManagedMedia.importImage(getApplication(),uri,"menu_"+i.id)}.getOrNull()
+   repo.saveMenuItem(i.copy(imageUri=managed))
+   audit("MENU",i.id,"IMAGE");autoBackup();autoMasterConfig()
+  }
+ }
  fun toggleMenu(i:MenuItemEntity){if(!canManageMenu())return;viewModelScope.launch{dao.setMenuActive(i.id,!i.active);audit("MENU",i.id,"ACTIVE",(!i.active).toString());autoBackup();autoMasterConfig()}}
  fun deleteMenu(i:MenuItemEntity){if(!canManageMenu())return;viewModelScope.launch{dao.setMenuActive(i.id,false);audit("MENU",i.id,"DELETE_SOFT",i.name);autoBackup();autoMasterConfig()}}
  fun addCategory(name:String){if(!canManageMenu()||name.isBlank())return;viewModelScope.launch{val id=UUID.randomUUID().toString();repo.saveCategory(MenuCategoryEntity(id,name.trim(),categories.value.size+1,true));audit("CATEGORY",id,"CREATE",name.trim());autoBackup();autoMasterConfig()}}
@@ -154,9 +169,10 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  fun saveCombo(name:String,price:Long,imageUri:String?,items:Map<String,Int>){
   val e=currentEmployee.value?:return
   if((e.role!="ADMIN"&&!e.canManageMenu)||name.isBlank()||price<=0||items.isEmpty())return
-  viewModelScope.launch{
+  viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
    val id=UUID.randomUUID().toString()
-   dao.saveCombo(ComboEntity(id,name.trim(),price,imageUri,combos.value.size+1,true))
+   val managed=runCatching{ManagedMedia.importImage(getApplication(),imageUri,"combo_"+id)}.getOrNull()
+   dao.saveCombo(ComboEntity(id,name.trim(),price,managed,combos.value.size+1,true))
    items.filterValues{it>0}.forEach{(menuItemId,qty)->
     dao.saveComboItem(ComboItemEntity(UUID.randomUUID().toString(),id,menuItemId,qty))
    }
@@ -216,12 +232,13 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
   val e=currentEmployee.value?:return
   if(!e.canPurchase&&e.role!="ADMIN")return
   if(name.isBlank()||qty<=0||unitPrice<=0)return
-  viewModelScope.launch{
+  viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
    val id=UUID.randomUUID().toString()
+   val managed=runCatching{ManagedMedia.importImage(getApplication(),imageUri,"invoice_"+id)}.getOrNull()
    val supplierId=if(supplierName.isBlank())null else UUID.randomUUID().toString().also{repo.saveSupplier(SupplierEntity(it,supplierName.trim()))}
    val amount=(qty*unitPrice).toLong()
    repo.savePurchase(
-    PurchaseEntity(id,supplierId,e.id,at,amount,note,imageUri),
+    PurchaseEntity(id,supplierId,e.id,at,amount,note,managed),
     listOf(PurchaseItemEntity(UUID.randomUUID().toString(),id,categoryId,name.trim(),qty,unit.ifBlank{"lần"},unitPrice,amount))
    )
    audit("PURCHASE",id,"CREATE","${name.trim()}:$qty:$unit:$unitPrice:$amount");autoBackup()
