@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -32,10 +33,10 @@ import vn.ecohome.pos0210.data.*
 import java.text.SimpleDateFormat
 import java.util.*
 
-private val Cream = Color(0xFFF7F2E9)
-private val Coffee = Color(0xFF65422F)
-private val Tint = Color(0xFFE9E2EA)
-private val Occupied = Color(0xFFE2C2A8)
+private val Cream = Color(0xFFF6F0E6)
+private val Coffee = Color(0xFF6E432D)
+private val Tint = Color(0xFFF1ECE3)
+private val Occupied = Color(0xFFE7C4AA)
 
 private fun money(v: Long) = "%,dđ".format(v).replace(',', '.')
 private fun time(v: Long) = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date(v))
@@ -138,6 +139,14 @@ fun Tables(vm: PosViewModel) {
     Column {
         Header()
         Operator(vm)
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            FilterChip(true, {}, { Text("BÁN HÀNG") })
+            FilterChip(false, { vm.screen.value = "REPORT" }, { Text("LỊCH SỬ") })
+            FilterChip(false, { vm.screen.value = "REPORT" }, { Text("BÁO CÁO") })
+        }
 
         BoxWithConstraints(
             Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
@@ -208,37 +217,93 @@ fun Tables(vm: PosViewModel) {
 @Composable
 fun Order(vm: PosViewModel, t: DiningTableEntity) {
     val ms by vm.menu.collectAsState()
+    val cats by vm.categories.collectAsState()
     val cart by vm.cart.collectAsState()
+    var selectedCat by remember(cats) { mutableStateOf(cats.firstOrNull()?.id ?: "") }
+    val visible = ms.filter { it.active && (selectedCat.isBlank() || it.categoryId == selectedCat) }
+    val itemCount = cart.values.sum()
+    val total = cart.entries.sumOf { (id, q) -> (ms.firstOrNull { it.id == id }?.price ?: 0L) * q }
+
     Column {
         Header(t.name) { vm.screen.value = "TABLES" }
-        LazyColumn(Modifier.weight(1f).padding(12.dp)) {
-            items(ms.filter { it.active }) { m ->
+
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            cats.take(5).forEach { c ->
+                FilterChip(
+                    selected = selectedCat == c.id,
+                    onClick = { selectedCat = c.id },
+                    label = { Text(c.name, fontSize = 11.sp) }
+                )
+            }
+        }
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(3),
+            modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            gridItems(visible, key = { it.id }) { m ->
                 val q = cart[m.id] ?: 0
-                Card(Modifier.fillMaxWidth().padding(4.dp)) {
-                    Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Card(
+                    Modifier.fillMaxWidth().clickable { vm.add(m) },
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFBF8F2))
+                ) {
+                    Column {
                         if (!m.imageUri.isNullOrBlank()) {
                             AsyncImage(
                                 model = m.imageUri,
                                 contentDescription = m.name,
-                                modifier = Modifier.size(58.dp)
+                                modifier = Modifier.fillMaxWidth().height(92.dp)
                             )
-                            Spacer(Modifier.width(12.dp))
+                        } else {
+                            Box(
+                                Modifier.fillMaxWidth().height(70.dp),
+                                contentAlignment = Alignment.Center
+                            ) { Text("0210", fontWeight = FontWeight.Black) }
                         }
-                        Column(Modifier.weight(1f)) {
-                            Text(m.name, fontWeight = FontWeight.Bold)
-                            Text(money(m.price))
+                        Column(Modifier.padding(8.dp)) {
+                            Text(m.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text(money(m.price), fontSize = 12.sp)
+                            if (q > 0) {
+                                Row(
+                                    Modifier.fillMaxWidth().padding(top = 5.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("−", Modifier.clickable { vm.sub(m) }.padding(5.dp), fontWeight = FontWeight.Bold)
+                                    Text(q.toString(), fontWeight = FontWeight.Black)
+                                    Text("+", Modifier.clickable { vm.add(m) }.padding(5.dp), fontWeight = FontWeight.Bold)
+                                }
+                            }
                         }
-                        if (q > 0) Text("− $q", Modifier.clickable { vm.sub(m) }.padding(10.dp))
-                        Text("＋", Modifier.clickable { vm.add(m) }.padding(10.dp))
                     }
                 }
             }
         }
-        Button(
-            onClick = { vm.sendBatch() },
-            modifier = Modifier.fillMaxWidth().padding(16.dp),
-            enabled = cart.isNotEmpty()
-        ) { Text("GỬI LÀM HÀNG") }
+
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("$itemCount món", fontWeight = FontWeight.Bold)
+            Spacer(Modifier.weight(1f))
+            Text(money(total), fontWeight = FontWeight.Black)
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedButton(onClick = {}, modifier = Modifier.weight(1f)) { Text("XEM GIỎ HÀNG") }
+            Button(
+                onClick = { vm.sendBatch() },
+                modifier = Modifier.weight(1f),
+                enabled = cart.isNotEmpty()
+            ) { Text("GỬI LÀM HÀNG") }
+        }
     }
 }
 
@@ -412,6 +477,34 @@ fun Manage(vm: PosViewModel) {
     val context = LocalContext.current
     var backupMessage by remember { mutableStateOf("") }
 
+    val exportMasterConfig = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+            val result = ConfigBackup.exportConfig(context, uri)
+            if (result.isSuccess) vm.saveSetting("master_config_uri", uri.toString())
+            backupMessage = if (result.isSuccess) "Đã lưu MASTER CONFIG .0210" else "MASTER lỗi: ${result.exceptionOrNull()?.message}"
+        }
+    }
+
+    val importMasterConfig = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val result = ConfigBackup.importConfig(context, uri)
+            if (result.isSuccess) {
+                Toast.makeText(context, "Đã khôi phục MASTER CONFIG. Mở lại app.", Toast.LENGTH_LONG).show()
+                android.os.Process.killProcess(android.os.Process.myPid())
+            } else {
+                backupMessage = "Restore MASTER lỗi: ${result.exceptionOrNull()?.message}"
+            }
+        }
+    }
+
     val exportBackup = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri ->
@@ -467,6 +560,27 @@ fun Manage(vm: PosViewModel) {
             Rowx("Máy in", "Cấu hình") { vm.screen.value = "PRINTER" }
 
             if (employee?.role == "ADMIN" || employee?.canManageSystem == true) {
+                Card(Modifier.fillMaxWidth().padding(5.dp)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("MASTER CONFIG", fontWeight = FontWeight.Black, fontSize = 18.sp)
+                        Text("Menu · ảnh món · bàn · nhân viên · VietQR · cấu hình máy in", fontSize = 12.sp)
+                        Text(
+                            if (vm.setting("master_config_uri").isBlank()) "Chưa gắn file MASTER" else "MASTER tự cập nhật: ĐÃ BẬT",
+                            Modifier.padding(vertical = 6.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold
+                        )
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { exportMasterConfig.launch("POS0210_MASTER.0210") },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("XUẤT MASTER") }
+                            Button(
+                                onClick = { importMasterConfig.launch(arrayOf("*/*")) },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("LOAD MASTER") }
+                        }
+                    }
+                }
+
                 Card(Modifier.fillMaxWidth().padding(5.dp)) {
                     Column(Modifier.padding(16.dp)) {
                         Text("Sao lưu dữ liệu", fontWeight = FontWeight.Bold)
@@ -1118,9 +1232,38 @@ fun VietQr(vm: PosViewModel) {
 
 @Composable
 fun Printer(vm: PosViewModel) {
+    val preview by vm.printerPreview.collectAsState()
     Column {
         Header("Máy in") { vm.screen.value = "MANAGE" }
-        Text("Driver ESC/POS chưa kích hoạt", Modifier.padding(20.dp))
+        Column(Modifier.fillMaxSize().padding(16.dp)) {
+            Text("MÁY IN BILL NHIỆT K80 · ESC/POS", fontWeight = FontWeight.Black)
+            Text("Chế độ hiện tại: TEST / PREVIEW · chưa cần máy in thật", fontSize = 12.sp)
+            Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton({ vm.previewKitchen() }, Modifier.weight(1f)) { Text("PHIẾU BẾP", fontSize = 11.sp) }
+                OutlinedButton({ vm.previewBill() }, Modifier.weight(1f)) { Text("BILL", fontSize = 11.sp) }
+                OutlinedButton({ vm.previewCancel() }, Modifier.weight(1f)) { Text("PHIẾU HỦY", fontSize = 11.sp) }
+            }
+            if (preview.isNotBlank()) {
+                Card(
+                    Modifier.fillMaxWidth().weight(1f).padding(top = 12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color.White)
+                ) {
+                    Text(
+                        preview,
+                        Modifier.fillMaxSize().padding(18.dp),
+                        fontSize = 13.sp
+                    )
+                }
+            } else {
+                Card(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Test trước khi mua máy", fontWeight = FontWeight.Bold)
+                        Text("Preview kiểm tra nội dung và bố cục phiếu. Khi có máy K80 Bluetooth ESC/POS sẽ nối transport Bluetooth vào cùng formatter.")
+                    }
+                }
+            }
+        }
     }
 }
 

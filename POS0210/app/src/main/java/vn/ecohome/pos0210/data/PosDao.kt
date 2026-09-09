@@ -22,6 +22,12 @@ import kotlinx.coroutines.flow.Flow
 @Query("SELECT * FROM PrintJobEntity ORDER BY createdAt DESC") fun printJobs():Flow<List<PrintJobEntity>>
 @Query("SELECT * FROM AuditEventEntity ORDER BY occurredAt DESC LIMIT 100") fun audits():Flow<List<AuditEventEntity>>
 @Query("SELECT * FROM AppSettingEntity") fun settings():Flow<List<AppSettingEntity>>
+@Query("SELECT * FROM AreaEntity ORDER BY sortOrder,name") suspend fun allAreasSnapshot():List<AreaEntity>
+@Query("SELECT * FROM DiningTableEntity ORDER BY sortOrder,name") suspend fun allTablesSnapshot():List<DiningTableEntity>
+@Query("SELECT * FROM MenuCategoryEntity ORDER BY sortOrder,name") suspend fun allCategoriesSnapshot():List<MenuCategoryEntity>
+@Query("SELECT * FROM MenuItemEntity ORDER BY sortOrder,name") suspend fun allMenuSnapshot():List<MenuItemEntity>
+@Query("SELECT * FROM EmployeeEntity ORDER BY name") suspend fun allEmployeesSnapshot():List<EmployeeEntity>
+@Query("SELECT * FROM AppSettingEntity") suspend fun allSettingsSnapshot():List<AppSettingEntity>
 @Query("SELECT * FROM EmployeeEntity WHERE pin=:pin AND active=1 LIMIT 1") suspend fun employeeByPin(pin:String):EmployeeEntity?
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertSession(v:TableSessionEntity)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertBatch(v:OrderBatchEntity)
