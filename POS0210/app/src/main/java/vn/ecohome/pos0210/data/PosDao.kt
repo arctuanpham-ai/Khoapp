@@ -51,6 +51,13 @@ import kotlinx.coroutines.flow.Flow
 @Query("UPDATE MenuItemEntity SET active=:active WHERE id=:id") suspend fun setMenuActive(id:String,active:Boolean)
 @Query("UPDATE MenuCategoryEntity SET active=:active WHERE id=:id") suspend fun setCategoryActive(id:String,active:Boolean)
 @Query("UPDATE PurchaseCategoryEntity SET active=:active WHERE id=:id") suspend fun setPurchaseCategoryActive(id:String,active:Boolean)
+@Query("UPDATE AreaEntity SET active=0") suspend fun deactivateAllAreas()
+@Query("UPDATE DiningTableEntity SET active=0") suspend fun deactivateAllTables()
+@Query("UPDATE MenuCategoryEntity SET active=0") suspend fun deactivateAllMenuCategories()
+@Query("UPDATE MenuItemEntity SET active=0") suspend fun deactivateAllMenuItems()
+@Query("UPDATE EmployeeEntity SET active=0") suspend fun deactivateAllEmployees()
+@Query("UPDATE PurchaseCategoryEntity SET active=0") suspend fun deactivateAllPurchaseCategories()
+@Query("DELETE FROM AppSettingEntity WHERE key NOT IN ('autoback_tree_uri','master_config_uri')") suspend fun clearConfigSettings()
 @Query("UPDATE EmployeeEntity SET active=:active WHERE id=:id") suspend fun setEmployeeActive(id:String,active:Boolean)
 @Query("UPDATE OrderBatchEntity SET status=:newStatus,sentAt=:sentAt WHERE id=:id AND status=:expected") suspend fun transitionBatch(id:String,expected:String,newStatus:String,sentAt:Long?):Int
 @Query("UPDATE OrderBatchEntity SET status='CANCELLED' WHERE id=:id AND status IN ('DRAFT','SENT')") suspend fun cancelBatch(id:String):Int

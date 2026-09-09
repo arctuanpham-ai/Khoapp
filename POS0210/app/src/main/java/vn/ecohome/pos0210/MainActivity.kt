@@ -504,7 +504,7 @@ fun Manage(vm: PosViewModel) {
             val result = ConfigBackup.exportConfig(context, uri)
             if (result.isSuccess) {
                 vm.saveSetting("master_config_uri", uri.toString())
-                ConfigBackup.saveMasterToDownloads(context)
+                ConfigBackup.copyMasterToDownloads(context, uri)
             }
             backupMessage = if (result.isSuccess) "Đã lưu MASTER CONFIG .0210 + bản tự nhận trong Downloads" else "MASTER lỗi: ${result.exceptionOrNull()?.message}"
         }
@@ -514,8 +514,8 @@ fun Manage(vm: PosViewModel) {
         if (uri != null) {
             val result = ConfigBackup.importConfig(context, uri)
             if (result.isSuccess) {
-                ConfigBackup.saveMasterToDownloads(context)
-                Toast.makeText(context, "Đã khôi phục MASTER CONFIG. Mở lại app.", Toast.LENGTH_LONG).show()
+                ConfigBackup.copyMasterToDownloads(context, uri)
+                Toast.makeText(context, "Đã khôi phục MASTER CONFIG và đặt làm MASTER chuẩn.", Toast.LENGTH_LONG).show()
                 android.os.Process.killProcess(android.os.Process.myPid())
             } else {
                 backupMessage = "Restore MASTER lỗi: ${result.exceptionOrNull()?.message}"
@@ -1592,11 +1592,11 @@ fun Printer(vm: PosViewModel) {
 fun SimplePrintPreview(title: String, body: String) {
     Column(Modifier.fillMaxSize().padding(20.dp)) {
         Text("0210", Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 25.sp, fontWeight = FontWeight.Black)
-        Text("BREAKFAST · COFFEE · DRINKS", Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Text("BREAKFAST · COFFEE · DRINKS", Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 18.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(12.dp))
-        Text(title, Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 18.sp, fontWeight = FontWeight.Black)
+        Text(title, Modifier.fillMaxWidth(), textAlign = TextAlign.Center, fontSize = 24.sp, fontWeight = FontWeight.Black)
         Spacer(Modifier.height(10.dp))
-        Text(body.substringAfter("--------------------------------").trim(), fontSize = 13.sp, lineHeight = 20.sp)
+        Text(body.substringAfter("--------------------------------").trim(), fontSize = 18.sp, lineHeight = 26.sp)
     }
 }
 
@@ -1614,10 +1614,10 @@ fun BillPrintPreview(vm: PosViewModel) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text("0210", fontSize = 30.sp, fontWeight = FontWeight.Black)
-        Text("BREAKFAST · COFFEE · DRINKS", fontSize = 10.sp, fontWeight = FontWeight.Medium)
+        Text("BREAKFAST · COFFEE · DRINKS", fontSize = 18.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(12.dp))
-        Text("BILL THANH TOÁN", fontSize = 17.sp, fontWeight = FontWeight.Black)
-        Text("BÀN 02  ·  08:32–09:25", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Text("BILL THANH TOÁN", fontSize = 24.sp, fontWeight = FontWeight.Black)
+        Text("BÀN 02  ·  08:32–09:25", fontSize = 18.sp, fontWeight = FontWeight.Medium)
         HorizontalDivider(Modifier.padding(vertical = 10.dp))
 
         PrintLine("2 × Bún gà", "80.000đ", bold = false)
@@ -1626,18 +1626,18 @@ fun BillPrintPreview(vm: PosViewModel) {
 
         HorizontalDivider(Modifier.padding(vertical = 10.dp))
         PrintLine("TỔNG CỘNG", "135.000đ", bold = true, large = true)
-        Text("Thanh toán: TIỀN MẶT / CHUYỂN KHOẢN", Modifier.fillMaxWidth(), fontSize = 11.sp)
+        Text("Thanh toán: TIỀN MẶT / CHUYỂN KHOẢN", Modifier.fillMaxWidth(), fontSize = 18.sp)
 
         HorizontalDivider(Modifier.padding(vertical = 10.dp))
-        Text("QUÉT MÃ THANH TOÁN", fontSize = 13.sp, fontWeight = FontWeight.Black)
+        Text("QUÉT MÃ THANH TOÁN", fontSize = 20.sp, fontWeight = FontWeight.Black)
         if (qrUrl.isNotBlank()) {
             AsyncImage(
                 model = qrUrl,
                 contentDescription = "VietQR trên bill",
                 modifier = Modifier.size(180.dp).padding(top = 6.dp)
             )
-            Text("${setting("bank_name")} · ${setting("bank_account")}", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            Text("Nội dung: 0210 BAN 02", fontSize = 10.sp)
+            Text("${setting("bank_name")} · ${setting("bank_account")}", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("Nội dung: 0210 BAN 02", fontSize = 18.sp)
         } else {
             Box(
                 Modifier.size(150.dp).padding(10.dp),
@@ -1646,7 +1646,7 @@ fun BillPrintPreview(vm: PosViewModel) {
         }
 
         HorizontalDivider(Modifier.padding(vertical = 10.dp))
-        Text("CẢM ƠN QUÝ KHÁCH!", fontWeight = FontWeight.Black, fontSize = 13.sp)
+        Text("CẢM ƠN QUÝ KHÁCH!", fontWeight = FontWeight.Black, fontSize = 18.sp)
         Text("Good Food · Good Coffee · Brighter Day", fontSize = 10.sp)
     }
 }
@@ -1658,7 +1658,7 @@ fun PrintLine(label: String, value: String, bold: Boolean, large: Boolean = fals
             label,
             Modifier.weight(1f),
             fontWeight = if (bold) FontWeight.Black else FontWeight.Normal,
-            fontSize = if (large) 17.sp else 13.sp
+            fontSize = if (large) 26.sp else 18.sp
         )
         Text(
             value,

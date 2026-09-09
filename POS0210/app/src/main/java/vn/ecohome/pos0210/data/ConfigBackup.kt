@@ -151,6 +151,38 @@ object ConfigBackup {
         target
     }
 
+    fun copyMasterToDownloads(context: Context, source: Uri): Result<Uri> = runCatching {
+        require(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) { "Android này chưa hỗ trợ MASTER Downloads" }
+        val resolver = context.contentResolver
+        val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+        var target: Uri? = null
+        resolver.query(
+            collection,
+            arrayOf(MediaStore.Downloads._ID),
+            MediaStore.Downloads.DISPLAY_NAME + "=?",
+            arrayOf(MASTER_NAME),
+            MediaStore.Downloads.DATE_MODIFIED + " DESC"
+        )?.use { c ->
+            if (c.moveToFirst()) target = Uri.withAppendedPath(collection, c.getLong(0).toString())
+        }
+        val outUri = target ?: resolver.insert(
+            collection,
+            android.content.ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, MASTER_NAME)
+                put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                put(MediaStore.Downloads.RELATIVE_PATH, "Download")
+            }
+        ) ?: error("Không tạo được MASTER trong Downloads")
+        resolver.openInputStream(source).use { input ->
+            requireNotNull(input)
+            resolver.openOutputStream(outUri, "w").use { output ->
+                requireNotNull(output)
+                input.copyTo(output)
+            }
+        }
+        outUri
+    }
+
     fun findMasterInDownloads(context: Context): Uri? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
         val resolver = context.contentResolver

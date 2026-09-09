@@ -11,8 +11,8 @@ android {
         applicationId = "vn.ecohome.pos0210"
         minSdk = 26
         targetSdk = 35
-        versionCode = 21
-        versionName = "1.0.0-alpha12"
+        versionCode = 22
+        versionName = "1.0.0-alpha13"
     }
     signingConfigs {
         getByName("debug") {

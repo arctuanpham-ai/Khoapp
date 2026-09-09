@@ -112,26 +112,26 @@ object ReceiptRenderer {
         val (b,c)=canvas(estimated)
         var y=48f
         c.drawText("0210",W/2f,y,paint(40f,true,Paint.Align.CENTER));y+=27
-        c.drawText("BREAKFAST · COFFEE · DRINKS",W/2f,y,paint(14f,false,Paint.Align.CENTER));y+=32
-        c.drawText("BILL THANH TOÁN",W/2f,y,paint(22f,true,Paint.Align.CENTER));y+=25
-        c.drawText("${table.uppercase()}  ·  $period",W/2f,y,paint(15f,false,Paint.Align.CENTER));y+=22
+        c.drawText("BREAKFAST · COFFEE · DRINKS",W/2f,y,paint(18f,false,Paint.Align.CENTER));y+=32
+        c.drawText("BILL THANH TOÁN",W/2f,y,paint(28f,true,Paint.Align.CENTER));y+=25
+        c.drawText("${table.uppercase()}  ·  $period",W/2f,y,paint(18f,false,Paint.Align.CENTER));y+=22
         line(c,y);y+=28
         items.forEach{(name,qty,unitPrice)->
             y=item(c,y,"$qty × $name",money(unitPrice*qty))
         }
         line(c,y);y+=34
-        c.drawText("TỔNG CỘNG",PAD,y,paint(24f,true))
+        c.drawText("TỔNG CỘNG",PAD,y,paint(30f,true))
         c.drawText(money(total),W-PAD,y,paint(24f,true,Paint.Align.RIGHT));y+=30
-        c.drawText("Thanh toán: $method",PAD,y,paint(14f));y+=24
+        c.drawText("Thanh toán: $method",PAD,y,paint(18f));y+=24
         line(c,y);y+=30
         if(qr!=null){
-            c.drawText("QUÉT MÃ THANH TOÁN",W/2f,y,paint(17f,true,Paint.Align.CENTER));y+=14
+            c.drawText("QUÉT MÃ THANH TOÁN",W/2f,y,paint(22f,true,Paint.Align.CENTER));y+=14
             val q=Bitmap.createScaledBitmap(qr,210,210,true)
             c.drawBitmap(q,(W-210)/2f,y,null);y+=225
         }
         line(c,y);y+=30
         c.drawText("CẢM ƠN QUÝ KHÁCH!",W/2f,y,paint(17f,true,Paint.Align.CENTER));y+=23
-        c.drawText("Good Food · Good Coffee · Brighter Day",W/2f,y,paint(13f,false,Paint.Align.CENTER))
+        c.drawText("Good Food · Good Coffee · Brighter Day",W/2f,y,paint(18f,false,Paint.Align.CENTER))
         return crop(b,(y+28).toInt())
     }
 
@@ -139,15 +139,15 @@ object ReceiptRenderer {
         val h=260+items.size*55
         val (b,c)=canvas(h)
         var y=45f
-        c.drawText("0210",W/2f,y,paint(34f,true,Paint.Align.CENTER));y+=30
-        c.drawText("PHIẾU LÀM HÀNG",W/2f,y,paint(23f,true,Paint.Align.CENTER));y+=28
-        c.drawText("${table.uppercase()}  ·  ĐƠN #$sequence",W/2f,y,paint(16f,true,Paint.Align.CENTER));y+=22
+        c.drawText("0210",W/2f,y,paint(38f,true,Paint.Align.CENTER));y+=30
+        c.drawText("PHIẾU LÀM HÀNG",W/2f,y,paint(30f,true,Paint.Align.CENTER));y+=28
+        c.drawText("${table.uppercase()}  ·  ĐƠN #$sequence",W/2f,y,paint(20f,true,Paint.Align.CENTER));y+=22
         line(c,y);y+=32
         items.forEach{(name,qty)->
-            c.drawText("$qty × $name",PAD,y,paint(21f,true));y+=42
+            c.drawText("$qty × $name",PAD,y,paint(24f,true));y+=42
         }
         line(c,y);y+=28
-        c.drawText("Order: $orderer",PAD,y,paint(15f,true))
+        c.drawText("Order: $orderer",PAD,y,paint(18f,true))
         return crop(b,(y+28).toInt())
     }
 
@@ -155,11 +155,11 @@ object ReceiptRenderer {
         val (b,c)=canvas(340)
         var y=48f
         c.drawText("0210",W/2f,y,paint(34f,true,Paint.Align.CENTER));y+=34
-        c.drawText("PHIẾU HỦY ĐƠN",W/2f,y,paint(24f,true,Paint.Align.CENTER));y+=30
+        c.drawText("PHIẾU HỦY ĐƠN",W/2f,y,paint(30f,true,Paint.Align.CENTER));y+=30
         c.drawText("${table.uppercase()} · ĐƠN #$sequence",W/2f,y,paint(17f,true,Paint.Align.CENTER));y+=28
         line(c,y);y+=34
-        c.drawText("LÝ DO:",PAD,y,paint(16f,true));y+=24
-        y=wrap(c,reason,PAD,y,W-PAD*2,paint(17f),24f)
+        c.drawText("LÝ DO:",PAD,y,paint(20f,true));y+=24
+        y=wrap(c,reason,PAD,y,W-PAD*2,paint(20f),24f)
         y+=8
         line(c,y);y+=30
         c.drawText("Manager: $manager",PAD,y,paint(15f,true))
@@ -168,7 +168,7 @@ object ReceiptRenderer {
 
     private fun item(c:Canvas,y0:Float,name:String,price:String):Float{
         val y=y0
-        c.drawText(name,PAD,y,paint(17f,true))
+        c.drawText(name,PAD,y,paint(22f,true))
         c.drawText(price,W-PAD,y,paint(17f,true,Paint.Align.RIGHT))
         return y+34
     }

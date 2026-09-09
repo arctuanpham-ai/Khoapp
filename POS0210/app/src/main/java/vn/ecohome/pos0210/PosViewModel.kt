@@ -5,13 +5,15 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import vn.ecohome.pos0210.data.*
 import vn.ecohome.pos0210.printing.PrinterText
 import vn.ecohome.pos0210.printing.BluetoothPrinter
 import vn.ecohome.pos0210.printing.ReceiptRenderer
 import java.util.UUID
 class PosViewModel(app:Application):AndroidViewModel(app){
- private val db=PosDatabase.get(app);private val repo=PosRepository(db);private val dao=db.dao()
+ private val db=PosDatabase.get(app);private val repo=PosRepository(db);private val dao=db.dao();private val masterMutex=Mutex()
  val areas=repo.areas().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val tables=repo.tables().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val categories=repo.categories().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val menu=repo.menuItems().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val employees=repo.employees().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val sessions=repo.openSessions().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val bills=repo.paidBills().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val suppliers=dao.suppliers().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val purchases=dao.purchases().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val purchaseCategories=dao.purchaseCategories().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val payments=dao.payments().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val settings=dao.settings().stateIn(viewModelScope,SharingStarted.Eagerly,emptyList());val printJobs=dao.printJobs().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val audits=dao.audits().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val itemSales=dao.paidItemSales().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList())
  val cart=MutableStateFlow<Map<String,Int>>(emptyMap());val currentTable=MutableStateFlow<DiningTableEntity?>(null);val currentSession=MutableStateFlow<TableSessionEntity?>(null);val currentEmployee=MutableStateFlow<EmployeeEntity?>(null);val authError=MutableStateFlow("");val screen=MutableStateFlow("LOGIN");val printerPreview=MutableStateFlow("");val printerMessage=MutableStateFlow("")
  init{viewModelScope.launch{bootstrap()}}
@@ -30,10 +32,12 @@ class PosViewModel(app:Application):AndroidViewModel(app){
   val tree=settings.value.firstOrNull{it.key=="autoback_tree_uri"}?.value.orEmpty()
   if(tree.isNotBlank()) DataBackup.autoBackup(getApplication(),tree)
  }
- private fun autoMasterConfig(){
-  ConfigBackup.saveMasterToDownloads(getApplication())
-  val uri=settings.value.firstOrNull{it.key=="master_config_uri"}?.value.orEmpty()
-  if(uri.isNotBlank()) ConfigBackup.exportConfig(getApplication(),Uri.parse(uri))
+ private suspend fun autoMasterConfig(){
+  masterMutex.withLock {
+   ConfigBackup.saveMasterToDownloads(getApplication())
+   val uri=dao.allSettingsSnapshot().firstOrNull{it.key=="master_config_uri"}?.value.orEmpty()
+   if(uri.isNotBlank()) ConfigBackup.exportConfig(getApplication(),Uri.parse(uri))
+  }
  }
  fun previewKitchen(){printerPreview.value="KITCHEN"}
  fun previewBill(){printerPreview.value="BILL"}
