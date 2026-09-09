@@ -163,6 +163,52 @@ class PosRepository(private val db:PosDatabase){
         return bill
     }
 
+    suspend fun deleteBillsAtomic(
+        targets:List<BillEntity>,
+        reason:String,
+        actorId:String,
+        autoTier:Boolean,
+        vipMinPoints:Int,
+        vvipMinPoints:Int
+    ):Int = db.withTransaction {
+        var changed=0
+        val safeVvip=vvipMinPoints.coerceAtLeast(vipMinPoints)
+        val now=System.currentTimeMillis()
+        targets.forEach { bill ->
+            if(dao.softDeleteBill(bill.id)==1){
+                changed++
+                bill.customerId?.let { customerId ->
+                    val delta=dao.pointDeltaForBill(bill.id)
+                    val cu=dao.customerById(customerId)
+                    if(delta!=0){
+                        dao.insertCustomerPoint(CustomerPointTransactionEntity(
+                            UUID.randomUUID().toString(),customerId,bill.id,-delta,
+                            "HỦY/XÓA BILL ${bill.billNo}",now,actorId
+                        ))
+                    }
+                    if(cu!=null){
+                        val newPoints=(cu.points-delta).coerceAtLeast(0)
+                        val newSpend=(cu.totalSpend-bill.total).coerceAtLeast(0)
+                        val newVisits=(cu.visitCount-1).coerceAtLeast(0)
+                        val newTier=if(cu.tierManual||!autoTier) cu.tier else when {
+                            newPoints>=safeVvip -> "VVIP"
+                            newPoints>=vipMinPoints -> "VIP"
+                            else -> "MEMBER"
+                        }
+                        dao.saveCustomer(cu.copy(
+                            points=newPoints,totalSpend=newSpend,visitCount=newVisits,tier=newTier,lastVisitAt=now
+                        ))
+                    }
+                }
+                dao.audit(AuditEventEntity(
+                    UUID.randomUUID().toString(),"BILL",bill.id,"DELETE_SOFT",actorId,null,now,
+                    "reason=${reason.trim()},total=${bill.total}"
+                ))
+            }
+        }
+        changed
+    }
+
     suspend fun closeCancelledSession(session:TableSessionEntity,actorId:String) {
         val now=System.currentTimeMillis()
         db.withTransaction {
