@@ -684,43 +684,163 @@ fun DeliveryQueue(vm: PosViewModel) {
 @Composable
 fun Customers(vm: PosViewModel) {
     val customers by vm.customers.collectAsState()
+    val itemStats by vm.customerItemStats.collectAsState()
+    val bills by vm.bills.collectAsState()
     var selected by remember { mutableStateOf<CustomerEntity?>(null) }
+    var query by remember { mutableStateOf("") }
+    var section by remember { mutableStateOf("LIST") }
+
+    val normalizedQuery = query.trim().lowercase()
+    val visibleCustomers = customers.filter { c ->
+        normalizedQuery.isBlank() || c.phone.contains(normalizedQuery.filter(Char::isDigit)) || c.name.lowercase().contains(normalizedQuery)
+    }
+
+    fun aggregatedRows(customerIds: Set<String>, combos: Boolean): List<Pair<String, Int>> {
+        return itemStats
+            .filter { it.customerId in customerIds }
+            .filter { if (combos) it.name.startsWith("COMBO ·") else !it.name.startsWith("COMBO ·") }
+            .groupBy { it.name }
+            .map { (name, rows) -> name to rows.sumOf { it.qty } }
+            .sortedByDescending { it.second }
+    }
+
     Column {
         Header("Khách hàng") { vm.screen.value = "MANAGE" }
-        Text("Member · VIP · VVIP", Modifier.padding(horizontal = 16.dp), fontWeight = FontWeight.Bold)
-        LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
-            items(customers) { c ->
-                Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { selected = c }) {
-                    Column(Modifier.padding(14.dp)) {
-                        Text("${c.phone} · ${c.tier}", fontWeight = FontWeight.Black)
-                        if (c.name.isNotBlank()) Text(c.name)
-                        Text("${c.points} điểm · ${c.visitCount} lần ghé · ${money(c.totalSpend)}")
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(section == "LIST", { section = "LIST" }, { Text("DANH SÁCH") })
+            FilterChip(section == "ANALYTICS", { section = "ANALYTICS" }, { Text("PHÂN TÍCH THÀNH VIÊN") })
+        }
+
+        if (section == "LIST") {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it.take(50) },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                leadingIcon = { Text("🔍") },
+                label = { Text("Tìm số điện thoại hoặc tên khách") },
+                singleLine = true
+            )
+            Text(
+                "${visibleCustomers.size} / ${customers.size} khách · Member / VIP / VVIP",
+                Modifier.padding(horizontal = 16.dp),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+            if (visibleCustomers.isEmpty()) {
+                Text("Không tìm thấy khách phù hợp.", Modifier.padding(20.dp))
+            } else {
+                LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
+                    items(visibleCustomers, key = { it.id }) { c ->
+                        Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { selected = c }) {
+                            Column(Modifier.padding(14.dp)) {
+                                Text("${c.phone} · ${c.tier}", fontWeight = FontWeight.Black)
+                                if (c.name.isNotBlank()) Text(c.name)
+                                Text("${c.points} điểm · ${c.visitCount} lần ghé · ${money(c.totalSpend)}")
+                                c.lastVisitAt?.let { Text("Gần nhất: ${time(it)}", fontSize = 11.sp) }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
+                item {
+                    Text("PHÂN TÍCH KHÁCH THÀNH VIÊN", fontWeight = FontWeight.Black, fontSize = 20.sp)
+                    Text("Tỷ lệ món tính theo tổng số phần đã gọi trong các bill còn hiệu lực.", fontSize = 11.sp)
+                    Spacer(Modifier.height(8.dp))
+                }
+                items(listOf("MEMBER","VIP","VVIP")) { tier ->
+                    val tierCustomers = customers.filter { it.tier == tier }
+                    val ids = tierCustomers.map { it.id }.toSet()
+                    val foodRows = aggregatedRows(ids, false)
+                    val comboRows = aggregatedRows(ids, true)
+                    val totalQty = foodRows.sumOf { it.second }
+                    val tierBills = bills.filter { it.customerId in ids }
+                    val avgBill = if (tierBills.isEmpty()) 0L else tierBills.sumOf { it.total } / tierBills.size
+                    Card(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+                        Column(Modifier.padding(14.dp)) {
+                            Text("$tier · ${tierCustomers.size} khách", fontWeight = FontWeight.Black, fontSize = 18.sp)
+                            Text("Bill TB: ${money(avgBill)} · ${tierBills.size} bill", fontSize = 12.sp)
+                            if (foodRows.isEmpty()) {
+                                Text("Chưa đủ dữ liệu món.", Modifier.padding(top = 8.dp), fontSize = 12.sp)
+                            } else {
+                                Text("Top món", Modifier.padding(top = 8.dp), fontWeight = FontWeight.Bold)
+                                foodRows.take(5).forEach { row ->
+                                    val pct = if (totalQty == 0) 0 else ((row.second * 100.0 / totalQty) + 0.5).toInt()
+                                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                                        Text(row.first, Modifier.weight(1f), fontSize = 12.sp)
+                                        Text("${row.second} phần · $pct%", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                            comboRows.firstOrNull()?.let { combo ->
+                                Text("Combo hay gọi: ${combo.first} · ${combo.second} lần", Modifier.padding(top = 7.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
                     }
                 }
             }
         }
     }
+
     selected?.let { c ->
+        val rows = itemStats.filter { it.customerId == c.id }
+        val foodRows = rows
+            .filter { !it.name.startsWith("COMBO ·") }
+            .groupBy { it.name }
+            .map { (name, rs) -> name to rs.sumOf { it.qty } }
+            .sortedByDescending { it.second }
+        val comboRows = rows
+            .filter { it.name.startsWith("COMBO ·") }
+            .groupBy { it.name }
+            .map { (name, rs) -> name to rs.sumOf { it.qty } }
+            .sortedByDescending { it.second }
+        val totalFoodQty = foodRows.sumOf { it.second }
+        val customerBills = bills.filter { it.customerId == c.id }
+        val avgBill = if (customerBills.isEmpty()) 0L else customerBills.sumOf { it.total } / customerBills.size
+
         AlertDialog(
             onDismissRequest = { selected = null },
-            title = { Text(c.phone) },
+            title = { Text(if (c.name.isBlank()) c.phone else "${c.name} · ${c.phone}") },
             text = {
-                Column {
-                    Text("Tổng chi tiêu: ${money(c.totalSpend)}")
-                    Text("Điểm: ${c.points}")
-                    Text("Lượt ghé: ${c.visitCount}")
-                    Text("Hạng khách", Modifier.padding(top = 10.dp), fontWeight = FontWeight.Bold)
-                    Text(if (c.tierManual) "Đang khóa hạng thủ công" else "Đang tự động theo điểm", fontSize = 11.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf("MEMBER","VIP","VVIP").forEach { tier ->
-                            FilterChip(c.tier == tier, { vm.setCustomerTier(c,tier); selected = c.copy(tier=tier,tierManual=true) }, { Text(tier) })
+                LazyColumn {
+                    item {
+                        Text("Hạng: ${c.tier}", fontWeight = FontWeight.Black)
+                        Text("Tổng chi tiêu: ${money(c.totalSpend)}")
+                        Text("Điểm: ${c.points}")
+                        Text("Lượt ghé: ${c.visitCount}")
+                        Text("Bill trung bình: ${money(avgBill)}")
+                        c.lastVisitAt?.let { Text("Lần ghé gần nhất: ${time(it)}") }
+                        foodRows.firstOrNull()?.let { Text("Món gọi nhiều nhất: ${it.first}", Modifier.padding(top = 6.dp), fontWeight = FontWeight.Bold) }
+                        comboRows.firstOrNull()?.let { Text("Combo hay gọi nhất: ${it.first}", fontWeight = FontWeight.Bold) }
+                        Spacer(Modifier.height(10.dp))
+                        Text("MÓN THƯỜNG GỌI", fontWeight = FontWeight.Black)
+                    }
+                    if (foodRows.isEmpty()) {
+                        item { Text("Chưa có đủ lịch sử món.", Modifier.padding(vertical = 6.dp)) }
+                    } else {
+                        items(foodRows.take(8)) { row ->
+                            val pct = if (totalFoodQty == 0) 0 else ((row.second * 100.0 / totalFoodQty) + 0.5).toInt()
+                            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                                Text(row.first, Modifier.weight(1f), fontSize = 12.sp)
+                                Text("${row.second} phần · $pct%", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
-                    if (c.tierManual) {
-                        OutlinedButton(
-                            onClick = { vm.setCustomerTierAutomatic(c); selected = null },
-                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                        ) { Text("CHUYỂN VỀ TỰ ĐỘNG THEO ĐIỂM") }
+                    item {
+                        Text("HẠNG KHÁCH", Modifier.padding(top = 10.dp), fontWeight = FontWeight.Bold)
+                        Text(if (c.tierManual) "Đang khóa hạng thủ công" else "Đang tự động theo điểm", fontSize = 11.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("MEMBER","VIP","VVIP").forEach { tier ->
+                                FilterChip(c.tier == tier, { vm.setCustomerTier(c,tier); selected = c.copy(tier=tier,tierManual=true) }, { Text(tier) })
+                            }
+                        }
+                        if (c.tierManual) {
+                            OutlinedButton(
+                                onClick = { vm.setCustomerTierAutomatic(c); selected = null },
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                            ) { Text("CHUYỂN VỀ TỰ ĐỘNG THEO ĐIỂM") }
+                        }
                     }
                 }
             },
