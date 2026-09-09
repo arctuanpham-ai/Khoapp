@@ -87,6 +87,7 @@ fun App(vm: PosViewModel = viewModel()) {
         "PRICING" -> PricingManager(vm)
         "DELIVERY" -> DeliveryQueue(vm)
         "CUSTOMERS" -> Customers(vm)
+        "LOYALTY_CONFIG" -> LoyaltyConfig(vm)
         "EMP" -> Employees(vm)
         "PURCHASE" -> Purchases(vm)
         "VIETQR" -> VietQr(vm)
@@ -486,6 +487,42 @@ private fun pricingRuleInTime(rule: PricingRuleEntity, now: Long): Boolean {
     return true
 }
 
+private fun settingValue(settings: List<AppSettingEntity>, key: String, fallback: String): String =
+    settings.firstOrNull { it.key == key }?.value?.ifBlank { fallback } ?: fallback
+
+private fun effectiveCustomerTier(customer: CustomerEntity?, settings: List<AppSettingEntity>, newMember: Boolean = false): String? {
+    if (customer == null) return if (newMember) "MEMBER" else null
+    if (customer.tierManual) return customer.tier
+    val auto = settingValue(settings, "loyalty_auto_tier", "true").toBoolean()
+    if (!auto) return customer.tier
+    val vip = settingValue(settings, "vip_min_points", "200").toIntOrNull() ?: 200
+    val vvip = settingValue(settings, "vvip_min_points", "500").toIntOrNull() ?: 500
+    return when {
+        customer.points >= vvip -> "VVIP"
+        customer.points >= vip -> "VIP"
+        else -> "MEMBER"
+    }
+}
+
+private fun tierDiscountRule(tier: String?, settings: List<AppSettingEntity>): PricingRuleEntity? {
+    if (tier == null) return null
+    val key = when (tier) {
+        "VVIP" -> "vvip_discount_percent"
+        "VIP" -> "vip_discount_percent"
+        else -> "member_discount_percent"
+    }
+    val pct = settingValue(settings, key, "0").toIntOrNull()?.coerceIn(0,100) ?: 0
+    if (pct <= 0) return null
+    return PricingRuleEntity(
+        id = "LOYALTY_$tier",
+        name = "ƯU ĐÃI HẠNG $tier",
+        kind = "DISCOUNT",
+        percent = pct,
+        autoApply = true,
+        active = true
+    )
+}
+
 private fun calculatePricing(subtotal: Long, rules: List<PricingRuleEntity>, enteredCode: String, now: Long = System.currentTimeMillis()): PricingPreview {
     val code = enteredCode.trim().uppercase()
     val eligible = rules.filter { pricingRuleInTime(it, now) }
@@ -521,7 +558,13 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
     var customerName by remember { mutableStateOf("") }
     val normalizedPhone = customerPhone.filter(Char::isDigit)
     val matchedCustomer = customers.firstOrNull { it.phone == normalizedPhone }
-    val preview = calculatePricing(subtotal, rules, appliedCode)
+    val effectiveTier = effectiveCustomerTier(
+        matchedCustomer,
+        settings,
+        newMember = matchedCustomer == null && normalizedPhone.length >= 9
+    )
+    val loyaltyRule = tierDiscountRule(effectiveTier, settings)
+    val preview = calculatePricing(subtotal, rules + listOfNotNull(loyaltyRule), appliedCode)
     val qrInfo = "${setting("qr_prefix").ifBlank { "0210" }} ${t.name}"
     val qrUrl = if (setting("bank_name").isNotBlank() && setting("bank_account").isNotBlank()) {
         vietQrUrl(setting("bank_name"), setting("bank_account"), setting("bank_holder"), preview.total, qrInfo)
@@ -569,8 +612,10 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
                 singleLine = true
             )
             if (matchedCustomer != null) {
-                Text("${matchedCustomer.tier} · ${matchedCustomer.points} điểm · ${matchedCustomer.visitCount} lần ghé", fontWeight = FontWeight.Bold)
+                Text("${effectiveTier ?: matchedCustomer.tier} · ${matchedCustomer.points} điểm · ${matchedCustomer.visitCount} lần ghé", fontWeight = FontWeight.Bold)
+                if (matchedCustomer.tierManual) Text("Hạng đặc biệt do Admin gán", fontSize = 11.sp)
                 if (matchedCustomer.name.isNotBlank()) Text(matchedCustomer.name)
+                loyaltyRule?.let { Text("Ưu đãi hạng: -${it.percent}%", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
             } else if (normalizedPhone.length >= 9) {
                 OutlinedTextField(
                     value = customerName,
@@ -665,10 +710,17 @@ fun Customers(vm: PosViewModel) {
                     Text("Điểm: ${c.points}")
                     Text("Lượt ghé: ${c.visitCount}")
                     Text("Hạng khách", Modifier.padding(top = 10.dp), fontWeight = FontWeight.Bold)
+                    Text(if (c.tierManual) "Đang khóa hạng thủ công" else "Đang tự động theo điểm", fontSize = 11.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         listOf("MEMBER","VIP","VVIP").forEach { tier ->
-                            FilterChip(c.tier == tier, { vm.setCustomerTier(c,tier); selected = c.copy(tier=tier) }, { Text(tier) })
+                            FilterChip(c.tier == tier, { vm.setCustomerTier(c,tier); selected = c.copy(tier=tier,tierManual=true) }, { Text(tier) })
                         }
+                    }
+                    if (c.tierManual) {
+                        OutlinedButton(
+                            onClick = { vm.setCustomerTierAutomatic(c); selected = null },
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                        ) { Text("CHUYỂN VỀ TỰ ĐỘNG THEO ĐIỂM") }
                     }
                 }
             },
@@ -676,6 +728,93 @@ fun Customers(vm: PosViewModel) {
         )
     }
 }
+@Composable
+fun LoyaltyConfig(vm: PosViewModel) {
+    val settings by vm.settings.collectAsState()
+    fun current(key: String, fallback: String) = settingValue(settings,key,fallback)
+    var autoTier by remember(settings) { mutableStateOf(current("loyalty_auto_tier","true").toBoolean()) }
+    var memberDiscount by remember(settings) { mutableStateOf(current("member_discount_percent","0")) }
+    var vipPoints by remember(settings) { mutableStateOf(current("vip_min_points","200")) }
+    var vipDiscount by remember(settings) { mutableStateOf(current("vip_discount_percent","5")) }
+    var vvipPoints by remember(settings) { mutableStateOf(current("vvip_min_points","500")) }
+    var vvipDiscount by remember(settings) { mutableStateOf(current("vvip_discount_percent","10")) }
+    var saved by remember { mutableStateOf(false) }
+
+    Column {
+        Header("Cấu hình hạng thành viên") { vm.screen.value = "MANAGE" }
+        Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("TỰ ĐỘNG NÂNG HẠNG", fontWeight = FontWeight.Black)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Theo điểm tích lũy", Modifier.weight(1f))
+                        Switch(checked = autoTier, onCheckedChange = { autoTier = it })
+                    }
+                    Text("Hạng Admin gán thủ công cho khách đặc biệt sẽ không bị hệ thống tự thay đổi.", fontSize = 11.sp)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            TierConfigCard("MEMBER", "0", memberDiscount, { memberDiscount = it }, null, null)
+            Spacer(Modifier.height(8.dp))
+            TierConfigCard("VIP", vipPoints, vipDiscount, { vipDiscount = it }, vipPoints) { vipPoints = it }
+            Spacer(Modifier.height(8.dp))
+            TierConfigCard("VVIP", vvipPoints, vvipDiscount, { vvipDiscount = it }, vvipPoints) { vvipPoints = it }
+            Button(
+                onClick = {
+                    vm.saveSetting("loyalty_auto_tier",autoTier.toString())
+                    vm.saveSetting("member_discount_percent",(memberDiscount.toIntOrNull() ?: 0).coerceIn(0,100).toString())
+                    vm.saveSetting("vip_min_points",(vipPoints.toIntOrNull() ?: 200).coerceAtLeast(0).toString())
+                    vm.saveSetting("vip_discount_percent",(vipDiscount.toIntOrNull() ?: 0).coerceIn(0,100).toString())
+                    vm.saveSetting("vvip_min_points",(vvipPoints.toIntOrNull() ?: 500).coerceAtLeast(0).toString())
+                    vm.saveSetting("vvip_discount_percent",(vvipDiscount.toIntOrNull() ?: 0).coerceIn(0,100).toString())
+                    saved = true
+                },
+                modifier = Modifier.fillMaxWidth().padding(top = 14.dp)
+            ) { Text("LƯU CẤU HÌNH") }
+            if (saved) Text("Đã lưu cấu hình hạng thành viên.", Modifier.padding(top = 8.dp), fontWeight = FontWeight.Bold)
+            Text(
+                "Quy tắc: ưu đãi theo hạng tham gia cùng mã giảm/Happy Hour; hệ thống vẫn chỉ chọn 1 mức giảm lớn nhất.",
+                Modifier.padding(top = 12.dp),
+                fontSize = 12.sp
+            )
+        }
+    }
+}
+
+@Composable
+fun TierConfigCard(
+    tier: String,
+    defaultPoints: String,
+    discount: String,
+    onDiscount: (String) -> Unit,
+    points: String?,
+    onPoints: ((String) -> Unit)?
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Text(tier, fontSize = 20.sp, fontWeight = FontWeight.Black)
+            if (points != null && onPoints != null) {
+                OutlinedTextField(
+                    value = points,
+                    onValueChange = { onPoints(it.filter(Char::isDigit).take(7)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Tự lên hạng khi đạt số điểm") },
+                    singleLine = true
+                )
+            } else {
+                Text("Hạng mặc định khi khách đăng ký số điện thoại", fontSize = 12.sp)
+            }
+            OutlinedTextField(
+                value = discount,
+                onValueChange = { onDiscount(it.filter(Char::isDigit).take(3)) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("% ưu đãi theo hạng") },
+                singleLine = true
+            )
+        }
+    }
+}
+
 @Composable
 fun Manage(vm: PosViewModel) {
     val employee by vm.currentEmployee.collectAsState()
@@ -693,6 +832,7 @@ fun Manage(vm: PosViewModel) {
             }
             if (employee?.role == "ADMIN") {
                 Rowx("Khách hàng", "Member · VIP · VVIP · điểm · tổng chi tiêu") { vm.screen.value = "CUSTOMERS" }
+                Rowx("Cấu hình hạng thành viên", "Ngưỡng điểm · tự nâng hạng · % ưu đãi Member/VIP/VVIP") { vm.screen.value = "LOYALTY_CONFIG" }
                 Rowx("Nhân viên", "Thêm · khóa · phân quyền") { vm.screen.value = "EMP" }
             }
             if (employee?.role == "ADMIN" || employee?.canManageSystem == true) {
