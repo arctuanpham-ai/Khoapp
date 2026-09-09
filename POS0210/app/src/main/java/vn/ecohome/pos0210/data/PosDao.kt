@@ -41,7 +41,7 @@ import kotlinx.coroutines.flow.Flow
 @Query("SELECT * FROM PurchaseItemEntity WHERE purchaseId=:purchaseId") fun purchaseItems(purchaseId:String):Flow<List<PurchaseItemEntity>>
 @Query("SELECT * FROM PrintJobEntity ORDER BY createdAt DESC") fun printJobs():Flow<List<PrintJobEntity>>
 @Query("SELECT * FROM PrintJobEntity WHERE batchId=:batchId AND type=\'KITCHEN\' LIMIT 1") suspend fun kitchenPrintJob(batchId:String):PrintJobEntity?
-@Query("SELECT * FROM AuditEventEntity ORDER BY occurredAt DESC LIMIT 100") fun audits():Flow<List<AuditEventEntity>>
+@Query("SELECT * FROM AuditEventEntity ORDER BY occurredAt DESC LIMIT 500") fun audits():Flow<List<AuditEventEntity>>
 @Query("SELECT * FROM AppSettingEntity") fun settings():Flow<List<AppSettingEntity>>
 @Query("SELECT * FROM AreaEntity ORDER BY sortOrder,name") suspend fun allAreasSnapshot():List<AreaEntity>
 @Query("SELECT * FROM DiningTableEntity ORDER BY sortOrder,name") suspend fun allTablesSnapshot():List<DiningTableEntity>
