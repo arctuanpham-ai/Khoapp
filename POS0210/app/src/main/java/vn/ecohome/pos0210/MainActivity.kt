@@ -1096,6 +1096,9 @@ fun BackupCenter(vm: PosViewModel) {
     val dataFound = remember(refreshTick, rootUri) {
         rootUri.isNotBlank() && DataBackup.findLatest(context, rootUri) != null
     }
+    val mediaFound = remember(refreshTick, rootUri) {
+        rootUri.isNotBlank() && DataBackup.findMediaLatest(context, rootUri) != null
+    }
 
     Column {
         Header("Dữ liệu & Backup") { vm.screen.value = "MANAGE" }
@@ -1186,7 +1189,9 @@ fun BackupCenter(vm: PosViewModel) {
                     Text("DATA VẬN HÀNH", fontWeight = FontWeight.Black, fontSize = 20.sp)
                     Text("Bill · order · thanh toán · nhập hàng · lịch sử · audit", fontSize = 13.sp)
                     Text(
-                        "POS0210/DATA/POS0210_DATA_LATEST.db\nTrạng thái: ${if (dataFound) "ĐÃ TÌM THẤY" else if (rootUri.isNotBlank()) "CHƯA CÓ FILE · BẤM BACKUP NGAY" else "CHƯA GẮN THƯ MỤC"}",
+                        "POS0210/DATA/POS0210_DATA_LATEST.db\n" +
+                        "POS0210/DATA/POS0210_MEDIA_LATEST.0210\n" +
+                        "DATA: ${if (dataFound) "ĐÃ CÓ" else "CHƯA CÓ"} · MEDIA: ${if (mediaFound) "ĐÃ CÓ" else "CHƯA CÓ"}",
                         Modifier.padding(vertical = 8.dp),
                         fontWeight = FontWeight.Bold
                     )
@@ -1198,7 +1203,7 @@ fun BackupCenter(vm: PosViewModel) {
                             } else {
                                 val result = DataBackup.backupLatest(context, rootUri)
                                 refreshTick++
-                                message = if (result.isSuccess) "BACKUP DATA_LATEST thành công." else "BACKUP lỗi: ${result.exceptionOrNull()?.message}"
+                                message = if (result.isSuccess) "BACKUP DATA + MEDIA thành công." else "BACKUP lỗi: ${result.exceptionOrNull()?.message}"
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
@@ -1224,7 +1229,7 @@ fun BackupCenter(vm: PosViewModel) {
                             onClick = {
                                 val result = DataBackup.restoreLatest(context, rootUri)
                                 if (result.isSuccess) {
-                                    Toast.makeText(context, "Đã RESTORE DATA + áp MASTER mới nhất. App sẽ mở lại.", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(context, "Đã RESTORE DATA + MEDIA + MASTER. App sẽ mở lại.", Toast.LENGTH_LONG).show()
                                     android.os.Process.killProcess(android.os.Process.myPid())
                                 } else {
                                     message = "RESTORE DATA_LATEST lỗi: ${result.exceptionOrNull()?.message}"
@@ -1248,17 +1253,19 @@ fun BackupCenter(vm: PosViewModel) {
                         "CẤU TRÚC ĐÚNG:\n" +
                         "Download/POS0210/CONFIG/POS0210_MASTER.0210\n" +
                         "Download/POS0210/DATA/POS0210_DATA_LATEST.db\n" +
+                        "Download/POS0210/DATA/POS0210_MEDIA_LATEST.0210\n" +
                         "Download/POS0210/ARCHIVE/...\n\n" +
                         "LƯU TRỮ:\n" +
                         "• MASTER: bấm GHI MASTER NGAY khi thay menu, bàn, nhân viên/PIN, phân quyền, VietQR, máy in.\n" +
-                        "• DATA_LATEST: app tự cập nhật sau các thao tác vận hành quan trọng; nút BACKUP NGAY dùng để ép ghi thủ công.\n" +
-                        "• ARCHIVE: dùng TẠO SNAPSHOT khi muốn giữ một mốc dữ liệu riêng.\n\n" +
+                        "• DATA_LATEST: app tự cập nhật sau các thao tác vận hành quan trọng.\n" +
+                        "• MEDIA_LATEST: giữ ảnh món/combo/hóa đơn; cập nhật khi có thay đổi ảnh hoặc BACKUP NGAY.\n" +
+                        "• ARCHIVE: tạo cả snapshot DB và media cùng mốc thời gian.\n\n" +
                         "CHUYỂN SANG MÁY KHÁC:\n" +
                         "1. Copy nguyên thư mục POS0210 vào Download của máy mới.\n" +
                         "2. Cài POS0210 và vào Dữ liệu & Backup.\n" +
                         "3. Gắn đúng thư mục Download/POS0210.\n" +
                         "4. Bấm KHÔI PHỤC TOÀN BỘ TỪ POS0210.\n" +
-                        "5. App sẽ khôi phục DATA_LATEST và áp MASTER, sau đó mở lại.\n\n" +
+                        "5. App sẽ khôi phục DATA_LATEST + MEDIA_LATEST + MASTER, sau đó mở lại.\n\n" +
                         "LƯU Ý:\n" +
                         "• Sau khi cài lại app phải gắn lại thư mục vì Android có thể mất quyền SAF của app cũ.\n" +
                         "• Nên copy cả thư mục POS0210, không copy riêng từng file.",
