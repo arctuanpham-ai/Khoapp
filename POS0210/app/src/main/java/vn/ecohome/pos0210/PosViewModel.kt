@@ -184,5 +184,38 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  fun total(id:String)=dao.sessionTotal(id)
  fun session(id:String)=dao.sessionById(id)
  fun purchaseItems(id:String)=dao.purchaseItems(id)
- fun close(method:String,total:Long){val s=currentSession.value?:return;val e=currentEmployee.value?:return;if(!e.canCheckout&&e.role!="ADMIN")return;viewModelScope.launch{repo.closeAndPay(s,total,method,e.id,"0210-${System.currentTimeMillis().toString().takeLast(6)}");autoBackup();currentSession.value=null;currentTable.value=null;screen.value="TABLES"}}
+ fun close(method:String,total:Long){
+  val session=currentSession.value?:return
+  val employee=currentEmployee.value?:return
+  val table=currentTable.value
+  if(!employee.canCheckout&&employee.role!="ADMIN")return
+  viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
+   val bill=repo.closeAndPay(session,total,method,employee.id,"0210-${System.currentTimeMillis().toString().takeLast(6)}")
+   autoBackup()
+   if(printerMode()=="BLUETOOTH"&&printerMac().isNotBlank()){
+    val bs=dao.batches(session.id).first().filter{it.status!="CANCELLED"}
+    val lines=mutableListOf<Triple<String,Int,Long>>()
+    bs.forEach{b->dao.batchItems(b.id).first().forEach{it2->lines.add(Triple(it2.itemNameSnapshot,it2.qty,it2.unitPriceSnapshot))}}
+    val info="0210 ${table?.name ?: bill.billNo}"
+    val qr=qrUrl(total,info).takeIf{it.isNotBlank()}?.let{BluetoothPrinter.downloadBitmap(it)}
+    val period="${java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date(session.openedAt))}–${java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date(bill.closedAt ?: System.currentTimeMillis()))}"
+    val bmp=ReceiptRenderer.bill(table?.name ?: "Bàn",period,lines,total,if(method=="CASH")"TIỀN MẶT" else "CHUYỂN KHOẢN",qr)
+    val job=PrintJobEntity(java.util.UUID.randomUUID().toString(),null,bill.id,"BILL",createdAt=System.currentTimeMillis())
+    dao.insertPrintJob(job)
+    val pr=BluetoothPrinter.printBitmap(getApplication(),printerMac(),bmp)
+    if(pr.isSuccess){
+     dao.markPrintSuccess(job.id,System.currentTimeMillis())
+     audit("PRINT",bill.id,"BILL_PRINTED","printer=${printerName()}")
+     printerMessage.value="ĐÃ IN BILL · ${bill.billNo}"
+    }else{
+     dao.markPrintFailed(job.id,pr.exceptionOrNull()?.message ?: "UNKNOWN")
+     audit("PRINT",bill.id,"BILL_PRINT_FAILED","printer=${printerName()}")
+     printerMessage.value="ĐÃ THANH TOÁN · IN BILL LỖI: ${pr.exceptionOrNull()?.message ?: "Thử in lại"}"
+    }
+   }
+   currentSession.value=null
+   currentTable.value=null
+   screen.value="TABLES"
+  }
+ }
 }

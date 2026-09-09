@@ -1,6 +1,9 @@
 package vn.ecohome.pos0210
 
 import android.net.Uri
+import android.Manifest
+import android.os.Build
+import android.provider.Settings
 import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
@@ -33,6 +36,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import vn.ecohome.pos0210.data.*
 import vn.ecohome.pos0210.printing.PrinterText
+import vn.ecohome.pos0210.printing.BluetoothPrinter
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -315,6 +319,8 @@ fun Sent(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
     val bs by vm.batches(s.id).collectAsState(initial = emptyList())
     val total by vm.total(s.id).collectAsState(initial = 0)
     val current by vm.currentEmployee.collectAsState()
+    val printerMessage by vm.printerMessage.collectAsState()
+    val printerMode = vm.setting("printer_mode").ifBlank { "TEST" }
     var pv by remember { mutableStateOf<OrderBatchEntity?>(null) }
     var cancelTarget by remember { mutableStateOf<OrderBatchEntity?>(null) }
     var cancelReason by remember { mutableStateOf("") }
@@ -343,6 +349,9 @@ fun Sent(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
             }
         }
         Text("Tạm tính ${money(total)}", Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        if (printerMessage.isNotBlank()) {
+            Text(printerMessage, Modifier.padding(horizontal = 16.dp, vertical = 4.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
         val allCancelled = bs.isNotEmpty() && bs.all { it.status == "CANCELLED" }
         val canRelease = allCancelled && total == 0L && (current?.role == "ADMIN" || current?.role == "MANAGER")
 
@@ -369,7 +378,9 @@ fun Sent(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
             onDismissRequest = { pv = null },
             confirmButton = {
                 if (b.status == "DRAFT") {
-                    Button(onClick = { vm.markBatchSent(b); pv = null }) { Text("XÁC NHẬN GỬI") }
+                    Button(onClick = { vm.markBatchSent(b); pv = null }) {
+                        Text(if (printerMode == "BLUETOOTH") "IN & GỬI BẾP" else "XÁC NHẬN GỬI (TEST)")
+                    }
                 } else {
                     Button(onClick = { pv = null }) { Text("ĐÓNG") }
                 }
@@ -1429,41 +1440,149 @@ fun VietQr(vm: PosViewModel) {
 @Composable
 fun Printer(vm: PosViewModel) {
     val preview by vm.printerPreview.collectAsState()
+    val settings by vm.settings.collectAsState()
+    val message by vm.printerMessage.collectAsState()
+    val context = LocalContext.current
+    var permissionTick by remember { mutableStateOf(0) }
+    val mode = settings.firstOrNull { it.key == "printer_mode" }?.value ?: "TEST"
+    val selectedMac = settings.firstOrNull { it.key == "printer_mac" }?.value ?: ""
+    val selectedName = settings.firstOrNull { it.key == "printer_name" }?.value ?: ""
+    val hasPermission = remember(permissionTick) { BluetoothPrinter.hasPermission(context) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissionTick++ }
+
+    val paired = remember(permissionTick, selectedMac, mode) {
+        if (BluetoothPrinter.hasPermission(context)) BluetoothPrinter.pairedDevices(context) else emptyList()
+    }
+
     Column {
         Header("Máy in") { vm.screen.value = "MANAGE" }
-        Column(Modifier.fillMaxSize().padding(16.dp)) {
-            Text("MÁY IN BILL NHIỆT K80 · ESC/POS", fontWeight = FontWeight.Black)
-            Text("Chế độ hiện tại: TEST / PREVIEW · chưa cần máy in thật", fontSize = 12.sp)
-            Spacer(Modifier.height(12.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedButton({ vm.previewKitchen() }, Modifier.weight(1f)) { Text("PHIẾU BẾP", fontSize = 11.sp) }
-                OutlinedButton({ vm.previewBill() }, Modifier.weight(1f)) { Text("BILL", fontSize = 11.sp) }
-                OutlinedButton({ vm.previewCancel() }, Modifier.weight(1f)) { Text("PHIẾU HỦY", fontSize = 11.sp) }
-            }
-            if (preview.isNotBlank()) {
-                Card(
-                    Modifier.fillMaxWidth().weight(1f).padding(top = 12.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White)
-                ) {
-                    when (preview) {
-                        "BILL" -> BillPrintPreview(vm)
-                        "KITCHEN" -> SimplePrintPreview(
-                            title = "PHIẾU LÀM HÀNG",
-                            body = PrinterText.kitchenSample()
-                        )
-                        "CANCEL" -> SimplePrintPreview(
-                            title = "PHIẾU HỦY",
-                            body = PrinterText.cancelSample()
-                        )
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+            item {
+                Text("XPRINTER XP‑N58H", fontWeight = FontWeight.Black, fontSize = 20.sp)
+                Text("58mm · vùng in 48mm · 203dpi · 384 dots · Bluetooth ESC/POS", fontSize = 12.sp)
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = mode == "TEST",
+                        onClick = { vm.saveSetting("printer_mode","TEST") },
+                        label = { Text("TEST / PREVIEW") }
+                    )
+                    FilterChip(
+                        selected = mode == "BLUETOOTH",
+                        onClick = { vm.saveSetting("printer_mode","BLUETOOTH") },
+                        label = { Text("BLUETOOTH") }
+                    )
+                }
+
+                if (mode == "BLUETOOTH") {
+                    Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                        Column(Modifier.padding(14.dp)) {
+                            Text("Máy đang chọn", fontWeight = FontWeight.Bold)
+                            Text(if (selectedMac.isBlank()) "CHƯA CHỌN" else "${selectedName.ifBlank { "Bluetooth printer" }} · $selectedMac")
+                            Spacer(Modifier.height(8.dp))
+
+                            if (!hasPermission) {
+                                Button(
+                                    onClick = {
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                            permissionLauncher.launch(
+                                                arrayOf(
+                                                    Manifest.permission.BLUETOOTH_CONNECT,
+                                                    Manifest.permission.BLUETOOTH_SCAN
+                                                )
+                                            )
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { Text("CẤP QUYỀN BLUETOOTH") }
+                            } else {
+                                if (paired.isEmpty()) {
+                                    Text("Chưa thấy máy đã ghép đôi.", fontSize = 12.sp)
+                                } else {
+                                    paired.forEach { d ->
+                                        Row(
+                                            Modifier.fillMaxWidth()
+                                                .clickable {
+                                                    vm.saveSetting("printer_mac",d.address)
+                                                    vm.saveSetting("printer_name",d.name)
+                                                }
+                                                .padding(vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            RadioButton(
+                                                selected = selectedMac == d.address,
+                                                onClick = {
+                                                    vm.saveSetting("printer_mac",d.address)
+                                                    vm.saveSetting("printer_name",d.name)
+                                                }
+                                            )
+                                            Column {
+                                                Text(d.name, fontWeight = FontWeight.Bold)
+                                                Text(d.address, fontSize = 11.sp)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            OutlinedButton(
+                                onClick = {
+                                    context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("MỞ CÀI ĐẶT BLUETOOTH") }
+
+                            Button(
+                                onClick = { vm.testBluetoothPrint() },
+                                modifier = Modifier.fillMaxWidth(),
+                                enabled = hasPermission && selectedMac.isNotBlank()
+                            ) { Text("TEST IN XP‑N58H") }
+                        }
                     }
                 }
-            } else {
-                Card(Modifier.fillMaxWidth().padding(top = 12.dp)) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Test trước khi mua máy", fontWeight = FontWeight.Bold)
-                        Text("Preview kiểm tra nội dung, QR và bố cục. Khi có máy K80 Bluetooth ESC/POS sẽ dùng cùng dữ liệu này để in thật.")
+
+                if (message.isNotBlank()) {
+                    Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                        Text(message, Modifier.padding(12.dp), fontWeight = FontWeight.Bold)
                     }
                 }
+
+                Text("XEM TRƯỚC PHIẾU", fontWeight = FontWeight.Black, modifier = Modifier.padding(top = 8.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton({ vm.previewKitchen() }, Modifier.weight(1f)) { Text("PHIẾU BẾP", fontSize = 11.sp) }
+                    OutlinedButton({ vm.previewBill() }, Modifier.weight(1f)) { Text("BILL", fontSize = 11.sp) }
+                    OutlinedButton({ vm.previewCancel() }, Modifier.weight(1f)) { Text("PHIẾU HỦY", fontSize = 11.sp) }
+                }
+
+                if (preview.isNotBlank()) {
+                    Card(
+                        Modifier.fillMaxWidth().heightIn(min = 430.dp).padding(top = 12.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White)
+                    ) {
+                        when (preview) {
+                            "BILL" -> BillPrintPreview(vm)
+                            "KITCHEN" -> SimplePrintPreview(
+                                title = "PHIẾU LÀM HÀNG",
+                                body = PrinterText.kitchenSample()
+                            )
+                            "CANCEL" -> SimplePrintPreview(
+                                title = "PHIẾU HỦY",
+                                body = PrinterText.cancelSample()
+                            )
+                        }
+                    }
+                } else {
+                    Card(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text("Profile chuẩn 0210", fontWeight = FontWeight.Bold)
+                            Text("XP‑N58H · 58mm · bitmap 384px. In bitmap giúp giữ font tiếng Việt, chữ Bold và VietQR ổn định.")
+                        }
+                    }
+                }
+                Spacer(Modifier.height(30.dp))
             }
         }
     }
