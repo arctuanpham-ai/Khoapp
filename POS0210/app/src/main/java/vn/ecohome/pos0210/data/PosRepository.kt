@@ -12,6 +12,7 @@ class PosRepository(private val db:PosDatabase){
     suspend fun saveMenuItem(v:MenuItemEntity)=dao.saveMenuItem(v)
     suspend fun saveEmployee(v:EmployeeEntity)=dao.saveEmployee(v)
     suspend fun saveSupplier(v:SupplierEntity)=dao.saveSupplier(v)
+    suspend fun savePurchaseCategory(v:PurchaseCategoryEntity)=dao.savePurchaseCategory(v)
 
     suspend fun openSession(tableId:String,employeeId:String):TableSessionEntity {
         val now=System.currentTimeMillis(); val s=TableSessionEntity(UUID.randomUUID().toString(),tableId,now,employeeId)

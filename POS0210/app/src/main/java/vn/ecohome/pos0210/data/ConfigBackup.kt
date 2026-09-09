@@ -27,6 +27,7 @@ object ConfigBackup {
                 dao.allCategoriesSnapshot(),
                 dao.allMenuSnapshot(),
                 dao.allEmployeesSnapshot(),
+                dao.allPurchaseCategoriesSnapshot(),
                 dao.allSettingsSnapshot()
             )
         }
@@ -84,6 +85,14 @@ object ConfigBackup {
                     put("canCheckout", e.canCheckout); put("canPurchase", e.canPurchase); put("canOrder", e.canOrder)
                     put("canSendKitchen", e.canSendKitchen); put("canViewReport", e.canViewReport)
                     put("canManageMenu", e.canManageMenu); put("canManageSystem", e.canManageSystem)
+                })
+            }
+        })
+        root.put("purchaseCategories", JSONArray().apply {
+            snapshot.purchaseCategories.forEach { c ->
+                put(JSONObject().apply {
+                    put("id", c.id); put("name", c.name); put("defaultUnit", c.defaultUnit)
+                    put("sortOrder", c.sortOrder); put("active", c.active)
                 })
             }
         })
@@ -236,6 +245,17 @@ object ConfigBackup {
                         )
                     )
                 }
+                root.optJSONArray("purchaseCategories")?.forEachObject { o ->
+                    dao.savePurchaseCategory(
+                        PurchaseCategoryEntity(
+                            id = o.getString("id"),
+                            name = o.getString("name"),
+                            defaultUnit = o.optString("defaultUnit", "lần"),
+                            sortOrder = o.optInt("sortOrder"),
+                            active = o.optBoolean("active", true)
+                        )
+                    )
+                }
                 root.getJSONArray("settings").forEachObject { o ->
                     dao.saveSetting(AppSettingEntity(o.getString("key"), o.optString("value", "")))
                 }
@@ -249,6 +269,7 @@ object ConfigBackup {
         val categories: List<MenuCategoryEntity>,
         val menu: List<MenuItemEntity>,
         val employees: List<EmployeeEntity>,
+        val purchaseCategories: List<PurchaseCategoryEntity>,
         val settings: List<AppSettingEntity>
     )
 

@@ -1097,7 +1097,7 @@ fun MenuAddDialog(
 @Composable
 fun Purchases(vm: PosViewModel) {
     val purchases by vm.purchases.collectAsState()
-    val itemSales by vm.itemSales.collectAsState()
+    val purchaseCategories by vm.purchaseCategories.collectAsState()
     val context = LocalContext.current
     var itemName by remember { mutableStateOf("") }
     var qtyText by remember { mutableStateOf("") }
@@ -1107,10 +1107,15 @@ fun Purchases(vm: PosViewModel) {
     var note by remember { mutableStateOf("") }
     var invoiceImage by remember { mutableStateOf<String?>(null) }
     var selectedPurchase by remember { mutableStateOf<PurchaseEntity?>(null) }
+    var selectedCategoryId by remember(purchaseCategories) {
+        mutableStateOf(purchaseCategories.firstOrNull()?.id ?: "pc_production")
+    }
+    var showCategoryManager by remember { mutableStateOf(false) }
     var dateText by remember {
         mutableStateOf(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date()))
     }
     var message by remember { mutableStateOf("") }
+
     val invoicePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             runCatching {
@@ -1122,14 +1127,43 @@ fun Purchases(vm: PosViewModel) {
             invoiceImage = uri.toString()
         }
     }
+
+    val selectedCategory = purchaseCategories.firstOrNull { it.id == selectedCategoryId }
     val qty = qtyText.replace(',', '.').toDoubleOrNull()
     val unitPrice = unitPriceText.toLongOrNull()
     val total = if (qty != null && unitPrice != null) (qty * unitPrice).toLong() else 0L
 
     Column {
         Header("Nhập đầu vào") { vm.screen.value = "MANAGE" }
+
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("Phân mục", Modifier.weight(1f), fontWeight = FontWeight.Black, fontSize = 18.sp)
+            OutlinedButton(onClick = { showCategoryManager = true }) { Text("QUẢN LÝ PHÂN MỤC") }
+        }
+
         LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
             item {
+                if (purchaseCategories.isNotEmpty()) {
+                    Row(
+                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        purchaseCategories.forEach { c ->
+                            FilterChip(
+                                selected = selectedCategoryId == c.id,
+                                onClick = {
+                                    selectedCategoryId = c.id
+                                    unit = c.defaultUnit
+                                },
+                                label = { Text(c.name) }
+                            )
+                        }
+                    }
+                }
+
                 OutlinedTextField(
                     dateText,
                     { dateText = it },
@@ -1146,14 +1180,14 @@ fun Purchases(vm: PosViewModel) {
                     itemName,
                     { itemName = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Mặt hàng") }
+                    label = { Text(if (selectedCategory?.id == "pc_salary") "Nội dung / nhân sự" else "Mặt hàng / nội dung chi") }
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         qtyText,
                         { qtyText = it.filter { ch -> ch.isDigit() || ch == ',' || ch == '.' } },
                         modifier = Modifier.weight(1f),
-                        label = { Text("Khối lượng / SL") }
+                        label = { Text(if (selectedCategory?.id == "pc_salary") "Số ngày công / SL" else "Khối lượng / SL") }
                     )
                     OutlinedTextField(
                         unit,
@@ -1166,7 +1200,7 @@ fun Purchases(vm: PosViewModel) {
                     unitPriceText,
                     { unitPriceText = it.filter(Char::isDigit) },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Đơn giá") }
+                    label = { Text(if (selectedCategory?.id == "pc_salary") "Đơn giá / ngày công" else "Đơn giá") }
                 )
                 OutlinedTextField(
                     note,
@@ -1175,13 +1209,16 @@ fun Purchases(vm: PosViewModel) {
                     label = { Text("Ghi chú") }
                 )
                 Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                    Text("Thành tiền: ${money(total)}", Modifier.padding(16.dp), fontWeight = FontWeight.Bold)
+                    Column(Modifier.padding(16.dp)) {
+                        Text(selectedCategory?.name ?: "Chưa chọn phân mục", fontWeight = FontWeight.Bold)
+                        Text("Thành tiền: ${money(total)}", fontWeight = FontWeight.Black, fontSize = 18.sp)
+                    }
                 }
                 OutlinedButton(
                     onClick = { invoicePicker.launch(arrayOf("image/*")) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(if (invoiceImage == null) "＋ ẢNH HÓA ĐƠN" else "✓ ĐÃ CHỌN ẢNH HÓA ĐƠN")
+                    Text(if (invoiceImage == null) "＋ ẢNH HÓA ĐƠN (TÙY CHỌN)" else "✓ ĐÃ CHỌN ẢNH HÓA ĐƠN")
                 }
                 Button(
                     onClick = {
@@ -1191,14 +1228,15 @@ fun Purchases(vm: PosViewModel) {
                         vm.addPurchaseDetailed(
                             name = itemName,
                             qty = qty ?: 0.0,
-                            unit = unit.ifBlank { "lần" },
+                            unit = unit.ifBlank { selectedCategory?.defaultUnit ?: "lần" },
                             unitPrice = unitPrice ?: 0L,
                             note = note,
                             at = parsedAt,
                             supplierName = supplier,
-                            imageUri = invoiceImage
+                            imageUri = invoiceImage,
+                            categoryId = selectedCategoryId
                         )
-                        message = "Đã tạo phiếu nhập · ${money(total)}"
+                        message = "Đã tạo phiếu nhập · ${selectedCategory?.name ?: ""} · ${money(total)}"
                         itemName = ""
                         qtyText = ""
                         unitPriceText = ""
@@ -1206,13 +1244,15 @@ fun Purchases(vm: PosViewModel) {
                         invoiceImage = null
                     },
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                    enabled = itemName.isNotBlank() && (qty ?: 0.0) > 0 && (unitPrice ?: 0L) > 0
+                    enabled = selectedCategoryId.isNotBlank() && itemName.isNotBlank() && (qty ?: 0.0) > 0 && (unitPrice ?: 0L) > 0
                 ) { Text("TẠO PHIẾU NHẬP") }
+
                 if (message.isNotBlank()) {
                     Text(message, Modifier.padding(vertical = 6.dp), fontWeight = FontWeight.Bold)
                 }
                 Text("Phiếu nhập gần đây", Modifier.padding(top = 14.dp, bottom = 6.dp), fontWeight = FontWeight.Bold)
             }
+
             items(purchases.take(20)) { p ->
                 Card(
                     Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { selectedPurchase = p }
@@ -1227,9 +1267,74 @@ fun Purchases(vm: PosViewModel) {
         }
     }
 
+    if (showCategoryManager) {
+        PurchaseCategoryManagerDialog(
+            categories = purchaseCategories,
+            onDismiss = { showCategoryManager = false },
+            onAdd = { name, defaultUnit -> vm.addPurchaseCategory(name, defaultUnit) },
+            onDelete = { vm.deletePurchaseCategory(it) }
+        )
+    }
+
     selectedPurchase?.let { p ->
         PurchaseDetailDialog(vm, p) { selectedPurchase = null }
     }
+}
+
+@Composable
+fun PurchaseCategoryManagerDialog(
+    categories: List<PurchaseCategoryEntity>,
+    onDismiss: () -> Unit,
+    onAdd: (String, String) -> Unit,
+    onDelete: (PurchaseCategoryEntity) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var defaultUnit by remember { mutableStateOf("lần") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Phân mục nhập đầu vào") },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("ĐÓNG") } },
+        text = {
+            LazyColumn {
+                item {
+                    OutlinedTextField(
+                        name,
+                        { name = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Tên phân mục mới") }
+                    )
+                    OutlinedTextField(
+                        defaultUnit,
+                        { defaultUnit = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Đơn vị mặc định") }
+                    )
+                    Button(
+                        onClick = {
+                            onAdd(name, defaultUnit)
+                            name = ""
+                            defaultUnit = "lần"
+                        },
+                        enabled = name.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                    ) { Text("＋ THÊM PHÂN MỤC") }
+                }
+                items(categories) { c ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(c.name, fontWeight = FontWeight.Bold)
+                            Text("ĐVT mặc định: ${c.defaultUnit}", fontSize = 11.sp)
+                        }
+                        TextButton(onClick = { onDelete(c) }) { Text("XOÁ") }
+                    }
+                }
+            }
+        }
+    )
 }
 
 @Composable
