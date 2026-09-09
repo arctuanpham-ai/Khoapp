@@ -106,7 +106,12 @@ object ReceiptRenderer {
         surcharge=0L,
         discount=13500L,
         total=121500L,
-        adjustmentLines=listOf("ƯU ĐÃI HAPPY10  -10%"),
+        adjustmentLines=listOf("ƯU ĐÃI HẠNG VIP  -10%"),
+        customerName="ANH NAM",
+        customerTier="VIP",
+        pointsBefore=188,
+        pointsEarned=12,
+        pointsAfter=200,
         method="CHUYỂN KHOẢN",
         qr=qr
     )
@@ -120,11 +125,17 @@ object ReceiptRenderer {
         discount:Long=0L,
         total:Long,
         adjustmentLines:List<String> = emptyList(),
+        customerName:String="KHÁCH LẠ",
+        customerTier:String?=null,
+        pointsBefore:Int=0,
+        pointsEarned:Int=0,
+        pointsAfter:Int=0,
         method:String,
         qr:Bitmap?
     ):Bitmap{
         val adjustmentHeight = (if(surcharge>0) 34 else 0) + (if(discount>0) 34 else 0) + adjustmentLines.size*24
-        val estimated=610+items.size*48+adjustmentHeight+(if(qr!=null)340 else 0)
+        val customerHeight=if(customerTier!=null)92 else 48
+        val estimated=610+items.size*48+adjustmentHeight+customerHeight+(if(qr!=null)340 else 0)
         val (b,c)=canvas(estimated)
         var y=48f
         c.drawText("0210",W/2f,y,paint(40f,true,Paint.Align.CENTER));y+=27
@@ -152,6 +163,12 @@ object ReceiptRenderer {
         line(c,y);y+=35
         c.drawText("THÀNH TIỀN",PAD,y,paint(30f,true))
         c.drawText(money(total),W-PAD,y,paint(25f,true,Paint.Align.RIGHT));y+=31
+        line(c,y);y+=27
+        c.drawText("KHÁCH: ${customerName.uppercase()}",PAD,y,paint(17f,true));y+=22
+        if(customerTier!=null){
+            c.drawText("HẠNG: $customerTier",PAD,y,paint(17f,true));y+=22
+            c.drawText("ĐIỂM: $pointsBefore + $pointsEarned = $pointsAfter",PAD,y,paint(16f,true));y+=24
+        }
         c.drawText("Thanh toán: $method",PAD,y,paint(18f));y+=24
         line(c,y);y+=28
         if(qr!=null){
@@ -173,7 +190,7 @@ object ReceiptRenderer {
         var y=45f
         c.drawText("0210",W/2f,y,paint(38f,true,Paint.Align.CENTER));y+=30
         c.drawText("PHIẾU LÀM HÀNG",W/2f,y,paint(30f,true,Paint.Align.CENTER));y+=28
-        c.drawText("STT PHỤC VỤ #${serviceNo.toString().padStart(3,'0')}",W/2f,y,paint(24f,true,Paint.Align.CENTER));y+=26
+        c.drawText("THỨ TỰ RA ĐƠN #${serviceNo.toString().padStart(3,'0')}",W/2f,y,paint(24f,true,Paint.Align.CENTER));y+=26
         c.drawText("${table.uppercase()}  ·  ĐƠN #$sequence",W/2f,y,paint(18f,true,Paint.Align.CENTER));y+=22
         line(c,y);y+=32
         items.forEach{(name,qty)->
