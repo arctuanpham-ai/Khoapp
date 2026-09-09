@@ -21,3 +21,5 @@ import androidx.room.PrimaryKey
 @Entity data class AppSettingEntity(@PrimaryKey val key:String,val value:String)
 
 data class ItemSaleRow(val name:String,val qty:Int,val sessionId:String)
+
+data class PurchaseCostRow(val categoryId:String,val amount:Long,val purchasedAt:Long)
