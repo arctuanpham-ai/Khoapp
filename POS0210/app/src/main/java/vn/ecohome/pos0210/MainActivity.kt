@@ -47,6 +47,8 @@ private val Coffee = Color(0xFF6E432D)
 private val Tint = Color(0xFFF1ECE3)
 private val Occupied = Color(0xFFE7C4AA)
 private val WaitingDelivery = Color(0xFFF2B777)
+private val WaitingPriority1 = Color(0xFFE86A33)
+private val WaitingPriority2 = Color(0xFFF3C15F)
 
 private fun money(v: Long) = "%,dđ".format(v).replace(',', '.')
 private fun time(v: Long) = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date(v))
@@ -154,6 +156,8 @@ fun Tables(vm: PosViewModel) {
     val areas by vm.areas.collectAsState()
     val current by vm.currentEmployee.collectAsState()
     val canReport = current?.role == "ADMIN" || current?.canViewReport == true
+    val waitingOrdered = waiting.sortedWith(compareBy<OrderBatchEntity> { it.serviceNo }.thenBy { it.createdAt })
+    val waitingRankById = waitingOrdered.mapIndexed { index, batch -> batch.id to index }.toMap()
 
     Column {
         Header()
@@ -193,11 +197,14 @@ fun Tables(vm: PosViewModel) {
                     val open = ss.firstOrNull { it.tableId == tb.id }
                     val areaName = areas.firstOrNull { it.id == tb.areaId }?.name ?: tb.areaId
                     val waitingForTable = open?.let { s -> waiting.filter { it.sessionId == s.id } } ?: emptyList()
-                    val nextService = waitingForTable.minByOrNull { it.serviceNo }
+                    val nextService = waitingForTable.minWithOrNull(compareBy<OrderBatchEntity> { it.serviceNo }.thenBy { it.createdAt })
+                    val priorityRank = nextService?.let { waitingRankById[it.id] }
                     Card(
                         Modifier.fillMaxWidth().height(cardHeight).clickable { vm.selectTable(tb) },
                         colors = CardDefaults.cardColors(
                             containerColor = when {
+                                priorityRank == 0 -> WaitingPriority1
+                                priorityRank == 1 -> WaitingPriority2
                                 nextService != null -> WaitingDelivery
                                 open == null -> Tint
                                 else -> Occupied
@@ -225,7 +232,15 @@ fun Tables(vm: PosViewModel) {
                                     fontSize = if (columns >= 4) 11.sp else 13.sp
                                 )
                                 if (nextService != null) {
-                                    Text("#${nextService.serviceNo.toString().padStart(3,'0')} · CHỜ GIAO", fontWeight = FontWeight.Black, fontSize = 11.sp)
+                                    Text(
+                                        when (priorityRank) {
+                                            0 -> "#${nextService.serviceNo.toString().padStart(3,'0')} · ƯU TIÊN 1"
+                                            1 -> "#${nextService.serviceNo.toString().padStart(3,'0')} · ƯU TIÊN 2"
+                                            else -> "#${nextService.serviceNo.toString().padStart(3,'0')} · CHỜ GIAO"
+                                        },
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 11.sp
+                                    )
                                 } else if (cardHeight > 95.dp) {
                                     Text(time(open.openedAt), fontSize = 10.sp)
                                 }
@@ -668,14 +683,36 @@ fun DeliveryQueue(vm: PosViewModel) {
         if (waiting.isEmpty()) {
             Text("Không còn đơn chờ giao.", Modifier.padding(20.dp))
         } else {
+            val ordered = waiting.sortedWith(compareBy<OrderBatchEntity> { it.serviceNo }.thenBy { it.createdAt })
             LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
-                items(waiting) { b ->
+                itemsIndexed(ordered, key = { _, b -> b.id }) { index, b ->
                     val session = sessions.firstOrNull { it.id == b.sessionId }
                     val table = session?.let { s -> tables.firstOrNull { it.id == s.tableId } }
-                    Card(Modifier.fillMaxWidth().padding(vertical = 5.dp), colors = CardDefaults.cardColors(containerColor = WaitingDelivery)) {
+                    Card(
+                        Modifier.fillMaxWidth().padding(vertical = 5.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = when (index) {
+                                0 -> WaitingPriority1
+                                1 -> WaitingPriority2
+                                else -> WaitingDelivery
+                            }
+                        )
+                    ) {
                         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text("#${b.serviceNo.toString().padStart(3,'0')} · ${table?.name ?: "Bàn"}", fontSize = 20.sp, fontWeight = FontWeight.Black)
+                                Text(
+                                    "#${b.serviceNo.toString().padStart(3,'0')} · ${table?.name ?: "Bàn"}",
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                                Text(
+                                    when (index) {
+                                        0 -> "ƯU TIÊN GIAO TRƯỚC"
+                                        1 -> "ƯU TIÊN KẾ TIẾP"
+                                        else -> "ĐANG CHỜ GIAO"
+                                    },
+                                    fontWeight = FontWeight.Bold
+                                )
                                 Text("Đơn #${b.sequence} · ${SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(b.createdAt))}")
                             }
                             Button(onClick = { vm.markDelivered(b) }) { Text("ĐÃ GIAO ĐỦ") }
