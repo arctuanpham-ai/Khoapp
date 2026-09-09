@@ -34,8 +34,8 @@ class PosRepository(private val db:PosDatabase){
 
     suspend fun claimPrint(jobId:String,deviceId:String)=dao.claimPrint(jobId,"PENDING","CLAIMED",deviceId)==1
 
-    suspend fun closeAndPay(session:TableSessionEntity,total:Long,method:String,cashierId:String,billNo:String):BillEntity {
-        val now=System.currentTimeMillis(); val bill=BillEntity(UUID.randomUUID().toString(),session.id,billNo,session.openedAt,now,total,total,"PAID")
+    suspend fun closeAndPay(session:TableSessionEntity,subtotal:Long,total:Long,method:String,cashierId:String,billNo:String):BillEntity {
+        val now=System.currentTimeMillis(); val bill=BillEntity(UUID.randomUUID().toString(),session.id,billNo,session.openedAt,now,subtotal,total,"PAID")
         db.withTransaction {
             if(dao.closeSession(session.id,session.version)!=1) error("SESSION_ALREADY_CLOSED_OR_CHANGED")
             dao.insertBill(bill)
