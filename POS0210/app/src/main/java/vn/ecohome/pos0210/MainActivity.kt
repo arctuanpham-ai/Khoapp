@@ -556,7 +556,9 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Bàn & khu vực", "Thêm · sửa · Trong nhà / Ngoài trời") { vm.screen.value = "TABLE_ADMIN" }
             }
             Rowx("Nhập đầu vào", "Ngày giờ thủ công") { vm.screen.value = "PURCHASE" }
-            Rowx("VietQR", "Lưu tài khoản · tạo QR") { vm.screen.value = "VIETQR" }
+            if (employee?.role == "ADMIN" || employee?.role == "MANAGER") {
+                Rowx("VietQR", "Lưu tài khoản · tạo QR") { vm.screen.value = "VIETQR" }
+            }
             Rowx("Máy in", "Cấu hình") { vm.screen.value = "PRINTER" }
 
             if (employee?.role == "ADMIN" || employee?.canManageSystem == true) {
@@ -885,6 +887,8 @@ fun MenuManager(vm: PosViewModel) {
     val categories by vm.categories.collectAsState()
     val context = LocalContext.current
     var showAdd by remember { mutableStateOf(false) }
+    var showCategoryManager by remember { mutableStateOf(false) }
+    var deleteTarget by remember { mutableStateOf<MenuItemEntity?>(null) }
     var imageTarget by remember { mutableStateOf<MenuItemEntity?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -900,12 +904,15 @@ fun MenuManager(vm: PosViewModel) {
     }
     Column {
         Header("Quản lý menu") { vm.screen.value = "MANAGE" }
-        Button(
-            onClick = { showAdd = true },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
-        ) { Text("＋ THÊM MÓN") }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(onClick = { showAdd = true }, modifier = Modifier.weight(1f)) { Text("＋ THÊM MÓN") }
+            OutlinedButton(onClick = { showCategoryManager = true }, modifier = Modifier.weight(1f)) { Text("NHÓM MÓN") }
+        }
         LazyColumn {
-            items(menu) { m ->
+            items(menu.filter { it.active }) { m ->
                 Card(Modifier.fillMaxWidth().padding(6.dp)) {
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (!m.imageUri.isNullOrBlank()) {
@@ -933,7 +940,7 @@ fun MenuManager(vm: PosViewModel) {
                             imageTarget = m
                             picker.launch(arrayOf("image/*"))
                         }) { Text(if (m.imageUri.isNullOrBlank()) "＋ ẢNH" else "ĐỔI ẢNH") }
-                        Switch(checked = m.active, onCheckedChange = { vm.toggleMenu(m) })
+                        TextButton(onClick = { deleteTarget = m }) { Text("XOÁ") }
                     }
                 }
             }
@@ -945,6 +952,75 @@ fun MenuManager(vm: PosViewModel) {
             showAdd = false
         }
     }
+    if (showCategoryManager) {
+        CategoryManagerDialog(
+            categories = categories,
+            menu = menu,
+            onDismiss = { showCategoryManager = false },
+            onAdd = { vm.addCategory(it) },
+            onDelete = { vm.deleteCategory(it) }
+        )
+    }
+    deleteTarget?.let { m ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("Xoá món") },
+            text = { Text("Xoá ${m.name} khỏi menu bán? Lịch sử bill cũ vẫn được giữ.") },
+            confirmButton = {
+                Button(onClick = { vm.deleteMenu(m); deleteTarget = null }) { Text("XOÁ MÓN") }
+            },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("HỦY") } }
+        )
+    }
+}
+
+@Composable
+fun CategoryManagerDialog(
+    categories: List<MenuCategoryEntity>,
+    menu: List<MenuItemEntity>,
+    onDismiss: () -> Unit,
+    onAdd: (String) -> Unit,
+    onDelete: (MenuCategoryEntity) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Nhóm món") },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("ĐÓNG") } },
+        text = {
+            LazyColumn {
+                item {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Tên nhóm mới") }
+                    )
+                    Button(
+                        onClick = { onAdd(name); name = "" },
+                        enabled = name.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                    ) { Text("＋ THÊM NHÓM") }
+                }
+                items(categories) { c ->
+                    val hasActiveItems = menu.any { it.active && it.categoryId == c.id }
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(c.name, Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                        TextButton(
+                            onClick = { onDelete(c) },
+                            enabled = !hasActiveItems
+                        ) { Text("XOÁ") }
+                    }
+                    if (hasActiveItems) {
+                        Text("Còn món trong nhóm này", fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+    )
 }
 
 @Composable
@@ -1198,6 +1274,14 @@ fun PurchaseDetailDialog(vm: PosViewModel, p: PurchaseEntity, onDismiss: () -> U
 
 @Composable
 fun VietQr(vm: PosViewModel) {
+    val current by vm.currentEmployee.collectAsState()
+    if (current?.role != "ADMIN" && current?.role != "MANAGER") {
+        Column {
+            Header("VietQR") { vm.screen.value = "MANAGE" }
+            Text("Tài khoản Staff chỉ được sử dụng QR đã cài đặt khi thanh toán.", Modifier.padding(20.dp))
+        }
+        return
+    }
     val sets by vm.settings.collectAsState()
     val valueFor: (String) -> String = { key -> sets.firstOrNull { it.key == key }?.value ?: "" }
     var bank by remember(sets) { mutableStateOf(valueFor("bank_name")) }
