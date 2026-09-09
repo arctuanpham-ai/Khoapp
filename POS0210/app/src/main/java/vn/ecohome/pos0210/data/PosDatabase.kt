@@ -5,7 +5,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-@Database(entities=[EmployeeEntity::class,AreaEntity::class,DiningTableEntity::class,MenuCategoryEntity::class,MenuItemEntity::class,TableSessionEntity::class,OrderBatchEntity::class,OrderItemEntity::class,BillEntity::class,PaymentEntity::class,SupplierEntity::class,PurchaseEntity::class,PurchaseCategoryEntity::class,PurchaseItemEntity::class,PrintJobEntity::class,AuditEventEntity::class,AppSettingEntity::class],version=4,exportSchema=false)
+@Database(entities=[EmployeeEntity::class,AreaEntity::class,DiningTableEntity::class,MenuCategoryEntity::class,MenuItemEntity::class,TableSessionEntity::class,OrderBatchEntity::class,OrderItemEntity::class,BillEntity::class,PaymentEntity::class,SupplierEntity::class,PurchaseEntity::class,PurchaseCategoryEntity::class,PurchaseItemEntity::class,PrintJobEntity::class,AuditEventEntity::class,AppSettingEntity::class],version=5,exportSchema=false)
 abstract class PosDatabase:RoomDatabase(){
  abstract fun dao():PosDao
  companion object{
@@ -20,9 +20,15 @@ abstract class PosDatabase:RoomDatabase(){
     db.execSQL("CREATE INDEX IF NOT EXISTS index_PurchaseItemEntity_categoryId ON PurchaseItemEntity(categoryId)")
    }
   }
+  private val MIGRATION_4_5=object:Migration(4,5){
+   override fun migrate(db:SupportSQLiteDatabase){
+    db.execSQL("ALTER TABLE PurchaseEntity ADD COLUMN status TEXT NOT NULL DEFAULT 'ACTIVE'")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_PurchaseEntity_status ON PurchaseEntity(status)")
+   }
+  }
   fun get(context:Context):PosDatabase=instance?:synchronized(this){
    instance?:Room.databaseBuilder(context.applicationContext,PosDatabase::class.java,"pos0210.db")
-    .addMigrations(MIGRATION_3_4)
+    .addMigrations(MIGRATION_3_4,MIGRATION_4_5)
     .build().also{instance=it}
   }
   fun closeForRestore(){synchronized(this){instance?.close();instance=null}}
