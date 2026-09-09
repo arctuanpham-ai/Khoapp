@@ -185,7 +185,7 @@ object ReceiptRenderer {
     }
 
     fun kitchen(table:String,sequence:Int,serviceNo:Int,orderer:String,items:List<Pair<String,Int>>):Bitmap{
-        val h=260+items.size*55
+        val h=300+items.size*55
         val (b,c)=canvas(h)
         var y=45f
         c.drawText("0210",W/2f,y,paint(38f,true,Paint.Align.CENTER));y+=30
