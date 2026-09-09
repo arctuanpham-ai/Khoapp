@@ -70,6 +70,8 @@ import kotlinx.coroutines.flow.Flow
 @Query("UPDATE DiningTableEntity SET active=0") suspend fun deactivateAllTables()
 @Query("UPDATE MenuCategoryEntity SET active=0") suspend fun deactivateAllMenuCategories()
 @Query("UPDATE MenuItemEntity SET active=0") suspend fun deactivateAllMenuItems()
+@Query("UPDATE ComboEntity SET active=0") suspend fun deactivateAllCombos()
+@Query("UPDATE PricingRuleEntity SET active=0") suspend fun deactivateAllPricingRules()
 @Query("UPDATE EmployeeEntity SET active=0") suspend fun deactivateAllEmployees()
 @Query("UPDATE PurchaseCategoryEntity SET active=0") suspend fun deactivateAllPurchaseCategories()
 @Query("DELETE FROM AppSettingEntity WHERE key NOT IN ('autoback_tree_uri','master_config_uri','storage_root_uri')") suspend fun clearConfigSettings()
