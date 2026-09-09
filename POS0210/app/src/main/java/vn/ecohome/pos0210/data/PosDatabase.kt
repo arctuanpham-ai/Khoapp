@@ -5,7 +5,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-@Database(entities=[EmployeeEntity::class,AreaEntity::class,DiningTableEntity::class,MenuCategoryEntity::class,ComboEntity::class,ComboItemEntity::class,MenuItemEntity::class,TableSessionEntity::class,OrderBatchEntity::class,OrderItemEntity::class,BillEntity::class,PaymentEntity::class,PricingRuleEntity::class,BillAdjustmentEntity::class,SupplierEntity::class,PurchaseEntity::class,PurchaseCategoryEntity::class,PurchaseItemEntity::class,PrintJobEntity::class,AuditEventEntity::class,AppSettingEntity::class],version=6,exportSchema=false)
+@Database(entities=[EmployeeEntity::class,AreaEntity::class,DiningTableEntity::class,MenuCategoryEntity::class,ComboEntity::class,ComboItemEntity::class,MenuItemEntity::class,TableSessionEntity::class,OrderBatchEntity::class,OrderItemEntity::class,BillEntity::class,PaymentEntity::class,CustomerEntity::class,CustomerPointTransactionEntity::class,PricingRuleEntity::class,BillAdjustmentEntity::class,SupplierEntity::class,PurchaseEntity::class,PurchaseCategoryEntity::class,PurchaseItemEntity::class,PrintJobEntity::class,AuditEventEntity::class,AppSettingEntity::class],version=7,exportSchema=false)
 abstract class PosDatabase:RoomDatabase(){
  abstract fun dao():PosDao
  companion object{
@@ -40,9 +40,27 @@ abstract class PosDatabase:RoomDatabase(){
     db.execSQL("CREATE INDEX IF NOT EXISTS index_BillAdjustmentEntity_ruleId ON BillAdjustmentEntity(ruleId)")
    }
   }
+  private val MIGRATION_6_7=object:Migration(6,7){
+   override fun migrate(db:SupportSQLiteDatabase){
+    db.execSQL("ALTER TABLE OrderBatchEntity ADD COLUMN serviceNo INTEGER NOT NULL DEFAULT 0")
+    db.execSQL("ALTER TABLE OrderBatchEntity ADD COLUMN deliveredAt INTEGER")
+    db.execSQL("ALTER TABLE OrderBatchEntity ADD COLUMN deliveredBy TEXT")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_OrderBatchEntity_serviceNo ON OrderBatchEntity(serviceNo)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_OrderBatchEntity_status ON OrderBatchEntity(status)")
+    db.execSQL("UPDATE OrderBatchEntity SET status='WAITING' WHERE status='SENT'")
+    db.execSQL("ALTER TABLE BillEntity ADD COLUMN customerId TEXT")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_BillEntity_customerId ON BillEntity(customerId)")
+    db.execSQL("CREATE TABLE IF NOT EXISTS CustomerEntity (id TEXT NOT NULL, phone TEXT NOT NULL, name TEXT NOT NULL, tier TEXT NOT NULL, points INTEGER NOT NULL, totalSpend INTEGER NOT NULL, visitCount INTEGER NOT NULL, lastVisitAt INTEGER, active INTEGER NOT NULL, PRIMARY KEY(id))")
+    db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_CustomerEntity_phone ON CustomerEntity(phone)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_CustomerEntity_tier ON CustomerEntity(tier)")
+    db.execSQL("CREATE TABLE IF NOT EXISTS CustomerPointTransactionEntity (id TEXT NOT NULL, customerId TEXT NOT NULL, billId TEXT, delta INTEGER NOT NULL, reason TEXT NOT NULL, createdAt INTEGER NOT NULL, actorId TEXT, PRIMARY KEY(id))")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_CustomerPointTransactionEntity_customerId ON CustomerPointTransactionEntity(customerId)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_CustomerPointTransactionEntity_billId ON CustomerPointTransactionEntity(billId)")
+   }
+  }
   fun get(context:Context):PosDatabase=instance?:synchronized(this){
    instance?:Room.databaseBuilder(context.applicationContext,PosDatabase::class.java,"pos0210.db")
-    .addMigrations(MIGRATION_3_4,MIGRATION_4_5,MIGRATION_5_6)
+    .addMigrations(MIGRATION_3_4,MIGRATION_4_5,MIGRATION_5_6,MIGRATION_6_7)
     .build().also{instance=it}
   }
   fun closeForRestore(){synchronized(this){instance?.close();instance=null}}
