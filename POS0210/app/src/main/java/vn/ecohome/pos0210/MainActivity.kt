@@ -14,6 +14,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -85,6 +86,7 @@ fun App(vm: PosViewModel = viewModel()) {
         "VIETQR" -> VietQr(vm)
         "PRINTER" -> Printer(vm)
         "TABLE_ADMIN" -> TableManager(vm)
+        "BACKUP" -> BackupCenter(vm)
         "SETTINGS" -> Settings(vm)
     }
 }
@@ -488,18 +490,51 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
 @Composable
 fun Manage(vm: PosViewModel) {
     val employee by vm.currentEmployee.collectAsState()
-    val context = LocalContext.current
-    var backupMessage by remember { mutableStateOf("") }
+    Column {
+        Header("Quản lý") { vm.screen.value = "TABLES" }
+        Column(
+            Modifier.fillMaxSize().padding(horizontal = 16.dp).verticalScroll(rememberScrollState())
+        ) {
+            if (employee?.role == "ADMIN" || employee?.canManageMenu == true) {
+                Rowx("Quản lý menu", "Thêm món · ảnh · nhóm món") { vm.screen.value = "MENU" }
+            }
+            if (employee?.role == "ADMIN") {
+                Rowx("Nhân viên", "Thêm · khóa · phân quyền") { vm.screen.value = "EMP" }
+            }
+            if (employee?.role == "ADMIN" || employee?.canManageSystem == true) {
+                Rowx("Bàn & khu vực", "Thêm · sửa · Trong nhà / Ngoài trời") { vm.screen.value = "TABLE_ADMIN" }
+            }
+            Rowx("Nhập đầu vào", "Lương · vật tư cố định · vật tư sản xuất") { vm.screen.value = "PURCHASE" }
+            if (employee?.role == "ADMIN" || employee?.role == "MANAGER") {
+                Rowx("VietQR", "Lưu tài khoản · tạo QR") { vm.screen.value = "VIETQR" }
+            }
+            Rowx("Máy in", "XP-N58H · Bluetooth · ESC/POS") { vm.screen.value = "PRINTER" }
+            if (employee?.role == "ADMIN" || employee?.canManageSystem == true) {
+                Rowx("Dữ liệu & Backup", "MASTER · Autobackup · Backup/Restore") { vm.screen.value = "BACKUP" }
+            }
+            Spacer(Modifier.height(30.dp))
+        }
+    }
+}
 
-    val importMasterConfig = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+@Composable
+fun BackupCenter(vm: PosViewModel) {
+    val context = LocalContext.current
+    var message by remember { mutableStateOf("") }
+
+    val importMaster = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val result = ConfigBackup.importConfig(context, uri)
             if (result.isSuccess) {
                 val copy = ConfigBackup.copyMasterToDownloads(context, uri)
-                Toast.makeText(context, if(copy.isSuccess) "Đã khôi phục và ghi đè MASTER chuẩn." else "Đã khôi phục cấu hình nhưng lỗi ghi MASTER.", Toast.LENGTH_LONG).show()
+                Toast.makeText(
+                    context,
+                    if (copy.isSuccess) "Đã LOAD MASTER và ghi đè file chuẩn." else "Đã LOAD MASTER nhưng lỗi ghi file chuẩn.",
+                    Toast.LENGTH_LONG
+                ).show()
                 android.os.Process.killProcess(android.os.Process.myPid())
             } else {
-                backupMessage = "Restore MASTER lỗi: ${result.exceptionOrNull()?.message}"
+                message = "LOAD MASTER lỗi: ${result.exceptionOrNull()?.message}"
             }
         }
     }
@@ -509,22 +544,23 @@ fun Manage(vm: PosViewModel) {
     ) { uri ->
         if (uri != null) {
             val result = DataBackup.exportDatabase(context, uri)
-            backupMessage = if (result.isSuccess) "Đã xuất file backup." else "Backup lỗi: ${result.exceptionOrNull()?.message}"
+            message = if (result.isSuccess) "Đã xuất DATA backup thủ công." else "BACKUP lỗi: ${result.exceptionOrNull()?.message}"
         }
     }
+
     val restoreBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val result = DataBackup.restoreDatabase(context, uri)
             if (result.isSuccess) {
-                Toast.makeText(context, "Đã khôi phục dữ liệu. Hãy mở lại app.", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "Đã RESTORE DATA. App sẽ mở lại.", Toast.LENGTH_LONG).show()
                 android.os.Process.killProcess(android.os.Process.myPid())
             } else {
-                backupMessage = "Restore lỗi: ${result.exceptionOrNull()?.message}"
+                message = "RESTORE DATA lỗi: ${result.exceptionOrNull()?.message}"
             }
         }
     }
 
-    val chooseAutoBackupFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+    val chooseAutoFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
             runCatching {
                 context.contentResolver.takePersistableUriPermission(
@@ -534,92 +570,87 @@ fun Manage(vm: PosViewModel) {
             }
             vm.saveSetting("autoback_tree_uri", uri.toString())
             val result = DataBackup.autoBackup(context, uri.toString())
-            backupMessage = if (result.isSuccess) {
-                "Autobackup đã bật · file POS0210_autoback_latest.db"
-            } else {
-                "Autobackup lỗi: ${result.exceptionOrNull()?.message}"
-            }
+            message = if (result.isSuccess) "Autobackup đã bật và vừa ghi DATA mới." else "Autobackup lỗi: ${result.exceptionOrNull()?.message}"
         }
     }
 
+    val autoFolder = vm.setting("autoback_tree_uri")
+
     Column {
-        Header("Quản lý") { vm.screen.value = "TABLES" }
-        Column(Modifier.padding(16.dp)) {
-            if (employee?.role == "ADMIN" || employee?.canManageMenu == true) {
-                Rowx("Quản lý menu", "Thêm món · ảnh · bật/tắt") { vm.screen.value = "MENU" }
-            }
-            if (employee?.role == "ADMIN") {
-                Rowx("Nhân viên", "Thêm · khóa · phân quyền") { vm.screen.value = "EMP" }
-            }
-            if (employee?.role == "ADMIN" || employee?.canManageSystem == true) {
-                Rowx("Bàn & khu vực", "Thêm · sửa · Trong nhà / Ngoài trời") { vm.screen.value = "TABLE_ADMIN" }
-            }
-            Rowx("Nhập đầu vào", "Ngày giờ thủ công") { vm.screen.value = "PURCHASE" }
-            if (employee?.role == "ADMIN" || employee?.role == "MANAGER") {
-                Rowx("VietQR", "Lưu tài khoản · tạo QR") { vm.screen.value = "VIETQR" }
-            }
-            Rowx("Máy in", "Cấu hình") { vm.screen.value = "PRINTER" }
-
-            if (employee?.role == "ADMIN" || employee?.canManageSystem == true) {
-                Card(Modifier.fillMaxWidth().padding(5.dp)) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("MASTER CONFIG", fontWeight = FontWeight.Black, fontSize = 18.sp)
-                        Text("Menu · ảnh món · bàn · nhân viên · VietQR · cấu hình máy in", fontSize = 12.sp)
-                        Text(
-                            "File chuẩn: Download/POS0210/POS0210_MASTER.0210 · tự ghi đè",
-                            Modifier.padding(vertical = 6.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold
-                        )
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(
-                                onClick = {
-                                    val result = ConfigBackup.saveMasterToDownloads(context)
-                                    backupMessage = if (result.isSuccess) "Đã ghi đè MASTER chuẩn." else "MASTER lỗi: ${result.exceptionOrNull()?.message}"
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) { Text("GHI MASTER") }
-                            Button(
-                                onClick = { importMasterConfig.launch(arrayOf("*/*")) },
-                                modifier = Modifier.weight(1f)
-                            ) { Text("LOAD MASTER") }
-                        }
-                    }
-                }
-
-                Card(Modifier.fillMaxWidth().padding(5.dp)) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Sao lưu dữ liệu", fontWeight = FontWeight.Bold)
-                        Text("Xuất/khôi phục dữ liệu và bật Autobackup tự động.", fontSize = 12.sp)
-                        OutlinedButton(
-                            onClick = { chooseAutoBackupFolder.launch(null) },
-                            modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
-                        ) { Text("CHỌN THƯ MỤC AUTOBACKUP") }
-                        val autoFolder = vm.setting("autoback_tree_uri")
-                        Text(
-                            if (autoFolder.isBlank()) "Autobackup: CHƯA BẬT" else "Autobackup: ĐÃ BẬT",
-                            Modifier.padding(top = 6.dp),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Row(
-                            Modifier.fillMaxWidth().padding(top = 10.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = {
-                                    val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
-                                    exportBackup.launch("POS0210_backup_$stamp.db")
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) { Text("BACKUP") }
-                            Button(
-                                onClick = { restoreBackup.launch(arrayOf("application/octet-stream", "*/*")) },
-                                modifier = Modifier.weight(1f)
-                            ) { Text("RESTORE") }
-                        }
-                        if (backupMessage.isNotBlank()) Text(backupMessage, Modifier.padding(top = 8.dp), fontSize = 12.sp)
-                    }
+        Header("Dữ liệu & Backup") { vm.screen.value = "MANAGE" }
+        Column(
+            Modifier.fillMaxSize().padding(horizontal = 16.dp).verticalScroll(rememberScrollState())
+        ) {
+            Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("MASTER CONFIG", fontWeight = FontWeight.Black, fontSize = 20.sp)
+                    Text("Menu · ảnh món · bàn · nhân viên · VietQR · máy in · phân mục nhập", fontSize = 13.sp)
+                    Text(
+                        "File chuẩn duy nhất:\nDownload/POS0210/POS0210_MASTER.0210",
+                        Modifier.padding(vertical = 8.dp),
+                        fontWeight = FontWeight.Bold
+                    )
+                    Button(
+                        onClick = {
+                            val result = ConfigBackup.saveMasterToDownloads(context)
+                            message = if (result.isSuccess) "Đã GHI ĐÈ MASTER chuẩn." else "GHI MASTER lỗi: ${result.exceptionOrNull()?.message}"
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("GHI MASTER NGAY") }
+                    OutlinedButton(
+                        onClick = { importMaster.launch(arrayOf("*/*")) },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    ) { Text("LOAD MASTER TỪ FILE") }
                 }
             }
+
+            Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("DATA VẬN HÀNH", fontWeight = FontWeight.Black, fontSize = 20.sp)
+                    Text("Bill · order · thanh toán · nhập hàng · lịch sử · audit", fontSize = 13.sp)
+                    Text(
+                        if (autoFolder.isBlank()) "Autobackup: CHƯA BẬT" else "Autobackup: ĐÃ BẬT",
+                        Modifier.padding(vertical = 8.dp),
+                        fontWeight = FontWeight.Bold
+                    )
+                    OutlinedButton(
+                        onClick = { chooseAutoFolder.launch(null) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("CHỌN THƯ MỤC AUTOBACKUP") }
+
+                    Button(
+                        onClick = {
+                            if (autoFolder.isBlank()) {
+                                message = "Chưa chọn thư mục Autobackup."
+                            } else {
+                                val result = DataBackup.autoBackup(context, autoFolder)
+                                message = if (result.isSuccess) "BACKUP NGAY thành công · POS0210_autoback_latest.db" else "BACKUP NGAY lỗi: ${result.exceptionOrNull()?.message}"
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    ) { Text("BACKUP NGAY") }
+
+                    OutlinedButton(
+                        onClick = {
+                            val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
+                            exportBackup.launch("POS0210_backup_$stamp.db")
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    ) { Text("LƯU DATA RA FILE...") }
+
+                    Button(
+                        onClick = { restoreBackup.launch(arrayOf("application/octet-stream", "*/*")) },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    ) { Text("RESTORE DATA TỪ FILE") }
+                }
+            }
+
+            if (message.isNotBlank()) {
+                Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                    Text(message, Modifier.padding(14.dp), fontWeight = FontWeight.Bold)
+                }
+            }
+            Spacer(Modifier.height(30.dp))
         }
     }
 }
