@@ -252,7 +252,7 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
    val result=BluetoothPrinter.printBitmap(getApplication(),mac,ReceiptRenderer.kitchen(table,b.sequence,b.serviceNo,e.name,items))
    if(result.isSuccess){
     dao.markPrintSuccess(job.id,System.currentTimeMillis())
-    dao.transitionBatch(b.id,"DRAFT","SENT",System.currentTimeMillis())
+    dao.transitionBatch(b.id,"DRAFT","WAITING",System.currentTimeMillis())
     audit("PRINT",b.id,"KITCHEN_PRINTED","printer=${printerName()},operator=${e.name}")
     printerMessage.value="ĐÃ IN · Đơn #${b.sequence}"
    }else{
@@ -314,9 +314,30 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
   val e=currentEmployee.value?:return
   if(e.role!="ADMIN"||tier !in listOf("MEMBER","VIP","VVIP"))return
   viewModelScope.launch{
-   dao.saveCustomer(customer.copy(tier=tier))
-   audit("CUSTOMER",customer.id,"TIER","$tier")
+   dao.saveCustomer(customer.copy(tier=tier,tierManual=true))
+   audit("CUSTOMER",customer.id,"TIER_MANUAL","$tier")
    autoBackup()
+  }
+ }
+ fun setCustomerTierAutomatic(customer:CustomerEntity){
+  val e=currentEmployee.value?:return
+  if(e.role!="ADMIN")return
+  viewModelScope.launch{
+   val tier=autoTierFor(customer.points)
+   dao.saveCustomer(customer.copy(tier=tier,tierManual=false))
+   audit("CUSTOMER",customer.id,"TIER_AUTO","$tier")
+   autoBackup()
+  }
+ }
+ private fun autoTierFor(points:Int):String{
+  val auto=setting("loyalty_auto_tier").ifBlank{"true"}.toBoolean()
+  if(!auto)return "MEMBER"
+  val vip=setting("vip_min_points").toIntOrNull() ?: 200
+  val vvip=setting("vvip_min_points").toIntOrNull() ?: 500
+  return when{
+   points>=vvip -> "VVIP"
+   points>=vip -> "VIP"
+   else -> "MEMBER"
   }
  }
  fun customerPoints(id:String)=dao.customerPoints(id)
@@ -365,16 +386,24 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
   viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
    val normalizedPhone=customerPhone.filter(Char::isDigit).take(15)
    val customer=if(normalizedPhone.isBlank())null else{
-    dao.customerByPhone(normalizedPhone) ?: CustomerEntity(UUID.randomUUID().toString(),normalizedPhone,customerName.trim(),"MEMBER",0,0,0,null,true).also{dao.saveCustomer(it)}
+    dao.customerByPhone(normalizedPhone) ?: CustomerEntity(UUID.randomUUID().toString(),normalizedPhone,customerName.trim(),"MEMBER",0,0,0,null,true,false).also{dao.saveCustomer(it)}
    }
    val bill=repo.closeAndPay(session,preview.subtotal,preview.total,method,employee.id,"0210-${System.currentTimeMillis().toString().takeLast(6)}",customer?.id)
+   var pointsBefore=customer?.points ?: 0
+   var pointsEarned=0
+   var pointsAfter=pointsBefore
+   var receiptTier:String?=customer?.tier
    customer?.let{cu->
-    val earned=(preview.total/10000L).toInt()
-    dao.updateCustomerStats(cu.id,earned,preview.total,1,System.currentTimeMillis())
-    if(earned>0){
-     dao.insertCustomerPoint(CustomerPointTransactionEntity(UUID.randomUUID().toString(),cu.id,bill.id,earned,"TÍCH ĐIỂM ${bill.billNo}",System.currentTimeMillis(),employee.id))
+    pointsEarned=(preview.total/10000L).toInt()
+    pointsAfter=pointsBefore+pointsEarned
+    val newTier=if(cu.tierManual)cu.tier else autoTierFor(pointsAfter)
+    dao.updateCustomerStats(cu.id,pointsEarned,preview.total,1,System.currentTimeMillis())
+    if(newTier!=cu.tier)dao.saveCustomer(cu.copy(tier=newTier,points=pointsAfter,totalSpend=cu.totalSpend+preview.total,visitCount=cu.visitCount+1,lastVisitAt=System.currentTimeMillis()))
+    receiptTier=newTier
+    if(pointsEarned>0){
+     dao.insertCustomerPoint(CustomerPointTransactionEntity(UUID.randomUUID().toString(),cu.id,bill.id,pointsEarned,"TÍCH ĐIỂM ${bill.billNo}",System.currentTimeMillis(),employee.id))
     }
-    audit("CUSTOMER",cu.id,"VISIT","bill=${bill.billNo},spend=${preview.total},points=$earned")
+    audit("CUSTOMER",cu.id,"VISIT","bill=${bill.billNo},spend=${preview.total},points=$pointsEarned,tier=$newTier")
    }
    val now=System.currentTimeMillis()
    val adjustments=mutableListOf<BillAdjustmentEntity>()
@@ -409,6 +438,11 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
      discount=preview.discount,
      total=preview.total,
      adjustmentLines=receiptAdjustments,
+     customerName=customer?.name?.ifBlank{"KHÁCH THÀNH VIÊN"} ?: "KHÁCH LẠ",
+     customerTier=receiptTier,
+     pointsBefore=pointsBefore,
+     pointsEarned=pointsEarned,
+     pointsAfter=pointsAfter,
      method=if(method=="CASH")"TIỀN MẶT" else "CHUYỂN KHOẢN",
      qr=qr
     )
