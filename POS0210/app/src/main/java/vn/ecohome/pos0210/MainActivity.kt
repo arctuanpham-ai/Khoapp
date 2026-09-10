@@ -274,7 +274,9 @@ fun Order(vm: PosViewModel, t: DiningTableEntity) {
     val combos by vm.combos.collectAsState()
     val cats by vm.categories.collectAsState()
     val cart by vm.cart.collectAsState()
+    val cartNotes by vm.cartNotes.collectAsState()
     var showCart by remember { mutableStateOf(false) }
+    var noteTarget by remember { mutableStateOf<Pair<String,String>?>(null) }
     var selectedCat by remember(cats) { mutableStateOf(cats.firstOrNull()?.id ?: "") }
     val visible = ms.filter { it.active && (selectedCat.isBlank() || it.categoryId == selectedCat) }
     val activeCombos = combos.filter { it.active }
@@ -310,7 +312,11 @@ fun Order(vm: PosViewModel, t: DiningTableEntity) {
                 gridItems(activeCombos, key = { "combo:" + it.id }) { combo ->
                     val key = "combo:" + combo.id
                     val q = cart[key] ?: 0
-                    Card(Modifier.fillMaxWidth().clickable { vm.addCombo(combo) }) {
+                    val note = cartNotes[key].orEmpty()
+                    Card(
+                        Modifier.fillMaxWidth().clickable { vm.addCombo(combo) },
+                        colors = CardDefaults.cardColors(containerColor = if(note.isNotBlank()) Color(0xFFFFF0D8) else Color(0xFFFBF8F2))
+                    ) {
                         Column {
                             if (!combo.imageUri.isNullOrBlank()) {
                                 AsyncImage(model = combo.imageUri, contentDescription = combo.name, modifier = Modifier.fillMaxWidth().height(92.dp))
@@ -326,6 +332,13 @@ fun Order(vm: PosViewModel, t: DiningTableEntity) {
                                         Text(q.toString(), fontWeight = FontWeight.Black)
                                         Text("+", Modifier.clickable { vm.addCombo(combo) }.padding(5.dp), fontWeight = FontWeight.Bold)
                                     }
+                                    Text(
+                                        if(note.isBlank()) "+ Ghi chú" else "📝 " + note.take(24),
+                                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp).clickable { noteTarget = key to combo.name },
+                                        fontSize = 10.sp,
+                                        fontWeight = if(note.isBlank()) FontWeight.Normal else FontWeight.Bold,
+                                        color = Coffee
+                                    )
                                 }
                             }
                         }
@@ -334,7 +347,11 @@ fun Order(vm: PosViewModel, t: DiningTableEntity) {
             } else {
                 gridItems(visible, key = { it.id }) { m ->
                     val q = cart[m.id] ?: 0
-                    Card(Modifier.fillMaxWidth().clickable { vm.add(m) }, colors = CardDefaults.cardColors(containerColor = Color(0xFFFBF8F2))) {
+                    val note = cartNotes[m.id].orEmpty()
+                    Card(
+                        Modifier.fillMaxWidth().clickable { vm.add(m) },
+                        colors = CardDefaults.cardColors(containerColor = if(note.isNotBlank()) Color(0xFFFFF0D8) else Color(0xFFFBF8F2))
+                    ) {
                         Column {
                             if (!m.imageUri.isNullOrBlank()) {
                                 AsyncImage(model = m.imageUri, contentDescription = m.name, modifier = Modifier.fillMaxWidth().height(92.dp))
@@ -350,6 +367,13 @@ fun Order(vm: PosViewModel, t: DiningTableEntity) {
                                         Text(q.toString(), fontWeight = FontWeight.Black)
                                         Text("+", Modifier.clickable { vm.add(m) }.padding(5.dp), fontWeight = FontWeight.Bold)
                                     }
+                                    Text(
+                                        if(note.isBlank()) "+ Ghi chú" else "📝 " + note.take(24),
+                                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp).clickable { noteTarget = m.id to m.name },
+                                        fontSize = 10.sp,
+                                        fontWeight = if(note.isBlank()) FontWeight.Normal else FontWeight.Bold,
+                                        color = Coffee
+                                    )
                                 }
                             }
                         }
@@ -368,6 +392,37 @@ fun Order(vm: PosViewModel, t: DiningTableEntity) {
         }
     }
     if (showCart) OrderCartNotesDialog(vm) { showCart = false }
+    noteTarget?.let { (key,name) ->
+        var noteText by remember(key) { mutableStateOf(cartNotes[key].orEmpty()) }
+        AlertDialog(
+            onDismissRequest = { noteTarget = null },
+            title = { Text("Ghi chú · $name") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = noteText,
+                        onValueChange = { noteText = it.take(120) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Ví dụ: không hành, ít đá...") },
+                        minLines = 2
+                    )
+                    Row(Modifier.fillMaxWidth().padding(top = 8.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("Không hành","Ít đá","Không đá","Ít ngọt","Không cay").forEach { quick ->
+                            AssistChip(onClick = { noteText = quick }, label = { Text(quick, fontSize = 10.sp) })
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { vm.setCartNote(key,noteText); noteTarget = null }) { Text("LƯU GHI CHÚ") }
+            },
+            dismissButton = {
+                if(cartNotes[key].orEmpty().isNotBlank()) {
+                    TextButton(onClick = { vm.setCartNote(key,""); noteTarget = null }) { Text("XÓA GHI CHÚ") }
+                }
+            }
+        )
+    }
 }
 
 @Composable
