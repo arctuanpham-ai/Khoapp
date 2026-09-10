@@ -188,6 +188,7 @@ object DataBackup {
 
     fun restoreDatabase(context: Context, uri: Uri): Result<Unit> = runCatching {
         val temp = File(context.cacheDir, "pos0210-restore.tmp")
+        val rollback = File(context.cacheDir, "pos0210-pre-restore.db")
         context.contentResolver.openInputStream(uri).use { input ->
             requireNotNull(input)
             temp.outputStream().use { output -> input.copyTo(output) }
@@ -197,10 +198,45 @@ object DataBackup {
         PosDatabase.closeForRestore()
         val target = context.getDatabasePath(DB_NAME)
         target.parentFile?.mkdirs()
-        temp.copyTo(target, overwrite = true)
-        File(target.path + "-wal").delete()
-        File(target.path + "-shm").delete()
-        temp.delete()
+
+        if (target.exists()) {
+            target.copyTo(rollback, overwrite = true)
+        } else {
+            rollback.delete()
+        }
+
+        fun clearSidecars() {
+            File(target.path + "-wal").delete()
+            File(target.path + "-shm").delete()
+        }
+
+        try {
+            temp.copyTo(target, overwrite = true)
+            clearSidecars()
+
+            // Opening Room here forces all required migrations to run before
+            // the restore is accepted as successful.
+            PosDatabase.get(context).openHelper.writableDatabase
+            DatabaseHealth.validate(context).getOrThrow()
+
+            rollback.delete()
+            temp.delete()
+        } catch (restoreError: Throwable) {
+            PosDatabase.closeForRestore()
+            if (rollback.exists()) {
+                rollback.copyTo(target, overwrite = true)
+                clearSidecars()
+                runCatching {
+                    PosDatabase.get(context).openHelper.writableDatabase
+                    DatabaseHealth.validate(context).getOrThrow()
+                }
+            }
+            temp.delete()
+            throw IllegalStateException(
+                "Khôi phục DATA thất bại, đã quay lại database trước đó: ${restoreError.message}",
+                restoreError
+            )
+        }
     }
     fun restoreDatabaseAndApplyMaster(context: Context, uri: Uri, rootTreeUriString: String): Result<Unit> = runCatching {
         restoreDatabase(context, uri).getOrThrow()
