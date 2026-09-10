@@ -80,6 +80,30 @@ fun Sent'''
           s = s.replace('its.forEach { Text("${it.qty} × ${it.itemNameSnapshot}") }', 'its.forEach { item ->\n                        Text("${item.qty} × ${item.itemNameSnapshot}")\n                        if(item.note.isNotBlank()) Text("↳ ${item.note}", fontSize = 12.sp, fontWeight = FontWeight.Bold)\n                    }',1)
           main.write_text(s)
 
+          printer = Path('POS0210/app/src/main/java/vn/ecohome/pos0210/printing/BluetoothPrinter.kt')
+          s = printer.read_text()
+          s = s.replace('fun kitchen(table:String,sequence:Int,serviceNo:Int,orderer:String,items:List<Pair<String,Int>>):Bitmap{', 'fun kitchen(table:String,sequence:Int,serviceNo:Int,orderer:String,items:List<Triple<String,Int,String>>):Bitmap{',1)
+          s = s.replace('val h=300+items.size*55', 'val h=300+items.sumOf{if(it.third.isBlank())55 else 86}',1)
+          old_items = '''        items.forEach{(name,qty)->
+            c.drawText("$qty × $name",PAD,y,paint(24f,true));y+=42
+        }'''
+          new_items = '''        items.forEach{(name,qty,note)->
+            c.drawText("$qty × $name",PAD,y,paint(24f,true));y+=30
+            if(note.isNotBlank()){
+                y=wrap(c,"GHI CHÚ: ${note.trim()}",PAD+10f,y,W-PAD*2-10f,paint(18f,true),21f)
+                y+=8
+            }else y+=12
+        }'''
+          if old_items in s:
+              s = s.replace(old_items,new_items,1)
+          printer.write_text(s)
+
+          preview = Path('POS0210/app/src/main/java/vn/ecohome/pos0210/printing/PrinterText.kt')
+          if preview.exists():
+              s = preview.read_text()
+              s = s.replace('appendLine("2 x Bun ga")', 'appendLine("2 x Bun ga")\n        appendLine("  GHI CHU: Khong hanh")',1)
+              preview.write_text(s)
+
           gradle = Path('POS0210/app/build.gradle.kts')
           g = gradle.read_text().replace('versionCode = 53','versionCode = 54').replace('versionName = "1.0.0-alpha44-hardening"','versionName = "1.0.0-alpha45-order-notes"')
           gradle.write_text(g)
@@ -88,7 +112,7 @@ fun Sent'''
           if ! git diff --quiet; then
             git config user.name "pos0210-hardening-bot"
             git config user.email "actions@users.noreply.github.com"
-            git add POS0210/app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt POS0210/app/build.gradle.kts
+            git add POS0210/app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt POS0210/app/src/main/java/vn/ecohome/pos0210/printing/BluetoothPrinter.kt POS0210/app/src/main/java/vn/ecohome/pos0210/printing/PrinterText.kt POS0210/app/build.gradle.kts
             git commit -m "Add per-line order notes for kitchen"
             git push origin HEAD:pos0210-v1-rebuild
             echo "PATCH_COMMITTED=1" >> "$GITHUB_ENV"
