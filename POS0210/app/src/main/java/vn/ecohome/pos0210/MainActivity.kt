@@ -97,6 +97,7 @@ fun App(vm: PosViewModel = viewModel()) {
         "PRINTER" -> Printer(vm)
         "TABLE_ADMIN" -> TableManager(vm)
         "BACKUP" -> BackupCenter(vm)
+        "HEALTH" -> DataHealth(vm)
         "SETTINGS" -> Settings(vm)
     }
 }
@@ -1096,6 +1097,7 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Dữ liệu & Backup", "MASTER · Autobackup · Backup/Restore") { vm.screen.value = "BACKUP" }
             }
             if (employee?.role == "ADMIN") {
+                Rowx("Kiểm tra dữ liệu", "Đối soát Payment · Bill · Customer · điểm · trạng thái bàn") { vm.screen.value = "HEALTH" }
                 Rowx("Nhật ký hệ thống", "Audit thao tác · người thực hiện · thời điểm · dữ liệu thay đổi") { vm.screen.value = "SETTINGS" }
             }
             Spacer(Modifier.height(30.dp))
@@ -3189,6 +3191,52 @@ fun BillBatchDetail(vm: PosViewModel, batch: OrderBatchEntity, employees: List<E
                 Text("${line.qty} × ${line.itemNameSnapshot} · ${money(line.unitPriceSnapshot * line.qty)}")
                 if (line.note.isNotBlank()) Text("  Ghi chú: ${line.note}", fontSize = 12.sp)
             }
+        }
+    }
+}
+
+@Composable
+fun DataHealth(vm: PosViewModel) {
+    val current by vm.currentEmployee.collectAsState()
+    val issues by vm.healthIssues.collectAsState()
+    val message by vm.healthMessage.collectAsState()
+    if (current?.role != "ADMIN") {
+        Column {
+            Header("Kiểm tra dữ liệu") { vm.screen.value = "MANAGE" }
+            Text("Chỉ Admin được chạy kiểm tra dữ liệu.", Modifier.padding(20.dp), fontWeight = FontWeight.Bold)
+        }
+        return
+    }
+    Column {
+        Header("Kiểm tra dữ liệu") { vm.screen.value = "MANAGE" }
+        Column(Modifier.fillMaxSize().padding(16.dp)) {
+            Text("ĐỐI SOÁT HỆ THỐNG", fontWeight = FontWeight.Black, fontSize = 20.sp)
+            Text(
+                "Kiểm tra Payment ↔ Bill ↔ Session ↔ Customer ↔ Điểm. Không tự sửa dữ liệu.",
+                Modifier.padding(top = 4.dp),
+                fontSize = 12.sp
+            )
+            Button(
+                onClick = { vm.runHealthCheck() },
+                modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+            ) { Text("CHẠY KIỂM TRA") }
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(14.dp)) {
+                    Text(message, fontWeight = FontWeight.Black)
+                    if (issues.isEmpty() && message.startsWith("PASS")) {
+                        Text("Không phát hiện lệch dữ liệu lõi.", Modifier.padding(top = 6.dp))
+                    } else {
+                        issues.forEach { issue ->
+                            Text("• $issue", Modifier.padding(top = 5.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+            Text(
+                "Nếu có cảnh báo, cần xác định nguyên nhân trước khi sửa hoặc chạy thử thật.",
+                Modifier.padding(top = 12.dp),
+                fontSize = 11.sp
+            )
         }
     }
 }
