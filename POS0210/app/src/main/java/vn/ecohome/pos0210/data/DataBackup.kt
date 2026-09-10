@@ -253,8 +253,6 @@ object DataBackup {
             temp.copyTo(target, overwrite = true)
             clearSidecars()
 
-            // Opening Room here forces all required migrations to run before
-            // the restore is accepted as successful.
             PosDatabase.get(context).openHelper.writableDatabase
             DatabaseHealth.validate(context).getOrThrow()
 
@@ -277,17 +275,18 @@ object DataBackup {
             )
         }
     }
+
     fun restoreDatabaseAndApplyMaster(context: Context, uri: Uri, rootTreeUriString: String): Result<Unit> = runCatching {
         restoreDatabase(context, uri).getOrThrow()
-        val dbName=displayName(context,uri).orEmpty()
-        val archiveStamp=Regex("POS0210_DATA_(\d{8}_\d{6})\.db").matchEntire(dbName)?.groupValues?.get(1)
-        if(archiveStamp!=null){
-            val structure=SafPosStorage.ensureSelectedRoot(context,rootTreeUriString).getOrThrow()
-            val media=SafPosStorage.findFile(context,structure.archive,"POS0210_MEDIA_${archiveStamp}.0210")
+        val dbName = displayName(context, uri).orEmpty()
+        val archiveStamp = Regex("""POS0210_DATA_(\d{8}_\d{6})\.db""").matchEntire(dbName)?.groupValues?.get(1)
+        if (archiveStamp != null) {
+            val structure = SafPosStorage.ensureSelectedRoot(context, rootTreeUriString).getOrThrow()
+            val media = SafPosStorage.findFile(context, structure.archive, "POS0210_MEDIA_${archiveStamp}.0210")
                 ?: error("Thiếu MEDIA archive cùng mốc $archiveStamp; không dùng MEDIA_LATEST để tránh ghép sai dữ liệu")
-            validateMediaArchive(context,media)
-            restoreMediaFromUri(context,media)
-        }else{
+            validateMediaArchive(context, media)
+            restoreMediaFromUri(context, media)
+        } else {
             restoreMediaLatest(context, rootTreeUriString).getOrThrow()
         }
         val master = ConfigBackup.findMaster(context, rootTreeUriString)
@@ -298,5 +297,4 @@ object DataBackup {
             PosDatabase.get(context).dao().saveSetting(AppSettingEntity("storage_root_uri", rootTreeUriString))
         }
     }
-
 }
