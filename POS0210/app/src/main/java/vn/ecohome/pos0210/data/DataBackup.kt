@@ -14,6 +14,7 @@ object DataBackup {
     private const val DB_NAME = "pos0210.db"
     private const val LATEST_NAME = "POS0210_DATA_LATEST.db"
     private const val TEMP_NAME = "POS0210_DATA_TEMP.db"
+    private const val PREVIOUS_NAME = "POS0210_DATA_PREVIOUS.db"
     private const val MEDIA_LATEST_NAME = "POS0210_MEDIA_LATEST.0210"
 
     private fun checkpoint(context: Context): File {
@@ -40,6 +41,18 @@ object DataBackup {
         }
         validateSqlite(temp)
         temp.delete()
+    }
+
+    private fun copyUri(context: Context, source: Uri, target: Uri) {
+        context.contentResolver.openInputStream(source).use { input ->
+            requireNotNull(input) { "Không đọc được file nguồn" }
+            SafPosStorage.overwrite(context, target) { output -> input.copyTo(output) }
+        }
+    }
+
+    private fun validatedOrNull(context: Context, uri: Uri?): Uri? {
+        if (uri == null) return null
+        return runCatching { validateSqlite(context, uri); uri }.getOrNull()
     }
 
     fun ensureStructure(context: Context, rootTreeUriString: String): Result<Unit> =
@@ -78,16 +91,29 @@ object DataBackup {
             }
         }
 
-        val existing = SafPosStorage.findFile(context, structure.data, LATEST_NAME)
-        val target = existing ?: SafPosStorage.createFile(context, structure.data, LATEST_NAME)
+        val latest = SafPosStorage.findFile(context, structure.data, LATEST_NAME)
+            ?: SafPosStorage.createFile(context, structure.data, LATEST_NAME)
+        val temp = SafPosStorage.findFile(context, structure.data, TEMP_NAME)
+            ?: SafPosStorage.createFile(context, structure.data, TEMP_NAME)
+        val previous = SafPosStorage.findFile(context, structure.data, PREVIOUS_NAME)
+            ?: SafPosStorage.createFile(context, structure.data, PREVIOUS_NAME)
+
         val source = checkpoint(context)
-        SafPosStorage.overwrite(context, target) { out ->
+        SafPosStorage.overwrite(context, temp) { out ->
             source.inputStream().use { input -> input.copyTo(out) }
         }
-        validateSqlite(context, target)
+        validateSqlite(context, temp)
+
+        validatedOrNull(context, latest)?.let { validLatest ->
+            copyUri(context, validLatest, previous)
+            validateSqlite(context, previous)
+        }
+
+        copyUri(context, temp, latest)
+        validateSqlite(context, latest)
 
         if (includeMedia) backupMediaLatest(context, rootTreeUriString).getOrThrow()
-        target
+        latest
     }
 
     fun backupMediaLatest(context: Context, rootTreeUriString: String): Result<Uri> = runCatching {
@@ -171,7 +197,10 @@ object DataBackup {
     }
 
     fun restoreLatest(context: Context, rootTreeUriString: String): Result<Unit> = runCatching {
-        val uri = findLatest(context, rootTreeUriString) ?: error("Không tìm thấy POS0210_DATA_LATEST.db")
+        val structure = SafPosStorage.ensureSelectedRoot(context, rootTreeUriString).getOrThrow()
+        val latest = validatedOrNull(context, SafPosStorage.findFile(context, structure.data, LATEST_NAME))
+        val previous = validatedOrNull(context, SafPosStorage.findFile(context, structure.data, PREVIOUS_NAME))
+        val uri = latest ?: previous ?: error("Không tìm thấy DATA backup hợp lệ")
         restoreDatabase(context, uri).getOrThrow()
         restoreMediaLatest(context, rootTreeUriString).getOrThrow()
         val master = ConfigBackup.findMaster(context, rootTreeUriString)
