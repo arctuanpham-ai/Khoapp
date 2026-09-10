@@ -2680,15 +2680,15 @@ fun Report(vm: PosViewModel) {
         }.timeInMillis
     }
 
-    val from = periodStart(periodDays)
-    val filteredBills = bills.filter { (it.closedAt ?: 0L) >= from }
-    val filteredPurchases = purchases.filter { it.purchasedAt >= from }
+    val from = if (periodDays == 0) null else periodStart(periodDays)
+    val filteredBills = if (from == null) bills else bills.filter { (it.closedAt ?: 0L) >= from }
+    val filteredPurchases = if (from == null) purchases else purchases.filter { it.purchasedAt >= from }
     val billIds = filteredBills.map { it.id }.toSet()
     val filteredPayments = payments.filter { it.billId in billIds }
     val revenue = filteredBills.sumOf { it.total }
     val purchaseTotal = filteredPurchases.sumOf { it.total }
     val categorizedCosts = purchaseCosts
-        .filter { it.purchasedAt >= from }
+        .filter { from == null || it.purchasedAt >= from }
         .groupBy { it.categoryId }
         .map { (categoryId, rows) ->
             val categoryName = purchaseCategories.firstOrNull { it.id == categoryId }?.name ?: "Phân mục khác"
@@ -2757,6 +2757,7 @@ fun Report(vm: PosViewModel) {
                     FilterChip(periodDays == 1, { periodDays = 1 }, { Text("Hôm nay") })
                     FilterChip(periodDays == 7, { periodDays = 7 }, { Text("7 ngày") })
                     FilterChip(periodDays == 30, { periodDays = 30 }, { Text("30 ngày") })
+                    FilterChip(periodDays == 0, { periodDays = 0 }, { Text("Tất cả") })
                 }
                 LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
                     item { MetricCard("Doanh thu", money(revenue)) }
@@ -2998,6 +2999,7 @@ fun PeakHoursChart(
         1 -> "Hôm nay"
         7 -> "7 ngày"
         30 -> "30 ngày"
+        0 -> "Tất cả"
         else -> "$periodDays ngày"
     }
 
