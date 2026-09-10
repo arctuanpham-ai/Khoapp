@@ -16,7 +16,8 @@ import kotlinx.coroutines.flow.Flow
 @Query("SELECT * FROM TableSessionEntity WHERE id=:id LIMIT 1") fun sessionById(id:String):Flow<TableSessionEntity?>
 @Query("SELECT * FROM TableSessionEntity WHERE tableId=:tableId AND status='OPEN' LIMIT 1") suspend fun openSessionForTable(tableId:String):TableSessionEntity?
 @Query("SELECT * FROM OrderBatchEntity WHERE sessionId=:sessionId ORDER BY sequence") fun batches(sessionId:String):Flow<List<OrderBatchEntity>>
-@Query("SELECT * FROM OrderBatchEntity WHERE status='WAITING' ORDER BY serviceNo,createdAt") fun waitingBatches():Flow<List<OrderBatchEntity>>
+@Query("SELECT ob.* FROM OrderBatchEntity ob INNER JOIN TableSessionEntity s ON s.id=ob.sessionId WHERE ob.status='WAITING' AND s.status='OPEN' ORDER BY ob.serviceNo,ob.createdAt") fun waitingBatches():Flow<List<OrderBatchEntity>>
+@Query("SELECT COUNT(*) FROM OrderBatchEntity WHERE sessionId=:sessionId AND status='WAITING'") suspend fun waitingCountForSession(sessionId:String):Int
 @Query("SELECT COALESCE(MAX(serviceNo),0) FROM OrderBatchEntity WHERE createdAt>=:dayStart") suspend fun maxServiceNoSince(dayStart:Long):Int
 @Query("SELECT * FROM OrderItemEntity WHERE batchId=:batchId") fun batchItems(batchId:String):Flow<List<OrderItemEntity>>
 @Query("SELECT COALESCE(SUM(qty*unitPriceSnapshot),0) FROM OrderItemEntity WHERE batchId IN (SELECT id FROM OrderBatchEntity WHERE sessionId=:sessionId AND status!='CANCELLED')") fun sessionTotal(sessionId:String):Flow<Long>
