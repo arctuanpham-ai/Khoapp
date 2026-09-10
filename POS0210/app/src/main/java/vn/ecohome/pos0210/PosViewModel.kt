@@ -227,7 +227,7 @@ fun saveLoyaltyConfig(auto:Boolean,memberDiscount:Int,vipPoints:Int,vipDiscount:
       cu.points>=safeVip -> "VIP"
       else -> "MEMBER"
      }
-     if(tier!=cu.tier)dao.saveCustomer(cu.copy(tier=tier))
+     if(tier!=cu.tier)dao.updateCustomerTierFields(cu.id,tier,false)
     }
    }
    audit("LOYALTY","CONFIG","SAVE","auto=$auto,vip=$safeVip,vvip=$safeVvip")
@@ -414,7 +414,7 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
   val e=currentEmployee.value?:return
   if(e.role!="ADMIN"||tier !in listOf("MEMBER","VIP","VVIP"))return
   viewModelScope.launch{
-   dao.saveCustomer(customer.copy(tier=tier,tierManual=true))
+   dao.updateCustomerTierFields(customer.id,tier,true)
    audit("CUSTOMER",customer.id,"TIER_MANUAL","$tier")
    autoBackup()
   }
@@ -423,9 +423,10 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
   val e=currentEmployee.value?:return
   if(e.role!="ADMIN")return
   viewModelScope.launch{
+   val fresh=dao.customerById(customer.id) ?: return@launch
    val auto=setting("loyalty_auto_tier").ifBlank{"true"}.toBoolean()
-   val tier=if(auto)autoTierFor(customer.points) else customer.tier
-   dao.saveCustomer(customer.copy(tier=tier,tierManual=false))
+   val tier=if(auto)autoTierFor(fresh.points) else fresh.tier
+   dao.updateCustomerTierFields(fresh.id,tier,false)
    audit("CUSTOMER",customer.id,"TIER_AUTO","$tier")
    autoBackup()
   }
@@ -446,7 +447,12 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
    if(normalized.length<9){customerUpdateMessage.value="Số điện thoại không hợp lệ";return@launch}
    val other=dao.customerByPhone(normalized)
    if(other!=null&&other.id!=customer.id){customerUpdateMessage.value="Số điện thoại đã thuộc khách khác";return@launch}
-   dao.saveCustomer(customer.copy(name=name.trim(),phone=normalized,address=address.trim()))
+   runCatching {
+    dao.updateCustomerProfileFields(customer.id,name.trim(),normalized,address.trim())
+   }.onFailure {
+    customerUpdateMessage.value="Không cập nhật được hồ sơ: ${it.message ?: "UNKNOWN"}"
+    return@launch
+   }
    audit("CUSTOMER",customer.id,"PROFILE_UPDATE","name=${name.trim()},phone=$normalized")
    customerUpdateMessage.value="Đã cập nhật thông tin khách"
    autoBackup()
