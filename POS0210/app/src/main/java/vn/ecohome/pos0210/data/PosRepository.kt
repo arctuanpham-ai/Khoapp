@@ -73,6 +73,7 @@ class PosRepository(private val db:PosDatabase){
         val now=System.currentTimeMillis()
         val normalizedPhone=customerPhone.filter(Char::isDigit).take(15)
         return db.withTransaction {
+            if(dao.waitingCountForSession(session.id)>0) error("PENDING_DELIVERY_NOT_CONFIRMED")
             var customer:CustomerEntity?=null
             var pointsBefore=0
             var pointsEarned=0
