@@ -94,6 +94,7 @@ import kotlinx.coroutines.flow.Flow
 @Query("UPDATE OrderBatchEntity SET status='CANCELLED' WHERE id=:id AND status IN ('DRAFT','WAITING')") suspend fun cancelBatch(id:String):Int
 @Query("UPDATE TableSessionEntity SET status='CLOSED',version=version+1 WHERE id=:id AND status='OPEN' AND version=:version") suspend fun closeSession(id:String,version:Long):Int
 @Query("UPDATE PrintJobEntity SET status=:newStatus,claimedByDeviceId=:deviceId,attempts=attempts+1 WHERE id=:id AND status=:expected") suspend fun claimPrint(id:String,expected:String,newStatus:String,deviceId:String):Int
+@Query("UPDATE PrintJobEntity SET status='REVIEW',error='APP_RESTART_DURING_PRINT' WHERE status='CLAIMED'") suspend fun recoverClaimedPrints():Int
 @Query("UPDATE PrintJobEntity SET status='PRINTED',printedAt=:printedAt,error=NULL WHERE id=:id AND status='CLAIMED'") suspend fun markPrintSuccess(id:String,printedAt:Long):Int
 @Query("UPDATE PrintJobEntity SET status='FAILED',error=:error WHERE id=:id AND status='CLAIMED'") suspend fun markPrintFailed(id:String,error:String):Int
 @Query("UPDATE BillEntity SET status='DELETED' WHERE id=:id AND status='PAID'") suspend fun softDeleteBill(id:String):Int
