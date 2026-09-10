@@ -1,0 +1,122 @@
+name: Patch POS0210 order notes
+
+on:
+  push:
+    branches: [ pos0210-v1-rebuild ]
+    paths:
+      - '.github/workflows/patch-order-notes.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: pos0210-v1-rebuild
+
+      - name: Apply order note wiring
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          vm = Path('POS0210/app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt')
+          s = vm.read_text()
+          s = s.replace(
+              'val customerUpdateMessage=MutableStateFlow("");val cart=MutableStateFlow<Map<String,Int>>(emptyMap());',
+              'val customerUpdateMessage=MutableStateFlow("");val cartNotes=MutableStateFlow<Map<String,String>>(emptyMap());val cart=MutableStateFlow<Map<String,Int>>(emptyMap());',
+              1
+          )
+          marker = ' fun add(i:MenuItemEntity){cart.value=cart.value.toMutableMap().apply{put(i.id,(get(i.id)?:0)+1)}}'
+          if 'fun setCartNote(' not in s and marker in s:
+              s = s.replace(marker, ' fun setCartNote(key:String,note:String){cartNotes.value=cartNotes.value.toMutableMap().apply{if(note.isBlank())remove(key) else put(key,note.take(120))}}\n' + marker, 1)
+          s = s.replace('cart.value=emptyMap()\n   if(existing!=null)', 'cart.value=emptyMap();cartNotes.value=emptyMap()\n   if(existing!=null)', 1)
+          s = s.replace(
+              'fun addMore(){val e=currentEmployee.value?:return;if(!e.canOrder&&e.role!="ADMIN")return;if(currentSession.value==null||currentTable.value==null)return;cart.value=emptyMap();screen.value="ORDER"}',
+              'fun addMore(){val e=currentEmployee.value?:return;if(!e.canOrder&&e.role!="ADMIN")return;if(currentSession.value==null||currentTable.value==null)return;cart.value=emptyMap();cartNotes.value=emptyMap();screen.value="ORDER"}',
+              1
+          )
+          s = s.replace(
+              'its.add(OrderItemEntity("","","combo:"+combo.id,"COMBO · ${combo.name} [${parts.joinToString(" + ")}]",combo.price,q))',
+              'its.add(OrderItemEntity("","","combo:"+combo.id,"COMBO · ${combo.name} [${parts.joinToString(" + ")}]",combo.price,q,(cartNotes.value[id] ?: "").trim()))',
+              1
+          )
+          s = s.replace(
+              'menu.value.firstOrNull{it.id==id}?.let{its.add(OrderItemEntity("","",it.id,it.name,it.price,q))}',
+              'menu.value.firstOrNull{it.id==id}?.let{its.add(OrderItemEntity("","",it.id,it.name,it.price,q,(cartNotes.value[id] ?: "").trim()))}',
+              1
+          )
+          s = s.replace('repo.createBatch(s.id,bs.size+1,e.id,its)\n   cart.value=emptyMap()', 'repo.createBatch(s.id,bs.size+1,e.id,its)\n   cart.value=emptyMap();cartNotes.value=emptyMap()', 1)
+          s = s.replace('val items=dao.batchItems(b.id).first().map{it.itemNameSnapshot to it.qty}', 'val items=dao.batchItems(b.id).first().map{Triple(it.itemNameSnapshot,it.qty,it.note)}', 1)
+          vm.write_text(s)
+
+          main = Path('POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt')
+          s = main.read_text()
+          s = s.replace('    val cart by vm.cart.collectAsState()\n    var selectedCat', '    val cart by vm.cart.collectAsState()\n    var showCart by remember { mutableStateOf(false) }\n    var selectedCat', 1)
+          s = s.replace('OutlinedButton(onClick = {}, modifier = Modifier.weight(1f)) { Text("XEM GIỎ HÀNG") }', 'OutlinedButton(onClick = { showCart = true }, modifier = Modifier.weight(1f)) { Text("XEM GIỎ HÀNG") }', 1)
+          old_end = '''        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { showCart = true }, modifier = Modifier.weight(1f)) { Text("XEM GIỎ HÀNG") }
+            Button(onClick = { vm.sendBatch() }, modifier = Modifier.weight(1f), enabled = cart.isNotEmpty()) { Text("GỬI LÀM HÀNG") }
+        }
+    }
+}
+
+@Composable
+fun Sent'''
+          new_end = '''        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { showCart = true }, modifier = Modifier.weight(1f)) { Text("XEM GIỎ HÀNG") }
+            Button(onClick = { vm.sendBatch() }, modifier = Modifier.weight(1f), enabled = cart.isNotEmpty()) { Text("GỬI LÀM HÀNG") }
+        }
+    }
+    if (showCart) OrderCartNotesDialog(vm) { showCart = false }
+}
+
+@Composable
+fun Sent'''
+          s = s.replace(old_end, new_end, 1)
+          s = s.replace(
+              'its.forEach { Text("${it.qty} × ${it.itemNameSnapshot}") }',
+              'its.forEach { item ->\n                        Text("${item.qty} × ${item.itemNameSnapshot}")\n                        if(item.note.isNotBlank()) Text("↳ ${item.note}", fontSize = 12.sp, fontWeight = FontWeight.Bold)\n                    }',
+              1
+          )
+          main.write_text(s)
+
+          printer = Path('POS0210/app/src/main/java/vn/ecohome/pos0210/printing/BluetoothPrinter.kt')
+          s = printer.read_text()
+          s = s.replace(
+              'fun kitchen(table:String,sequence:Int,serviceNo:Int,orderer:String,items:List<Pair<String,Int>>):Bitmap{',
+              'fun kitchen(table:String,sequence:Int,serviceNo:Int,orderer:String,items:List<Triple<String,Int,String>>):Bitmap{',
+              1
+          )
+          s = s.replace('val h=300+items.size*55', 'val h=300+items.sumOf{if(it.third.isBlank())55 else 86}', 1)
+          old_items = '''        items.forEach{(name,qty)->
+            c.drawText("$qty × $name",PAD,y,paint(24f,true));y+=42
+        }'''
+          new_items = '''        items.forEach{(name,qty,note)->
+            c.drawText("$qty × $name",PAD,y,paint(24f,true));y+=30
+            if(note.isNotBlank()){
+                y=wrap(c,"GHI CHÚ: ${note.trim()}",PAD+10f,y,W-PAD*2-10f,paint(18f,true),21f)
+                y+=8
+            }else y+=12
+        }'''
+          s = s.replace(old_items, new_items, 1)
+          printer.write_text(s)
+
+          gradle = Path('POS0210/app/build.gradle.kts')
+          g = gradle.read_text()
+          g = g.replace('versionCode = 53', 'versionCode = 54', 1)
+          g = g.replace('versionName = "1.0.0-alpha44-hardening"', 'versionName = "1.0.0-alpha45-order-notes"', 1)
+          gradle.write_text(g)
+          PY
+
+          git config user.name "pos0210-patch-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add POS0210/app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt POS0210/app/src/main/java/vn/ecohome/pos0210/printing/BluetoothPrinter.kt POS0210/app/build.gradle.kts
+          if ! git diff --cached --quiet; then
+            git commit -m "Add per-line order notes for kitchen"
+            git push origin HEAD:pos0210-v1-rebuild
+          fi
