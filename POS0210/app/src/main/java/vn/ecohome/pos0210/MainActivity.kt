@@ -571,6 +571,8 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
     val rules by vm.pricingRules.collectAsState()
     val e by vm.currentEmployee.collectAsState()
     val settings by vm.settings.collectAsState()
+    val waitingAll by vm.waitingBatches.collectAsState()
+    val pendingDelivery = waitingAll.filter { it.sessionId == s.id }.sortedBy { it.serviceNo }
     fun setting(key: String) = settings.firstOrNull { it.key == key }?.value ?: ""
     var method by remember { mutableStateOf("CASH") }
     var codeText by remember { mutableStateOf("") }
@@ -595,6 +597,30 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
     Column {
         Header("Thanh toán") { vm.screen.value = "SENT" }
         Column(Modifier.weight(1f).padding(18.dp).verticalScroll(rememberScrollState())) {
+            if (pendingDelivery.isNotEmpty()) {
+                Card(
+                    Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                    colors = CardDefaults.cardColors(containerColor = WaitingPriority2)
+                ) {
+                    Column(Modifier.padding(14.dp)) {
+                        Text("CHƯA XÁC NHẬN GIAO ĐỦ", fontWeight = FontWeight.Black, fontSize = 18.sp)
+                        Text(
+                            "Không thể thanh toán cho đến khi xác nhận đã giao đủ đồ cho khách.",
+                            Modifier.padding(top = 4.dp),
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            pendingDelivery.joinToString(" · ") { "#${it.serviceNo.toString().padStart(3,'0')}" },
+                            Modifier.padding(top = 8.dp),
+                            fontWeight = FontWeight.Black
+                        )
+                        Button(
+                            onClick = { vm.confirmAllDelivered(s.id) },
+                            modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                        ) { Text("✓ XÁC NHẬN ĐÃ GIAO ĐỦ") }
+                    }
+                }
+            }
             Text("TẠM TÍNH")
             Text(money(preview.subtotal), fontSize = 24.sp, fontWeight = FontWeight.Bold)
             if (preview.surcharge > 0) Text("Phụ thu: +${money(preview.surcharge)}", fontWeight = FontWeight.Bold)
@@ -668,8 +694,12 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
                 }
             }
         }
-        Button(onClick = { vm.close(method, preview, customerPhone, customerName) }, modifier = Modifier.fillMaxWidth().padding(18.dp), enabled = preview.total > 0) {
-            Text("XÁC NHẬN THANH TOÁN")
+        Button(
+            onClick = { vm.close(method, preview, customerPhone, customerName) },
+            modifier = Modifier.fillMaxWidth().padding(18.dp),
+            enabled = preview.total > 0 && pendingDelivery.isEmpty()
+        ) {
+            Text(if (pendingDelivery.isEmpty()) "XÁC NHẬN THANH TOÁN" else "CHƯA GIAO ĐỦ · CHƯA THỂ THANH TOÁN")
         }
     }
 }
