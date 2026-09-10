@@ -70,8 +70,12 @@ class PosRepository(private val db:PosDatabase){
         vipMinPoints:Int=200,
         vvipMinPoints:Int=500
     ):PaymentCommitResult {
+        require(method=="CASH" || method=="TRANSFER") { "INVALID_PAYMENT_METHOD" }
+        require(preview.subtotal>=0L && preview.total>=0L && preview.surcharge>=0L && preview.discount>=0L) { "INVALID_PAYMENT_AMOUNT" }
+        require(preview.total == (preview.subtotal + preview.surcharge - preview.discount).coerceAtLeast(0L)) { "PRICING_TOTAL_MISMATCH" }
         val now=System.currentTimeMillis()
         val normalizedPhone=customerPhone.filter(Char::isDigit).take(15)
+        if(normalizedPhone.isNotBlank()) require(normalizedPhone.length>=9) { "INVALID_CUSTOMER_PHONE" }
         return db.withTransaction {
             if(dao.waitingCountForSession(session.id)>0) error("PENDING_DELIVERY_NOT_CONFIRMED")
             var customer:CustomerEntity?=null
@@ -188,16 +192,17 @@ class PosRepository(private val db:PosDatabase){
                         ))
                     }
                     if(cu!=null){
-                        val newPoints=(cu.points-delta).coerceAtLeast(0)
-                        val newSpend=(cu.totalSpend-bill.total).coerceAtLeast(0)
-                        val newVisits=(cu.visitCount-1).coerceAtLeast(0)
+                        val newPoints=dao.pointBalanceForCustomer(customerId).coerceAtLeast(0)
+                        val newSpend=dao.paidSpendForCustomer(customerId).coerceAtLeast(0)
+                        val newVisits=dao.paidVisitCountForCustomer(customerId).coerceAtLeast(0)
+                        val lastVisit=dao.lastPaidVisitForCustomer(customerId)
                         val newTier=if(cu.tierManual||!autoTier) cu.tier else when {
                             newPoints>=safeVvip -> "VVIP"
                             newPoints>=vipMinPoints -> "VIP"
                             else -> "MEMBER"
                         }
                         dao.saveCustomer(cu.copy(
-                            points=newPoints,totalSpend=newSpend,visitCount=newVisits,tier=newTier,lastVisitAt=now
+                            points=newPoints,totalSpend=newSpend,visitCount=newVisits,tier=newTier,lastVisitAt=lastVisit
                         ))
                     }
                 }
