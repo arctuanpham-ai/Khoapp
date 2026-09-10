@@ -18,6 +18,10 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  val customerUpdateMessage=MutableStateFlow("");val cart=MutableStateFlow<Map<String,Int>>(emptyMap());val currentTable=MutableStateFlow<DiningTableEntity?>(null);val currentSession=MutableStateFlow<TableSessionEntity?>(null);val currentEmployee=MutableStateFlow<EmployeeEntity?>(null);val authError=MutableStateFlow("");val screen=MutableStateFlow("LOGIN");val printerPreview=MutableStateFlow("");val printerMessage=MutableStateFlow("")
  init{viewModelScope.launch{bootstrap()}}
  private suspend fun bootstrap(){
+  val recovered=dao.recoverClaimedPrints()
+  if(recovered>0){
+   dao.audit(AuditEventEntity(UUID.randomUUID().toString(),"PRINT","RECOVERY","CLAIMED_TO_REVIEW",null,"ANDROID",System.currentTimeMillis(),"count=$recovered"))
+  }
   if(dao.areas().first().isNotEmpty())return
   seed()
  }
@@ -292,7 +296,15 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
     printerMessage.value="ĐƠN #${b.sequence} ĐANG ĐƯỢC XỬ LÝ"
     return@launch
    }
-   val expected=if(job.status=="FAILED")"FAILED" else "PENDING"
+   if(job.status=="REVIEW" && e.role!="ADMIN" && e.role!="MANAGER"){
+    printerMessage.value="ĐƠN #${b.sequence}: TRẠNG THÁI IN CHƯA XÁC ĐỊNH · Nhờ Admin/Manager kiểm tra giấy trước khi in lại"
+    return@launch
+   }
+   val expected=when(job.status){
+    "FAILED" -> "FAILED"
+    "REVIEW" -> "REVIEW"
+    else -> "PENDING"
+   }
    if(!repo.claimPrint(job.id,"ANDROID",expected)){
     printerMessage.value="ĐƠN #${b.sequence} ĐÃ ĐƯỢC THIẾT BỊ KHÁC NHẬN IN"
     return@launch
