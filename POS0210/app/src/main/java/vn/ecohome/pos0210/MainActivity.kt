@@ -2861,6 +2861,7 @@ fun Report(vm: PosViewModel) {
                         FilterChip(periodDays == 1 && historyDateText.isBlank(), { periodDays = 1; historyDateText = ""; selectedBillIds = emptySet() }, { Text("Hôm nay") })
                         FilterChip(periodDays == 7 && historyDateText.isBlank(), { periodDays = 7; historyDateText = ""; selectedBillIds = emptySet() }, { Text("7 ngày") })
                         FilterChip(periodDays == 30 && historyDateText.isBlank(), { periodDays = 30; historyDateText = ""; selectedBillIds = emptySet() }, { Text("30 ngày") })
+                        FilterChip(periodDays == 0 && historyDateText.isBlank(), { periodDays = 0; historyDateText = ""; selectedBillIds = emptySet() }, { Text("Tất cả") })
                     }
                     OutlinedTextField(
                         value = historyDateText,
