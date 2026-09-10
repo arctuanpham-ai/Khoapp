@@ -101,6 +101,8 @@ import kotlinx.coroutines.flow.Flow
 @Query("UPDATE BillEntity SET status='DELETED' WHERE id=:id AND status='PAID'") suspend fun softDeleteBill(id:String):Int
 @Query("UPDATE BillEntity SET status='DELETED' WHERE id IN (:ids) AND status='PAID'") suspend fun softDeleteBills(ids:List<String>):Int
 @Query("UPDATE CustomerEntity SET points=points+:pointsDelta,totalSpend=MAX(0,totalSpend+:spendDelta),visitCount=MAX(0,visitCount+:visitDelta),lastVisitAt=:lastVisitAt WHERE id=:customerId") suspend fun updateCustomerStats(customerId:String,pointsDelta:Int,spendDelta:Long,visitDelta:Int,lastVisitAt:Long?)
+@Query("UPDATE CustomerEntity SET name=:name,phone=:phone,address=:address WHERE id=:id") suspend fun updateCustomerProfileFields(id:String,name:String,phone:String,address:String):Int
+@Query("UPDATE CustomerEntity SET tier=:tier,tierManual=:manual WHERE id=:id") suspend fun updateCustomerTierFields(id:String,tier:String,manual:Boolean):Int
 @Query("UPDATE PurchaseEntity SET status='DELETED' WHERE id=:id AND status='ACTIVE'") suspend fun softDeletePurchase(id:String):Int
 @Query("UPDATE PurchaseEntity SET invoiceImageUri=:uri WHERE id=:id") suspend fun updatePurchaseImage(id:String,uri:String?)
 }
