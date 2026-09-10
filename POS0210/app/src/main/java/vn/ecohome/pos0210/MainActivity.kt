@@ -3230,6 +3230,17 @@ fun DataHealth(vm: PosViewModel) {
                         issues.forEach { issue ->
                             Text("• $issue", Modifier.padding(top = 5.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
+                        if (issues.any { it.startsWith("Session CLOSED còn đơn WAITING") }) {
+                            Button(
+                                onClick = { vm.reconcileLegacyWaiting() },
+                                modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                            ) { Text("XỬ LÝ DỮ LIỆU CŨ") }
+                            Text(
+                                "Chỉ đối soát đơn WAITING thuộc session đã đóng; không sửa bill, payment, doanh thu hay điểm.",
+                                Modifier.padding(top = 6.dp),
+                                fontSize = 10.sp
+                            )
+                        }
                     }
                 }
             }
