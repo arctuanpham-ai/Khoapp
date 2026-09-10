@@ -185,7 +185,7 @@ object ReceiptRenderer {
     }
 
     fun kitchen(table:String,sequence:Int,serviceNo:Int,orderer:String,items:List<Triple<String,Int,String>>):Bitmap{
-        val h=300+items.sumOf{if(it.third.isBlank())55 else 86}
+        val h=300+items.fold(0){acc,item->acc+if(item.third.isBlank())55 else 86}
         val (b,c)=canvas(h)
         var y=45f
         c.drawText("0210",W/2f,y,paint(38f,true,Paint.Align.CENTER));y+=30
