@@ -355,7 +355,23 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
     autoBackup()
    }
   }
+ } fun confirmAllDelivered(sessionId:String){
+  val e=currentEmployee.value?:return
+  viewModelScope.launch{
+   val targets=waitingBatches.value.filter{it.sessionId==sessionId}.sortedBy{it.serviceNo}
+   targets.forEach{b->
+    val now=System.currentTimeMillis()
+    if(dao.markDelivered(b.id,now,e.id)>0){
+     audit("BATCH",b.id,"DELIVERED_AT_CHECKOUT","serviceNo=${b.serviceNo},by=${e.name}")
+    }
+   }
+   if(targets.isNotEmpty()){
+    printerMessage.value="ĐÃ XÁC NHẬN GIAO ĐỦ ${targets.size} ĐƠN"
+    autoBackup()
+   }
+  }
  }
+
  fun canCancelOrder():Boolean{val r=currentEmployee.value?.role?:return false;return r=="ADMIN"||r=="MANAGER"}
  fun cancelBatch(b:OrderBatchEntity,reason:String){
   val e=currentEmployee.value?:return
@@ -489,9 +505,11 @@ fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(A
      vvipMinPoints=setting("vvip_min_points").toIntOrNull() ?: 500
     )
    }.getOrElse { err ->
-    printerMessage.value=if(err.message=="SESSION_ALREADY_CLOSED_OR_CHANGED")
-     "BILL ĐÃ ĐƯỢC THANH TOÁN / BÀN ĐÃ ĐÓNG · Không ghi bill lần 2"
-    else "THANH TOÁN LỖI · ${err.message ?: "UNKNOWN"}"
+    printerMessage.value=when(err.message){
+     "SESSION_ALREADY_CLOSED_OR_CHANGED" -> "BILL ĐÃ ĐƯỢC THANH TOÁN / BÀN ĐÃ ĐÓNG · Không ghi bill lần 2"
+     "PENDING_DELIVERY_NOT_CONFIRMED" -> "CHƯA XÁC NHẬN GIAO ĐỦ · Không thể thanh toán"
+     else -> "THANH TOÁN LỖI · ${err.message ?: "UNKNOWN"}"
+    }
     return@launch
    }
    val bill=commit.bill
