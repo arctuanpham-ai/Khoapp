@@ -236,6 +236,17 @@ class PosRepository(private val db:PosDatabase){
         changed
     }
 
+    suspend fun deletePurchaseAudited(purchase:PurchaseEntity,reason:String,actorId:String):Boolean =
+        db.withTransaction {
+            val changed=dao.softDeletePurchase(purchase.id)
+            if(changed!=1) return@withTransaction false
+            dao.audit(AuditEventEntity(
+                UUID.randomUUID().toString(),"PURCHASE",purchase.id,"DELETE_SOFT",actorId,null,System.currentTimeMillis(),
+                "reason=${reason.trim()},total=${purchase.total}"
+            ))
+            true
+        }
+
     suspend fun closeCancelledSession(session:TableSessionEntity,actorId:String) {
         val now=System.currentTimeMillis()
         db.withTransaction {
