@@ -111,7 +111,7 @@ class PosViewModel(app:Application):AndroidViewModel(app){
    }
   }
  }
- fun addMore(){if(currentSession.value==null||currentTable.value==null)return;cart.value=emptyMap();screen.value="ORDER"}
+ fun addMore(){val e=currentEmployee.value?:return;if(!e.canOrder&&e.role!="ADMIN")return;if(currentSession.value==null||currentTable.value==null)return;cart.value=emptyMap();screen.value="ORDER"}
  fun addTable(areaId:String,name:String=""){
   val e=currentEmployee.value?:return
   if(e.role!="ADMIN"&&!e.canManageSystem)return
@@ -175,8 +175,8 @@ class PosViewModel(app:Application):AndroidViewModel(app){
   }
  }
  fun saveEmployee(name:String,pin:String,role:String,checkout:Boolean,purchase:Boolean,order:Boolean=true,kitchen:Boolean=true,report:Boolean=false,menu:Boolean=false,system:Boolean=false){if(currentEmployee.value?.role!="ADMIN")return;viewModelScope.launch{val id=UUID.randomUUID().toString();repo.saveEmployee(EmployeeEntity(id,name,true,pin,role,checkout,purchase,order,kitchen,report,menu,system));audit("EMPLOYEE",id,"CREATE",name);autoBackup();autoMasterConfig()}}
- fun updateEmployee(e:EmployeeEntity){if(currentEmployee.value?.role!="ADMIN")return;viewModelScope.launch{repo.saveEmployee(e);audit("EMPLOYEE",e.id,"UPDATE");autoBackup();autoMasterConfig()}};fun toggleEmployee(e:EmployeeEntity){if(currentEmployee.value?.role!="ADMIN"||e.id==currentEmployee.value?.id)return;viewModelScope.launch{dao.setEmployeeActive(e.id,!e.active);audit("EMPLOYEE",e.id,if(e.active)"DISABLE" else "ENABLE")}}
- fun saveSupplier(name:String){viewModelScope.launch{repo.saveSupplier(SupplierEntity(UUID.randomUUID().toString(),name))}}
+ fun updateEmployee(e:EmployeeEntity){if(currentEmployee.value?.role!="ADMIN")return;viewModelScope.launch{repo.saveEmployee(e);audit("EMPLOYEE",e.id,"UPDATE");autoBackup();autoMasterConfig()}};fun toggleEmployee(e:EmployeeEntity){if(currentEmployee.value?.role!="ADMIN"||e.id==currentEmployee.value?.id)return;viewModelScope.launch{dao.setEmployeeActive(e.id,!e.active);audit("EMPLOYEE",e.id,if(e.active)"DISABLE" else "ENABLE");autoBackup();autoMasterConfig()}}
+ fun saveSupplier(name:String){val e=currentEmployee.value?:return;if(!e.canPurchase&&e.role!="ADMIN")return;if(name.isBlank())return;viewModelScope.launch{val id=UUID.randomUUID().toString();repo.saveSupplier(SupplierEntity(id,name.trim()));audit("SUPPLIER",id,"CREATE",name.trim());autoBackup()}}
  fun addPurchaseCategory(name:String,defaultUnit:String){
   val e=currentEmployee.value?:return
   if(e.role!="ADMIN"&&e.role!="MANAGER")return
@@ -259,7 +259,22 @@ fun saveLoyaltyConfig(auto:Boolean,memberDiscount:Int,vipPoints:Int,vipDiscount:
    autoBackup();autoMasterConfig()
   }
  }
-fun saveSetting(key:String,value:String){viewModelScope.launch{dao.saveSetting(AppSettingEntity(key,value));audit("SETTING",key,"SAVE",value);if(key!="master_config_uri"&&key!="autoback_tree_uri"&&key!="storage_root_uri")autoMasterConfig()}};fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
+fun saveSetting(key:String,value:String){
+ val e=currentEmployee.value?:return
+ val allowed=when(key){
+  "storage_root_uri","master_config_uri","autoback_tree_uri" -> e.role=="ADMIN"||e.canManageSystem
+  "bank_name","bank_account","bank_holder","qr_prefix","printer_mode","printer_mac","printer_name" -> e.role=="ADMIN"||e.role=="MANAGER"
+  else -> e.role=="ADMIN"
+ }
+ if(!allowed){viewModelScope.launch{audit("SECURITY",key,"SETTING_DENIED","role=${e.role}")};return}
+ viewModelScope.launch{
+  dao.saveSetting(AppSettingEntity(key,value))
+  val safePayload=if(key=="bank_account")"updated" else value.take(120)
+  audit("SETTING",key,"SAVE",safePayload)
+  if(key!="master_config_uri"&&key!="autoback_tree_uri"&&key!="storage_root_uri")autoMasterConfig()
+ }
+}
+fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
  fun addPurchase(name:String,amount:Long,note:String,at:Long=System.currentTimeMillis(),imageUri:String?=null){addPurchaseDetailed(name,1.0,"lần",amount,note,at,"",imageUri)}
  fun addPurchaseDetailed(name:String,qty:Double,unit:String,unitPrice:Long,note:String,at:Long=System.currentTimeMillis(),supplierName:String="",imageUri:String?=null,categoryId:String="pc_production"){
   val e=currentEmployee.value?:return
