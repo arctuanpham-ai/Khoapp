@@ -56,7 +56,21 @@ class PosViewModel(app:Application):AndroidViewModel(app){
    healthMessage.value=if(issues.isEmpty())"PASS · Dữ liệu lõi đang khớp" else "CẢNH BÁO · ${issues.size} nhóm lệch"
    audit("SYSTEM","HEALTH","CHECK","issues=${issues.size}")
   }
+ } fun reconcileLegacyWaiting(){
+  val e=currentEmployee.value?:return
+  if(e.role!="ADMIN")return
+  viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
+   val changed=dao.reconcileClosedSessionWaiting()
+   if(changed>0){
+    dao.audit(AuditEventEntity(UUID.randomUUID().toString(),"SYSTEM","LEGACY_WAITING","RECONCILE",e.id,"ANDROID",System.currentTimeMillis(),"count=$changed,status=RECONCILED"))
+    autoBackup()
+   }
+   val issues=DatabaseHealth.diagnoseOperational(getApplication())
+   healthIssues.value=issues
+   healthMessage.value=if(issues.isEmpty())"PASS · Dữ liệu lõi đang khớp" else "CẢNH BÁO · ${issues.size} nhóm lệch"
+  }
  }
+
  fun previewKitchen(){printerPreview.value="KITCHEN"}
  fun previewBill(){printerPreview.value="BILL"}
  fun previewCancel(){printerPreview.value="CANCEL"}
