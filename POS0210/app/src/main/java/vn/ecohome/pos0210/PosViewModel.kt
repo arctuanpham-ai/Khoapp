@@ -504,9 +504,7 @@ fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
   val e=currentEmployee.value?:return
   if(e.role!="ADMIN"||reason.isBlank())return
   viewModelScope.launch{
-   val changed=dao.softDeletePurchase(p.id)
-   if(changed>0){
-    audit("PURCHASE",p.id,"DELETE_SOFT","reason=${reason.trim()},total=${p.total},admin=${e.name}")
+   if(repo.deletePurchaseAudited(p,reason,e.id)){
     autoBackup()
    }
   }
