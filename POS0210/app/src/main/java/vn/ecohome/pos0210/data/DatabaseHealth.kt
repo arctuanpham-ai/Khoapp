@@ -52,4 +52,58 @@ object DatabaseHealth {
             require(count == 0L) { "Customer có số liệu âm: $count hồ sơ" }
         }
     }
+    fun diagnoseOperational(context: Context): List<String> {
+        val db = PosDatabase.get(context).openHelper.writableDatabase
+        val issues = mutableListOf<String>()
+
+        fun count(label: String, sql: String) {
+            db.query(sql).use { cursor ->
+                if (!cursor.moveToFirst()) {
+                    issues.add("$label · không đọc được")
+                    return@use
+                }
+                val n = cursor.getLong(0)
+                if (n > 0L) issues.add("$label · $n")
+            }
+        }
+
+        count(
+            "Bill PAID không có Payment",
+            "SELECT COUNT(*) FROM BillEntity b LEFT JOIN PaymentEntity p ON p.billId=b.id WHERE b.status='PAID' AND p.id IS NULL"
+        )
+        count(
+            "Payment lệch tổng Bill",
+            "SELECT COUNT(*) FROM PaymentEntity p INNER JOIN BillEntity b ON b.id=p.billId WHERE b.status='PAID' AND p.amount!=b.total"
+        )
+        count(
+            "Session CLOSED còn đơn WAITING",
+            "SELECT COUNT(*) FROM OrderBatchEntity ob INNER JOIN TableSessionEntity s ON s.id=ob.sessionId WHERE ob.status='WAITING' AND s.status!='OPEN'"
+        )
+        count(
+            "Bill PAID nhưng Session chưa CLOSED",
+            "SELECT COUNT(*) FROM BillEntity b INNER JOIN TableSessionEntity s ON s.id=b.sessionId WHERE b.status='PAID' AND s.status!='CLOSED'"
+        )
+        count(
+            "Session có nhiều hơn 1 Bill PAID",
+            "SELECT COUNT(*) FROM (SELECT sessionId,COUNT(*) c FROM BillEntity WHERE status='PAID' GROUP BY sessionId HAVING c>1)"
+        )
+        count(
+            "Customer lệch tổng chi tiêu",
+            "SELECT COUNT(*) FROM CustomerEntity c WHERE c.totalSpend != COALESCE((SELECT SUM(b.total) FROM BillEntity b WHERE b.customerId=c.id AND b.status='PAID'),0)"
+        )
+        count(
+            "Customer lệch số lần ghé",
+            "SELECT COUNT(*) FROM CustomerEntity c WHERE c.visitCount != COALESCE((SELECT COUNT(*) FROM BillEntity b WHERE b.customerId=c.id AND b.status='PAID'),0)"
+        )
+        count(
+            "Customer lệch sổ điểm",
+            "SELECT COUNT(*) FROM CustomerEntity c WHERE c.points != COALESCE((SELECT SUM(p.delta) FROM CustomerPointTransactionEntity p WHERE p.customerId=c.id),0)"
+        )
+        count(
+            "Bill PAID có Payment method không hợp lệ",
+            "SELECT COUNT(*) FROM PaymentEntity p INNER JOIN BillEntity b ON b.id=p.billId WHERE b.status='PAID' AND p.method NOT IN ('CASH','TRANSFER')"
+        )
+
+        return issues
+    }
 }
