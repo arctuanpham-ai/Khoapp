@@ -2,6 +2,7 @@ package vn.ecohome.pos0210.data
 
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -147,10 +148,8 @@ object DataBackup {
         }
     }
 
-    fun restoreMediaLatest(context: Context, rootTreeUriString: String): Result<Unit> = runCatching {
-        val uri = findMediaLatest(context, rootTreeUriString) ?: return@runCatching
+    private fun restoreMediaFromUri(context: Context, uri: Uri) {
         val dir = File(context.filesDir, "managed_media").apply { mkdirs() }
-
         context.contentResolver.openInputStream(uri).use { raw ->
             requireNotNull(raw)
             ZipInputStream(raw).use { zip ->
@@ -164,6 +163,17 @@ object DataBackup {
                 }
             }
         }
+    }
+
+    private fun displayName(context: Context, uri: Uri): String? = runCatching {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }
+    }.getOrNull()
+
+    fun restoreMediaLatest(context: Context, rootTreeUriString: String): Result<Unit> = runCatching {
+        val uri = findMediaLatest(context, rootTreeUriString) ?: return@runCatching
+        restoreMediaFromUri(context, uri)
     }
 
     fun archiveSnapshot(context: Context, rootTreeUriString: String): Result<Uri> = runCatching {
@@ -269,7 +279,17 @@ object DataBackup {
     }
     fun restoreDatabaseAndApplyMaster(context: Context, uri: Uri, rootTreeUriString: String): Result<Unit> = runCatching {
         restoreDatabase(context, uri).getOrThrow()
-        restoreMediaLatest(context, rootTreeUriString).getOrThrow()
+        val dbName=displayName(context,uri).orEmpty()
+        val archiveStamp=Regex("POS0210_DATA_(\d{8}_\d{6})\.db").matchEntire(dbName)?.groupValues?.get(1)
+        if(archiveStamp!=null){
+            val structure=SafPosStorage.ensureSelectedRoot(context,rootTreeUriString).getOrThrow()
+            val media=SafPosStorage.findFile(context,structure.archive,"POS0210_MEDIA_${archiveStamp}.0210")
+                ?: error("Thiếu MEDIA archive cùng mốc $archiveStamp; không dùng MEDIA_LATEST để tránh ghép sai dữ liệu")
+            validateMediaArchive(context,media)
+            restoreMediaFromUri(context,media)
+        }else{
+            restoreMediaLatest(context, rootTreeUriString).getOrThrow()
+        }
         val master = ConfigBackup.findMaster(context, rootTreeUriString)
         if (master != null) {
             ConfigBackup.importConfig(context, master).getOrThrow()

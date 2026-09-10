@@ -18,9 +18,12 @@ import kotlinx.coroutines.flow.Flow
 @Query("SELECT * FROM OrderBatchEntity WHERE sessionId=:sessionId ORDER BY sequence") fun batches(sessionId:String):Flow<List<OrderBatchEntity>>
 @Query("SELECT ob.* FROM OrderBatchEntity ob INNER JOIN TableSessionEntity s ON s.id=ob.sessionId WHERE ob.status='WAITING' AND s.status='OPEN' ORDER BY ob.serviceNo,ob.createdAt") fun waitingBatches():Flow<List<OrderBatchEntity>>
 @Query("SELECT COUNT(*) FROM OrderBatchEntity WHERE sessionId=:sessionId AND status='WAITING'") suspend fun waitingCountForSession(sessionId:String):Int
+@Query("SELECT COUNT(*) FROM OrderBatchEntity WHERE sessionId=:sessionId AND status IN ('DRAFT','WAITING')") suspend fun unfulfilledCountForSession(sessionId:String):Int
+@Query("SELECT COALESCE(MAX(sequence),0) FROM OrderBatchEntity WHERE sessionId=:sessionId") suspend fun maxBatchSequence(sessionId:String):Int
 @Query("SELECT COALESCE(MAX(serviceNo),0) FROM OrderBatchEntity WHERE createdAt>=:dayStart") suspend fun maxServiceNoSince(dayStart:Long):Int
 @Query("SELECT * FROM OrderItemEntity WHERE batchId=:batchId") fun batchItems(batchId:String):Flow<List<OrderItemEntity>>
 @Query("SELECT COALESCE(SUM(qty*unitPriceSnapshot),0) FROM OrderItemEntity WHERE batchId IN (SELECT id FROM OrderBatchEntity WHERE sessionId=:sessionId AND status!='CANCELLED')") fun sessionTotal(sessionId:String):Flow<Long>
+@Query("SELECT COALESCE(SUM(qty*unitPriceSnapshot),0) FROM OrderItemEntity WHERE batchId IN (SELECT id FROM OrderBatchEntity WHERE sessionId=:sessionId AND status!='CANCELLED')") suspend fun sessionTotalSnapshot(sessionId:String):Long
 @Query("SELECT * FROM BillEntity WHERE status='PAID' ORDER BY closedAt DESC") fun paidBills():Flow<List<BillEntity>>
 @Query("SELECT * FROM PaymentEntity ORDER BY paidAt DESC") fun payments():Flow<List<PaymentEntity>>
 @Query("SELECT * FROM CustomerEntity WHERE active=1 ORDER BY lastVisitAt DESC") fun customers():Flow<List<CustomerEntity>>

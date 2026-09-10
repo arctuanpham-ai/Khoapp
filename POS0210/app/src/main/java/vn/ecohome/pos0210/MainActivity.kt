@@ -632,8 +632,8 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
     val rules by vm.pricingRules.collectAsState()
     val e by vm.currentEmployee.collectAsState()
     val settings by vm.settings.collectAsState()
-    val waitingAll by vm.waitingBatches.collectAsState()
-    val pendingDelivery = waitingAll.filter { it.sessionId == s.id }.sortedBy { it.serviceNo }
+    val sessionBatches by vm.batches(s.id).collectAsState(initial = emptyList())
+    val pendingDelivery = sessionBatches.filter { it.status == "DRAFT" || it.status == "WAITING" }.sortedBy { it.serviceNo }
     fun setting(key: String) = settings.firstOrNull { it.key == key }?.value ?: ""
     var method by remember { mutableStateOf("CASH") }
     var codeText by remember { mutableStateOf("") }
@@ -664,21 +664,30 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
                     colors = CardDefaults.cardColors(containerColor = WaitingPriority2)
                 ) {
                     Column(Modifier.padding(14.dp)) {
-                        Text("CHƯA XÁC NHẬN GIAO ĐỦ", fontWeight = FontWeight.Black, fontSize = 18.sp)
+                        Text("CÒN ĐƠN CHƯA HOÀN TẤT", fontWeight = FontWeight.Black, fontSize = 18.sp)
                         Text(
-                            "Không thể thanh toán cho đến khi xác nhận đã giao đủ đồ cho khách.",
+                            "Không thể thanh toán khi còn đơn chưa gửi bếp hoặc chưa xác nhận giao đủ.",
                             Modifier.padding(top = 4.dp),
                             fontSize = 12.sp
                         )
                         Text(
-                            pendingDelivery.joinToString(" · ") { "#${it.serviceNo.toString().padStart(3,'0')}" },
+                            pendingDelivery.joinToString(" · ") { batch ->
+                                "#${batch.serviceNo.toString().padStart(3,'0')} ${if(batch.status=="DRAFT") "CHƯA GỬI" else "CHỜ GIAO"}"
+                            },
                             Modifier.padding(top = 8.dp),
                             fontWeight = FontWeight.Black
                         )
-                        Button(
-                            onClick = { vm.confirmAllDelivered(s.id) },
-                            modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
-                        ) { Text("✓ XÁC NHẬN ĐÃ GIAO ĐỦ") }
+                        if (pendingDelivery.none { it.status == "DRAFT" }) {
+                            Button(
+                                onClick = { vm.confirmAllDelivered(s.id) },
+                                modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                            ) { Text("✓ XÁC NHẬN ĐÃ GIAO ĐỦ") }
+                        } else {
+                            OutlinedButton(
+                                onClick = { vm.screen.value = "SENT" },
+                                modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                            ) { Text("QUAY LẠI GỬI BẾP") }
+                        }
                     }
                 }
             }

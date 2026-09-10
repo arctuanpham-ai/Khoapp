@@ -29,7 +29,8 @@ class PosRepository(private val db:PosDatabase){
         lateinit var b:OrderBatchEntity
         db.withTransaction {
             val serviceNo=dao.maxServiceNoSince(cal.timeInMillis)+1
-            b=OrderBatchEntity(UUID.randomUUID().toString(),sessionId,sequence,ordererId,now,serviceNo=serviceNo)
+            val nextSequence=dao.maxBatchSequence(sessionId)+1
+            b=OrderBatchEntity(UUID.randomUUID().toString(),sessionId,nextSequence,ordererId,now,serviceNo=serviceNo)
             val fixed=items.map{it.copy(id=if(it.id.isBlank()) UUID.randomUUID().toString() else it.id,batchId=b.id)}
             dao.insertBatch(b)
             dao.insertItems(fixed)
@@ -51,7 +52,7 @@ class PosRepository(private val db:PosDatabase){
     suspend fun finalizeKitchenPrint(jobId:String,batchId:String,printedAt:Long):Boolean =
         db.withTransaction {
             if(dao.markPrintSuccess(jobId,printedAt)!=1) return@withTransaction false
-            dao.transitionBatch(batchId,"DRAFT","WAITING",printedAt)
+            check(dao.transitionBatch(batchId,"DRAFT","WAITING",printedAt)==1) { "BATCH_STATE_CHANGED_DURING_PRINT" }
             true
         }
 
@@ -109,7 +110,9 @@ class PosRepository(private val db:PosDatabase){
         val normalizedPhone=customerPhone.filter(Char::isDigit).take(15)
         if(normalizedPhone.isNotBlank()) require(normalizedPhone.length>=9) { "INVALID_CUSTOMER_PHONE" }
         return db.withTransaction {
-            if(dao.waitingCountForSession(session.id)>0) error("PENDING_DELIVERY_NOT_CONFIRMED")
+            if(dao.unfulfilledCountForSession(session.id)>0) error("PENDING_ORDER_NOT_COMPLETED")
+            val liveSubtotal=dao.sessionTotalSnapshot(session.id)
+            if(liveSubtotal!=preview.subtotal) error("ORDER_TOTAL_CHANGED")
             var customer:CustomerEntity?=null
             var pointsBefore=0
             var pointsEarned=0

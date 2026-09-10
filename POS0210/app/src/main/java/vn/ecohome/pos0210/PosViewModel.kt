@@ -95,7 +95,7 @@ class PosViewModel(app:Application):AndroidViewModel(app){
   }
  }
  fun setCartNote(key:String,note:String){cartNotes.value=cartNotes.value.toMutableMap().apply{if(note.isBlank())remove(key) else put(key,note.take(120))}}
- fun add(i:MenuItemEntity){cart.value=cart.value.toMutableMap().apply{put(i.id,(get(i.id)?:0)+1)}};fun sub(i:MenuItemEntity){cart.value=cart.value.toMutableMap().apply{val q=get(i.id)?:0;if(q<=1)remove(i.id)else put(i.id,q-1)}};fun addCombo(i:ComboEntity){val k="combo:"+i.id;cart.value=cart.value.toMutableMap().apply{put(k,(get(k)?:0)+1)}};fun subCombo(i:ComboEntity){val k="combo:"+i.id;cart.value=cart.value.toMutableMap().apply{val q=get(k)?:0;if(q<=1)remove(k)else put(k,q-1)}}
+ fun add(i:MenuItemEntity){cart.value=cart.value.toMutableMap().apply{put(i.id,(get(i.id)?:0)+1)}};fun sub(i:MenuItemEntity){cart.value=cart.value.toMutableMap().apply{val q=get(i.id)?:0;if(q<=1){remove(i.id);setCartNote(i.id,"")}else put(i.id,q-1)}};fun addCombo(i:ComboEntity){val k="combo:"+i.id;cart.value=cart.value.toMutableMap().apply{put(k,(get(k)?:0)+1)}};fun subCombo(i:ComboEntity){val k="combo:"+i.id;cart.value=cart.value.toMutableMap().apply{val q=get(k)?:0;if(q<=1){remove(k);setCartNote(k,"")}else put(k,q-1)}}
  fun selectTable(t:DiningTableEntity){
   val e=currentEmployee.value?:return
   if(!e.canOrder&&e.role!="ADMIN")return
@@ -547,7 +547,8 @@ fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
    }.getOrElse { err ->
     printerMessage.value=when(err.message){
      "SESSION_ALREADY_CLOSED_OR_CHANGED" -> "BILL ĐÃ ĐƯỢC THANH TOÁN / BÀN ĐÃ ĐÓNG · Không ghi bill lần 2"
-     "PENDING_DELIVERY_NOT_CONFIRMED" -> "CHƯA XÁC NHẬN GIAO ĐỦ · Không thể thanh toán"
+     "PENDING_ORDER_NOT_COMPLETED" -> "CÒN ĐƠN CHƯA HOÀN TẤT · Gửi bếp và xác nhận giao đủ trước khi thanh toán"
+     "ORDER_TOTAL_CHANGED" -> "ĐƠN VỪA THAY ĐỔI · Quay lại kiểm tra món trước khi thanh toán"
      else -> "THANH TOÁN LỖI · ${err.message ?: "UNKNOWN"}"
     }
     return@launch

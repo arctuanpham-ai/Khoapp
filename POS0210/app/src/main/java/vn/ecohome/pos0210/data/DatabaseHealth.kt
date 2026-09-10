@@ -103,6 +103,30 @@ object DatabaseHealth {
             "Bill PAID có Payment method không hợp lệ",
             "SELECT COUNT(*) FROM PaymentEntity p INNER JOIN BillEntity b ON b.id=p.billId WHERE b.status='PAID' AND p.method NOT IN ('CASH','TRANSFER')"
         )
+        count(
+            "Bill PAID có nhiều hơn 1 Payment",
+            "SELECT COUNT(*) FROM (SELECT b.id,COUNT(p.id) c FROM BillEntity b INNER JOIN PaymentEntity p ON p.billId=b.id WHERE b.status='PAID' GROUP BY b.id HAVING c>1)"
+        )
+        count(
+            "Bill lệch subtotal so với món",
+            "SELECT COUNT(*) FROM BillEntity b WHERE b.status='PAID' AND b.subtotal != COALESCE((SELECT SUM(oi.qty*oi.unitPriceSnapshot) FROM OrderBatchEntity ob INNER JOIN OrderItemEntity oi ON oi.batchId=ob.id WHERE ob.sessionId=b.sessionId AND ob.status!='CANCELLED'),0)"
+        )
+        count(
+            "Session CLOSED còn batch DRAFT",
+            "SELECT COUNT(*) FROM OrderBatchEntity ob INNER JOIN TableSessionEntity s ON s.id=ob.sessionId WHERE ob.status='DRAFT' AND s.status='CLOSED'"
+        )
+        count(
+            "Trùng số thứ tự đơn trong cùng session",
+            "SELECT COUNT(*) FROM (SELECT sessionId,sequence,COUNT(*) c FROM OrderBatchEntity GROUP BY sessionId,sequence HAVING c>1)"
+        )
+        count(
+            "Kitchen PRINTED nhưng batch vẫn DRAFT",
+            "SELECT COUNT(*) FROM PrintJobEntity j INNER JOIN OrderBatchEntity b ON b.id=j.batchId WHERE j.type='KITCHEN' AND j.status='PRINTED' AND b.status='DRAFT'"
+        )
+        count(
+            "Phiếu nhập lệch tổng chi tiết",
+            "SELECT COUNT(*) FROM PurchaseEntity p WHERE p.status='ACTIVE' AND p.total != COALESCE((SELECT SUM(pi.amount) FROM PurchaseItemEntity pi WHERE pi.purchaseId=p.id),0)"
+        )
 
         return issues
     }
