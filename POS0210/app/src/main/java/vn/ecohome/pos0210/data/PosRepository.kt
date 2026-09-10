@@ -58,6 +58,38 @@ class PosRepository(private val db:PosDatabase){
     suspend fun failKitchenPrint(jobId:String,error:String):Boolean =
         dao.markPrintFailed(jobId,error)==1
 
+    suspend fun markDeliveredAudited(batch:OrderBatchEntity,employeeId:String,employeeName:String,action:String="DELIVERED"):Boolean =
+        db.withTransaction {
+            val now=System.currentTimeMillis()
+            if(dao.markDelivered(batch.id,now,employeeId)!=1) return@withTransaction false
+            dao.audit(AuditEventEntity(
+                UUID.randomUUID().toString(),"BATCH",batch.id,action,employeeId,null,now,
+                "serviceNo=${batch.serviceNo},by=$employeeName"
+            ))
+            true
+        }
+
+    suspend fun updateCustomerProfileAudited(customerId:String,name:String,phone:String,address:String,actorId:String):Boolean =
+        db.withTransaction {
+            val changed=dao.updateCustomerProfileFields(customerId,name,phone,address)
+            if(changed!=1) return@withTransaction false
+            dao.audit(AuditEventEntity(
+                UUID.randomUUID().toString(),"CUSTOMER",customerId,"PROFILE_UPDATE",actorId,null,System.currentTimeMillis(),
+                "name=$name,phone=$phone"
+            ))
+            true
+        }
+
+    suspend fun updateCustomerTierAudited(customerId:String,tier:String,manual:Boolean,actorId:String,action:String):Boolean =
+        db.withTransaction {
+            val changed=dao.updateCustomerTierFields(customerId,tier,manual)
+            if(changed!=1) return@withTransaction false
+            dao.audit(AuditEventEntity(
+                UUID.randomUUID().toString(),"CUSTOMER",customerId,action,actorId,null,System.currentTimeMillis(),tier
+            ))
+            true
+        }
+
     suspend fun completePayment(
         session:TableSessionEntity,
         preview:PricingPreview,
@@ -155,17 +187,6 @@ class PosRepository(private val db:PosDatabase){
 
             PaymentCommitResult(bill,customer,pointsBefore,pointsEarned,pointsAfter,tier)
         }
-    }
-
-    suspend fun closeAndPay(session:TableSessionEntity,subtotal:Long,total:Long,method:String,cashierId:String,billNo:String,customerId:String?=null):BillEntity {
-        val now=System.currentTimeMillis(); val bill=BillEntity(UUID.randomUUID().toString(),session.id,billNo,session.openedAt,now,subtotal,total,"PAID",customerId)
-        db.withTransaction {
-            if(dao.closeSession(session.id,session.version)!=1) error("SESSION_ALREADY_CLOSED_OR_CHANGED")
-            dao.insertBill(bill)
-            dao.insertPayment(PaymentEntity(UUID.randomUUID().toString(),bill.id,method,total,cashierId,now))
-            dao.audit(AuditEventEntity(UUID.randomUUID().toString(),"BILL",bill.id,"PAID",cashierId,null,now,"method=$method,total=$total"))
-        }
-        return bill
     }
 
     suspend fun deleteBillsAtomic(
