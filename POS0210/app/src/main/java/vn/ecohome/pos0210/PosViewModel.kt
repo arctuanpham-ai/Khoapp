@@ -390,8 +390,7 @@ fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
   val e=currentEmployee.value?:return
   viewModelScope.launch{
    val now=System.currentTimeMillis()
-   if(dao.markDelivered(b.id,now,e.id)>0){
-    audit("BATCH",b.id,"DELIVERED","serviceNo=${b.serviceNo},by=${e.name}")
+   if(repo.markDeliveredAudited(b,e.id,e.name,"DELIVERED")){
     autoBackup()
    }
   }
@@ -401,9 +400,7 @@ fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
    val targets=waitingBatches.value.filter{it.sessionId==sessionId}.sortedBy{it.serviceNo}
    targets.forEach{b->
     val now=System.currentTimeMillis()
-    if(dao.markDelivered(b.id,now,e.id)>0){
-     audit("BATCH",b.id,"DELIVERED_AT_CHECKOUT","serviceNo=${b.serviceNo},by=${e.name}")
-    }
+    repo.markDeliveredAudited(b,e.id,e.name,"DELIVERED_AT_CHECKOUT")
    }
    if(targets.isNotEmpty()){
     printerMessage.value="ĐÃ XÁC NHẬN GIAO ĐỦ ${targets.size} ĐƠN"
@@ -454,8 +451,7 @@ fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
   val e=currentEmployee.value?:return
   if(e.role!="ADMIN"||tier !in listOf("MEMBER","VIP","VVIP"))return
   viewModelScope.launch{
-   dao.updateCustomerTierFields(customer.id,tier,true)
-   audit("CUSTOMER",customer.id,"TIER_MANUAL","$tier")
+   repo.updateCustomerTierAudited(customer.id,tier,true,e.id,"TIER_MANUAL")
    autoBackup()
   }
  }
@@ -466,8 +462,7 @@ fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
    val fresh=dao.customerById(customer.id) ?: return@launch
    val auto=setting("loyalty_auto_tier").ifBlank{"true"}.toBoolean()
    val tier=if(auto)autoTierFor(fresh.points) else fresh.tier
-   dao.updateCustomerTierFields(fresh.id,tier,false)
-   audit("CUSTOMER",customer.id,"TIER_AUTO","$tier")
+   repo.updateCustomerTierAudited(fresh.id,tier,false,e.id,"TIER_AUTO")
    autoBackup()
   }
  }
@@ -487,13 +482,13 @@ fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
    if(normalized.length<9){customerUpdateMessage.value="Số điện thoại không hợp lệ";return@launch}
    val other=dao.customerByPhone(normalized)
    if(other!=null&&other.id!=customer.id){customerUpdateMessage.value="Số điện thoại đã thuộc khách khác";return@launch}
-   runCatching {
-    dao.updateCustomerProfileFields(customer.id,name.trim(),normalized,address.trim())
-   }.onFailure {
+   val changed=runCatching {
+    repo.updateCustomerProfileAudited(customer.id,name.trim(),normalized,address.trim(),e.id)
+   }.getOrElse {
     customerUpdateMessage.value="Không cập nhật được hồ sơ: ${it.message ?: "UNKNOWN"}"
     return@launch
    }
-   audit("CUSTOMER",customer.id,"PROFILE_UPDATE","name=${name.trim()},phone=$normalized")
+   if(!changed){customerUpdateMessage.value="Không tìm thấy hồ sơ khách để cập nhật";return@launch}
    customerUpdateMessage.value="Đã cập nhật thông tin khách"
    autoBackup()
   }
