@@ -29,6 +29,10 @@ import kotlinx.coroutines.flow.Flow
 @Query("SELECT * FROM CustomerPointTransactionEntity WHERE customerId=:customerId ORDER BY createdAt DESC") fun customerPoints(customerId:String):Flow<List<CustomerPointTransactionEntity>>
 @Query("SELECT b.customerId AS customerId, oi.itemNameSnapshot AS name, oi.qty AS qty FROM BillEntity b INNER JOIN OrderBatchEntity ob ON ob.sessionId=b.sessionId INNER JOIN OrderItemEntity oi ON oi.batchId=ob.id WHERE b.status='PAID' AND b.customerId IS NOT NULL AND ob.status!='CANCELLED'") fun customerItemStats():Flow<List<CustomerItemStatRow>>
 @Query("SELECT COALESCE(SUM(delta),0) FROM CustomerPointTransactionEntity WHERE billId=:billId") suspend fun pointDeltaForBill(billId:String):Int
+@Query("SELECT COALESCE(SUM(total),0) FROM BillEntity WHERE customerId=:customerId AND status='PAID'") suspend fun paidSpendForCustomer(customerId:String):Long
+@Query("SELECT COUNT(*) FROM BillEntity WHERE customerId=:customerId AND status='PAID'") suspend fun paidVisitCountForCustomer(customerId:String):Int
+@Query("SELECT MAX(closedAt) FROM BillEntity WHERE customerId=:customerId AND status='PAID'") suspend fun lastPaidVisitForCustomer(customerId:String):Long?
+@Query("SELECT COALESCE(SUM(delta),0) FROM CustomerPointTransactionEntity WHERE customerId=:customerId") suspend fun pointBalanceForCustomer(customerId:String):Int
 @Query("SELECT * FROM PricingRuleEntity ORDER BY name") fun pricingRules():Flow<List<PricingRuleEntity>>
 @Query("SELECT * FROM PricingRuleEntity WHERE active=1") suspend fun activePricingRulesSnapshot():List<PricingRuleEntity>
 @Query("SELECT * FROM PricingRuleEntity ORDER BY name") suspend fun allPricingRulesSnapshot():List<PricingRuleEntity>
