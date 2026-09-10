@@ -92,6 +92,7 @@ import kotlinx.coroutines.flow.Flow
 @Query("UPDATE EmployeeEntity SET active=:active WHERE id=:id") suspend fun setEmployeeActive(id:String,active:Boolean)
 @Query("UPDATE OrderBatchEntity SET status=:newStatus,sentAt=:sentAt WHERE id=:id AND status=:expected") suspend fun transitionBatch(id:String,expected:String,newStatus:String,sentAt:Long?):Int
 @Query("UPDATE OrderBatchEntity SET status='DELIVERED',deliveredAt=:at,deliveredBy=:employeeId WHERE id=:id AND status='WAITING'") suspend fun markDelivered(id:String,at:Long,employeeId:String):Int
+@Query("UPDATE OrderBatchEntity SET status='RECONCILED',deliveredAt=COALESCE((SELECT closedAt FROM TableSessionEntity s WHERE s.id=OrderBatchEntity.sessionId),deliveredAt,sentAt,createdAt) WHERE status='WAITING' AND sessionId IN (SELECT id FROM TableSessionEntity WHERE status='CLOSED')") suspend fun reconcileClosedSessionWaiting():Int
 @Query("UPDATE OrderBatchEntity SET status='CANCELLED' WHERE id=:id AND status IN ('DRAFT','WAITING')") suspend fun cancelBatch(id:String):Int
 @Query("UPDATE TableSessionEntity SET status='CLOSED',version=version+1 WHERE id=:id AND status='OPEN' AND version=:version") suspend fun closeSession(id:String,version:Long):Int
 @Query("UPDATE PrintJobEntity SET status=:newStatus,claimedByDeviceId=:deviceId,attempts=attempts+1 WHERE id=:id AND status=:expected") suspend fun claimPrint(id:String,expected:String,newStatus:String,deviceId:String):Int
