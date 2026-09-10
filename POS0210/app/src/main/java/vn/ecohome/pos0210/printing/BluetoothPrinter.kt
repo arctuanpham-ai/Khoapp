@@ -184,8 +184,8 @@ object ReceiptRenderer {
         return crop(b,(y+28).toInt())
     }
 
-    fun kitchen(table:String,sequence:Int,serviceNo:Int,orderer:String,items:List<Pair<String,Int>>):Bitmap{
-        val h=300+items.size*55
+    fun kitchen(table:String,sequence:Int,serviceNo:Int,orderer:String,items:List<Triple<String,Int,String>>):Bitmap{
+        val h=300+items.sumOf{if(it.third.isBlank())55 else 86}
         val (b,c)=canvas(h)
         var y=45f
         c.drawText("0210",W/2f,y,paint(38f,true,Paint.Align.CENTER));y+=30
@@ -193,8 +193,12 @@ object ReceiptRenderer {
         c.drawText("THỨ TỰ RA ĐƠN #${serviceNo.toString().padStart(3,'0')}",W/2f,y,paint(24f,true,Paint.Align.CENTER));y+=26
         c.drawText("${table.uppercase()}  ·  ĐƠN #$sequence",W/2f,y,paint(18f,true,Paint.Align.CENTER));y+=22
         line(c,y);y+=32
-        items.forEach{(name,qty)->
-            c.drawText("$qty × $name",PAD,y,paint(24f,true));y+=42
+        items.forEach{(name,qty,note)->
+            c.drawText("$qty × $name",PAD,y,paint(24f,true));y+=30
+            if(note.isNotBlank()){
+                y=wrap(c,"GHI CHÚ: ${note.trim()}",PAD+10f,y,W-PAD*2-10f,paint(18f,true),21f)
+                y+=8
+            }else y+=12
         }
         line(c,y);y+=28
         c.drawText("Order: $orderer",PAD,y,paint(18f,true))

@@ -274,6 +274,7 @@ fun Order(vm: PosViewModel, t: DiningTableEntity) {
     val combos by vm.combos.collectAsState()
     val cats by vm.categories.collectAsState()
     val cart by vm.cart.collectAsState()
+    var showCart by remember { mutableStateOf(false) }
     var selectedCat by remember(cats) { mutableStateOf(cats.firstOrNull()?.id ?: "") }
     val visible = ms.filter { it.active && (selectedCat.isBlank() || it.categoryId == selectedCat) }
     val activeCombos = combos.filter { it.active }
@@ -362,10 +363,11 @@ fun Order(vm: PosViewModel, t: DiningTableEntity) {
             Text(money(total), fontWeight = FontWeight.Black)
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = {}, modifier = Modifier.weight(1f)) { Text("XEM GIỎ HÀNG") }
+            OutlinedButton(onClick = { showCart = true }, modifier = Modifier.weight(1f)) { Text("XEM GIỎ HÀNG") }
             Button(onClick = { vm.sendBatch() }, modifier = Modifier.weight(1f), enabled = cart.isNotEmpty()) { Text("GỬI LÀM HÀNG") }
         }
     }
+    if (showCart) OrderCartNotesDialog(vm) { showCart = false }
 }
 
 @Composable
@@ -446,7 +448,10 @@ fun Sent(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
                 Column {
                     Text("0210 · ${t.name}")
                     Text("STT phục vụ: #${b.serviceNo.toString().padStart(3,'0')}", fontWeight = FontWeight.Black)
-                    its.forEach { Text("${it.qty} × ${it.itemNameSnapshot}") }
+                    its.forEach { item ->
+                        Text("${item.qty} × ${item.itemNameSnapshot}")
+                        if(item.note.isNotBlank()) Text("↳ ${item.note}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
                     if (b.status == "WAITING") {
                         Button(
                             onClick = { vm.markDelivered(b); pv = null },
