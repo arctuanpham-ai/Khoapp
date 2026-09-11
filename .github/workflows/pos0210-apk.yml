@@ -58,13 +58,17 @@ jobs:
         shell: bash
         run: |
           APK="app/build/outputs/apk/debug/app-debug.apk"
+          AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
           test -s "$APK"
-          BADGING=$(aapt dump badging "$APK" | head -n 1)
+          test -x "$AAPT"
+          test -x "$APKSIGNER"
+          BADGING=$($AAPT dump badging "$APK" | head -n 1)
           echo "$BADGING"
           echo "$BADGING" | grep -q "name='vn.ecohome.pos0210'"
           echo "$BADGING" | grep -q "versionCode='${{ steps.app_version.outputs.code }}'"
           echo "$BADGING" | grep -q "versionName='${{ steps.app_version.outputs.name }}'"
-          apksigner verify --verbose --print-certs "$APK"
+          $APKSIGNER verify --verbose --print-certs "$APK"
           sha256sum "$APK"
 
       - name: Prepare distributable APK
