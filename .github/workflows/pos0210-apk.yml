@@ -42,18 +42,44 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build debug APK
+      - name: Build full installable APK
         run: gradle --no-daemon :app:assembleDebug --stacktrace
 
-      - name: Verify APK
+      - name: Read app version
+        id: app_version
+        shell: bash
         run: |
-          test -s app/build/outputs/apk/debug/app-debug.apk
-          sha256sum app/build/outputs/apk/debug/app-debug.apk
+          VERSION_NAME=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          VERSION_CODE=$(grep -oP 'versionCode\s*=\s*\K[0-9]+' app/build.gradle.kts)
+          echo "name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
 
-      - name: Upload APK
+      - name: Verify package version and signature
+        shell: bash
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          BADGING=$(aapt dump badging "$APK" | head -n 1)
+          echo "$BADGING"
+          echo "$BADGING" | grep -q "name='vn.ecohome.pos0210'"
+          echo "$BADGING" | grep -q "versionCode='${{ steps.app_version.outputs.code }}'"
+          echo "$BADGING" | grep -q "versionName='${{ steps.app_version.outputs.name }}'"
+          apksigner verify --verbose --print-certs "$APK"
+          sha256sum "$APK"
+
+      - name: Prepare distributable APK
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/POS0210_v${{ steps.app_version.outputs.name }}.apk"
+          sha256sum "dist/POS0210_v${{ steps.app_version.outputs.name }}.apk" > "dist/POS0210_v${{ steps.app_version.outputs.name }}.apk.sha256"
+
+      - name: Upload full APK
         uses: actions/upload-artifact@v4
         with:
-          name: POS0210-debug-${{ github.sha }}
-          path: POS0210/app/build/outputs/apk/debug/app-debug.apk
+          name: POS0210-v${{ steps.app_version.outputs.name }}-vc${{ steps.app_version.outputs.code }}-${{ github.sha }}
+          path: |
+            POS0210/dist/POS0210_v${{ steps.app_version.outputs.name }}.apk
+            POS0210/dist/POS0210_v${{ steps.app_version.outputs.name }}.apk.sha256
           if-no-files-found: error
           retention-days: 30
