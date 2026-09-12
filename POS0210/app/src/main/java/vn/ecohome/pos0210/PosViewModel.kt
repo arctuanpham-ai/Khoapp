@@ -28,7 +28,7 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  private suspend fun seed(){if(dao.areas().first().isNotEmpty())return;
  repo.savePurchaseCategory(PurchaseCategoryEntity("pc_salary","Lương","ngày công",0,true))
  repo.savePurchaseCategory(PurchaseCategoryEntity("pc_fixed","Vật tư cố định","cái",1,true))
- repo.savePurchaseCategory(PurchaseCategoryEntity("pc_production","Vật tư sản xuất","kg",2,true));repo.saveArea(AreaEntity("inside","Trong nhà",0));repo.saveArea(AreaEntity("outside","Ngoài trời",1));(1..6).forEach{repo.saveTable(DiningTableEntity("t$it","inside","Bàn %02d".format(it),it))};(7..8).forEach{repo.saveTable(DiningTableEntity("t$it","outside","Bàn %02d".format(it),it))};listOf("Cà phê","Ăn sáng","Trà","Sinh tố","Khác").forEachIndexed{i,n->repo.saveCategory(MenuCategoryEntity("c$i",n,i))};listOf(MenuItemEntity("m1","c0","Đen đá",25000),MenuItemEntity("m2","c0","Nâu đá",30000),MenuItemEntity("m3","c0","Bạc xỉu",30000),MenuItemEntity("m4","c1","Bún gà",40000),MenuItemEntity("m5","c1","Đùi gà",55000),MenuItemEntity("m6","c1","Cánh gà",45000),MenuItemEntity("m7","c2","Trà mạn",25000),MenuItemEntity("m8","c2","Trà đào",35000)).forEach{repo.saveMenuItem(it)};repo.saveEmployee(EmployeeEntity("e0","Tuấn",true,"0210","ADMIN",true,true,true,true,true,true,true));repo.saveEmployee(EmployeeEntity("e1","Hương",true,"1992","STAFF",true,true,true,true,false,false,false));repo.saveEmployee(EmployeeEntity("e2","Nam",true,"2000","STAFF",false,false,true,true,false,false,false))}
+ repo.savePurchaseCategory(PurchaseCategoryEntity("pc_production","Vật tư sản xuất","kg",2,true));repo.saveArea(AreaEntity("inside","Trong nhà",0));repo.saveArea(AreaEntity("outside","Ngoài trời",1));(1..6).forEach{repo.saveTable(DiningTableEntity("t$it","inside","Bàn %02d".format(it),it))};(7..8).forEach{repo.saveTable(DiningTableEntity("t$it","outside","Bàn %02d".format(it),it))};listOf("Cà phê","Ăn sáng","Trà","Sinh tố","Khác").forEachIndexed{i,n->repo.saveCategory(MenuCategoryEntity("c$i",n,i))};listOf(MenuItemEntity("m1","c0","Đen đá",25000,productCode="CF-001"),MenuItemEntity("m2","c0","Nâu đá",30000,productCode="CF-002"),MenuItemEntity("m3","c0","Bạc xỉu",30000,productCode="CF-003"),MenuItemEntity("m4","c1","Bún gà",40000,productCode="AS-001"),MenuItemEntity("m5","c1","Đùi gà",55000,productCode="AS-002"),MenuItemEntity("m6","c1","Cánh gà",45000,productCode="AS-003"),MenuItemEntity("m7","c2","Trà mạn",25000,productCode="TR-001"),MenuItemEntity("m8","c2","Trà đào",35000,productCode="TR-002")).forEach{repo.saveMenuItem(it)};repo.saveEmployee(EmployeeEntity("e0","Tuấn",true,"0210","ADMIN",true,true,true,true,true,true,true));repo.saveEmployee(EmployeeEntity("e1","Hương",true,"1992","STAFF",true,true,true,true,false,false,false));repo.saveEmployee(EmployeeEntity("e2","Nam",true,"2000","STAFF",false,false,true,true,false,false,false))}
  fun login(pin:String){viewModelScope.launch{val e=dao.employeeByPin(pin);if(e==null)authError.value="PIN không đúng" else{currentEmployee.value=e;authError.value="";screen.value="TABLES";audit("AUTH",e.id,"LOGIN")}}};fun logout(){val e=currentEmployee.value;viewModelScope.launch{if(e!=null)audit("AUTH",e.id,"LOGOUT")};currentEmployee.value=null;screen.value="LOGIN"}
  private suspend fun audit(type:String,id:String,action:String,payload:String=""){dao.audit(AuditEventEntity(UUID.randomUUID().toString(),type,id,action,currentEmployee.value?.id,"ANDROID",System.currentTimeMillis(),payload))}
  private fun autoBackup(){
@@ -146,13 +146,32 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  }
  fun canConfigureQr():Boolean{val r=currentEmployee.value?.role?:return false;return r=="ADMIN"||r=="MANAGER"}
  private fun canManageMenu():Boolean{val e=currentEmployee.value?:return false;return e.role=="ADMIN"||e.canManageMenu}
- fun saveMenu(name:String,price:Long,cat:String,imageUri:String?=null){
+ fun saveMenu(name:String,price:Long,cat:String,description:String="",imageUri:String?=null,active:Boolean=true){
   if(!canManageMenu())return
   viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
    val id=UUID.randomUUID().toString()
+   val existing=dao.allMenuSnapshot()
+   val categoryName=categories.value.firstOrNull{it.id==cat}?.name.orEmpty()
+   val sameCategoryPrefix=existing.firstOrNull{it.categoryId==cat&&it.productCode.isNotBlank()}?.productCode?.substringBefore('-')
+   val occupiedByOther=existing.filter{it.categoryId!=cat}.map{it.productCode.substringBefore('-')}.filter{it.isNotBlank()}.toSet()
+   val root=ProductCodes.basePrefix(categoryName);var prefix=sameCategoryPrefix?:root;var suffix=2
+   while(sameCategoryPrefix==null&&prefix in occupiedByOther)prefix="$root${suffix++}"
+   val used=dao.allProductCodes().toSet();var seq=1;var code:String
+   do{code="$prefix-${seq.toString().padStart(3,'0')}";seq++}while(code in used)
    val managed=runCatching{ManagedMedia.importImage(getApplication(),imageUri,"menu_"+id)}.getOrNull()
-   repo.saveMenuItem(MenuItemEntity(id,cat,name,price,managed,menu.value.size+1))
-   audit("MENU",id,"CREATE",name);autoBackup();autoBackupMedia();autoMasterConfig()
+   repo.saveMenuItem(MenuItemEntity(id,cat,name.trim(),price,managed,menu.value.size+1,active,code,description.trim()))
+   audit("MENU",id,"CREATE","$code | ${name.trim()} | price=$price | category=$categoryName");autoBackup();autoBackupMedia();autoMasterConfig()
+  }
+ }
+ fun updateMenu(original:MenuItemEntity,name:String,price:Long,cat:String,description:String,imageUri:String?,active:Boolean){
+  if(!canManageMenu())return
+  viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
+   val managed=if(imageUri==original.imageUri)original.imageUri else runCatching{ManagedMedia.importImage(getApplication(),imageUri,"menu_"+original.id)}.getOrNull()
+   val updated=original.copy(categoryId=cat,name=name.trim(),price=price,description=description.trim(),imageUri=managed,active=active)
+   repo.saveMenuItem(updated)
+   val oldCat=categories.value.firstOrNull{it.id==original.categoryId}?.name.orEmpty();val newCat=categories.value.firstOrNull{it.id==cat}?.name.orEmpty()
+   audit("MENU",original.id,"UPDATE","${original.productCode} | name:${original.name}->${updated.name} | price:${original.price}->${updated.price} | category:$oldCat->$newCat | active:${original.active}->${updated.active} | actor:${currentEmployee.value?.id}")
+   autoBackup();autoBackupMedia();autoMasterConfig()
   }
  }
  fun setMenuImage(i:MenuItemEntity,uri:String?){

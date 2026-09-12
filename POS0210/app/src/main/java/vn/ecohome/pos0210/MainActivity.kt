@@ -1169,6 +1169,10 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Kiểm tra dữ liệu", "Đối soát Payment · Bill · Customer · điểm · trạng thái bàn") { vm.screen.value = "HEALTH" }
                 Rowx("Nhật ký hệ thống", "Audit thao tác · người thực hiện · thời điểm · dữ liệu thay đổi") { vm.screen.value = "SETTINGS" }
             }
+            HorizontalDivider(Modifier.padding(vertical = 12.dp))
+            Text("POS0210 v1.0.0-alpha51 · versionCode 61", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("Tương thích Android 8.0 (API 26) trở lên · Thiết bị hiện tại: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})", fontSize = 11.sp)
+            if (Build.VERSION.SDK_INT < 26) Text("Thiết bị không được hỗ trợ. Cần Android 8.0 trở lên.", color = Color.Red, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(30.dp))
         }
     }
@@ -1923,6 +1927,7 @@ fun MenuManager(vm: PosViewModel) {
     val context = LocalContext.current
     var showAdd by remember { mutableStateOf(false) }
     var showCategoryManager by remember { mutableStateOf(false) }
+    var editTarget by remember { mutableStateOf<MenuItemEntity?>(null) }
     var deleteTarget by remember { mutableStateOf<MenuItemEntity?>(null) }
     var imageTarget by remember { mutableStateOf<MenuItemEntity?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -1947,7 +1952,7 @@ fun MenuManager(vm: PosViewModel) {
             OutlinedButton(onClick = { showCategoryManager = true }, modifier = Modifier.weight(1f)) { Text("NHÓM MÓN") }
         }
         LazyColumn {
-            items(menu.filter { it.active }) { m ->
+            items(menu) { m ->
                 Card(Modifier.fillMaxWidth().padding(6.dp)) {
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         if (!m.imageUri.isNullOrBlank()) {
@@ -1969,22 +1974,32 @@ fun MenuManager(vm: PosViewModel) {
                         }
                         Column(Modifier.weight(1f)) {
                             Text(m.name, fontWeight = FontWeight.Bold)
+                            Text("${m.productCode} · ${categories.firstOrNull { it.id == m.categoryId }?.name ?: "Khác"}", fontSize = 12.sp)
                             Text(money(m.price))
+                            if (m.description.isNotBlank()) Text(m.description, fontSize = 12.sp, maxLines = 2)
+                            if (!m.active) Text("TẠM NGƯNG BÁN", color = Color(0xFF9A3412), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
+                        TextButton(onClick = { editTarget = m }) { Text("SỬA") }
                         TextButton(onClick = {
                             imageTarget = m
                             picker.launch(arrayOf("image/*"))
                         }) { Text(if (m.imageUri.isNullOrBlank()) "＋ ẢNH" else "ĐỔI ẢNH") }
-                        TextButton(onClick = { deleteTarget = m }) { Text("XOÁ") }
+                        TextButton(onClick = { if (m.active) deleteTarget = m else vm.toggleMenu(m) }) { Text(if(m.active) "TẠM NGƯNG" else "BẬT BÁN") }
                     }
                 }
             }
         }
     }
     if (showAdd) {
-        MenuAddDialog(categories, onDismiss = { showAdd = false }) { name, price, cat, imageUri ->
-            vm.saveMenu(name, price, cat, imageUri)
+        MenuAddDialog(categories, null, onDismiss = { showAdd = false }) { name, price, cat, description, imageUri, active ->
+            vm.saveMenu(name, price, cat, description, imageUri, active)
             showAdd = false
+        }
+    }
+    editTarget?.let { original ->
+        MenuAddDialog(categories, original, onDismiss = { editTarget = null }) { name, price, cat, description, imageUri, active ->
+            vm.updateMenu(original, name, price, cat, description, imageUri, active)
+            editTarget = null
         }
     }
     if (showCategoryManager) {
@@ -2061,14 +2076,17 @@ fun CategoryManagerDialog(
 @Composable
 fun MenuAddDialog(
     categories: List<MenuCategoryEntity>,
+    initial: MenuItemEntity? = null,
     onDismiss: () -> Unit,
-    onSave: (String, Long, String, String?) -> Unit
+    onSave: (String, Long, String, String, String?, Boolean) -> Unit
 ) {
     val context = LocalContext.current
-    var name by remember { mutableStateOf("") }
-    var priceText by remember { mutableStateOf("") }
-    var cat by remember(categories) { mutableStateOf(categories.firstOrNull()?.id ?: "") }
-    var imageUri by remember { mutableStateOf<String?>(null) }
+    var name by remember(initial?.id) { mutableStateOf(initial?.name ?: "") }
+    var priceText by remember(initial?.id) { mutableStateOf(initial?.price?.toString() ?: "") }
+    var cat by remember(categories, initial?.id) { mutableStateOf(initial?.categoryId ?: categories.firstOrNull()?.id ?: "") }
+    var description by remember(initial?.id) { mutableStateOf(initial?.description ?: "") }
+    var imageUri by remember(initial?.id) { mutableStateOf(initial?.imageUri) }
+    var active by remember(initial?.id) { mutableStateOf(initial?.active ?: true) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             runCatching {
@@ -2082,10 +2100,10 @@ fun MenuAddDialog(
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Thêm món") },
+        title = { Text(if (initial == null) "Thêm món" else "Sửa món · ${initial.productCode}") },
         confirmButton = {
             Button(
-                onClick = { onSave(name, priceText.toLongOrNull() ?: 0L, cat, imageUri) },
+                onClick = { onSave(name, priceText.toLongOrNull() ?: 0L, cat, description, imageUri, active) },
                 enabled = name.isNotBlank() && priceText.toLongOrNull() != null && cat.isNotBlank()
             ) { Text("LƯU MÓN") }
         },
@@ -2098,6 +2116,14 @@ fun MenuAddDialog(
                         priceText,
                         { priceText = it.filter(Char::isDigit) },
                         label = { Text("Giá bán") }
+                    )
+                    OutlinedTextField(
+                        description,
+                        { description = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Mô tả / ghi chú món") },
+                        minLines = 2,
+                        maxLines = 4
                     )
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(onClick = { picker.launch(arrayOf("image/*")) }) {
@@ -2117,6 +2143,10 @@ fun MenuAddDialog(
                             onClick = { cat = c.id },
                             label = { Text(c.name) }
                         )
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Đang bán", Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                        Switch(checked = active, onCheckedChange = { active = it })
                     }
                 }
             }

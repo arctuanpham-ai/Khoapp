@@ -12,7 +12,7 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 object ConfigBackup {
-    private const val CONFIG_VERSION = 3
+    private const val CONFIG_VERSION = 4
     private const val MASTER_NAME = "POS0210_MASTER.0210"
 
     fun exportConfig(context: Context, uri: Uri): Result<Unit> = runCatching {
@@ -66,6 +66,7 @@ object ConfigBackup {
         snapshot.menu.forEach { m ->
             val obj = JSONObject().apply {
                 put("id", m.id); put("categoryId", m.categoryId); put("name", m.name); put("price", m.price)
+                put("productCode", m.productCode); put("description", m.description)
                 put("sortOrder", m.sortOrder); put("active", m.active)
             }
             if (!m.imageUri.isNullOrBlank()) {
@@ -235,6 +236,15 @@ object ConfigBackup {
                 root.getJSONArray("menu").forEachObject { o ->
                     val entry = o.optString("imageEntry", "")
                     val localUri = extracted[entry]?.let { Uri.fromFile(it).toString() }
+                    val requestedCode = o.optString("productCode", "")
+                    val usedCodes = dao.allProductCodes().filter { it.isNotBlank() }.toSet()
+                    val categoryName = root.getJSONArray("categories").let { categories ->
+                        (0 until categories.length()).map { categories.getJSONObject(it) }
+                            .firstOrNull { it.optString("id") == o.getString("categoryId") }?.optString("name").orEmpty()
+                    }
+                    val currentCode = dao.menuItemById(o.getString("id"))?.productCode
+                    val productCode = requestedCode.takeIf { it.isNotBlank() && (it !in usedCodes || it == currentCode) }
+                        ?: ProductCodes.next(categoryName, usedCodes)
                     dao.saveMenuItem(
                         MenuItemEntity(
                             id = o.getString("id"),
@@ -243,7 +253,9 @@ object ConfigBackup {
                             price = o.getLong("price"),
                             imageUri = localUri,
                             sortOrder = o.optInt("sortOrder"),
-                            active = o.optBoolean("active", true)
+                            active = o.optBoolean("active", true),
+                            productCode = productCode,
+                            description = o.optString("description", "")
                         )
                     )
                 }
