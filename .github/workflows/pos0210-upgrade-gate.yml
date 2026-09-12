@@ -81,7 +81,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: |
-            set -euo pipefail
+            set -eu
             PKG=vn.ecohome.pos0210
             ACT=vn.ecohome.pos0210/.MainActivity
 
@@ -159,7 +159,10 @@ jobs:
             adb shell am start -W -n "$ACT"
             sleep 8
             adb shell pidof "$PKG"
-            ! adb logcat -d | grep -E 'FATAL EXCEPTION|Room cannot verify the data integrity|A migration from 10 to 11 was required but not found'
+            if adb logcat -d | grep -E 'FATAL EXCEPTION|Room cannot verify the data integrity|A migration from 10 to 11 was required but not found'; then
+              echo 'Migration/runtime fatal detected'
+              exit 1
+            fi
 
             echo '=== UI smoke: login surface exists ==='
             adb shell uiautomator dump /sdcard/window.xml >/dev/null || true
