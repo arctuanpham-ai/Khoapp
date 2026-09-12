@@ -1,0 +1,50 @@
+name: POS0210 Candidate Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_version:
+        description: Candidate version label, e.g. 1.0.0-alpha52-candidate.1
+        required: true
+        type: string
+      previous_version:
+        description: Previous accepted version, e.g. 1.0.0-alpha50
+        required: true
+        type: string
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'pos0210/**'
+      - 'qa/**'
+      - '.github/workflows/pos0210-*.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  policy-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify mandatory QA policy files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f qa/POS0210_RELEASE_POLICY.md
+          test -f qa/POS0210_QA_CHECKLIST.md
+          grep -q 'DATA SURVIVAL GATE' qa/POS0210_RELEASE_POLICY.md
+          grep -q 'Stable-flow regression' qa/POS0210_QA_CHECKLIST.md
+      - name: Reject destructive migration patterns
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d pos0210 ]; then
+            ! grep -RInE 'fallbackToDestructiveMigration|clearDatabase|deleteDatabase\(' pos0210 \
+              --exclude-dir=build --exclude-dir=.gradle
+          else
+            echo 'POS0210 source directory not present yet; static source checks deferred.'
+          fi
+      - name: Gate status
+        run: |
+          echo 'Policy/static gate completed.'
+          echo 'Release remains blocked until DATA SURVIVAL and regression evidence are attached to the release record.'
