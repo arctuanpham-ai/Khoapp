@@ -5,6 +5,7 @@ on:
     branches: [ pos0210-v1-rebuild ]
     paths:
       - '.github/workflows/pos0210-upgrade-gate.yml'
+      - '.github/scripts/pos0210-upgrade-gate.sh'
       - 'POS0210/**'
   workflow_dispatch:
 
@@ -80,145 +81,7 @@ jobs:
           heap-size: 512
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          script: |
-            set -eu
-            PKG=vn.ecohome.pos0210
-            ACT=vn.ecohome.pos0210/.MainActivity
-
-            echo '=== Install alpha50 baseline ==='
-            adb install -r /tmp/alpha50.apk | tee /tmp/install50.txt
-            grep -q Success /tmp/install50.txt
-            adb shell am start -W -n "$ACT"
-            sleep 6
-            adb shell pidof "$PKG"
-            adb shell am force-stop "$PKG"
-            sleep 2
-
-            echo '=== Extract alpha50 database including WAL if present ==='
-            adb exec-out run-as "$PKG" cat databases/pos0210.db > /tmp/pre.db
-            if adb shell run-as "$PKG" test -f databases/pos0210.db-wal; then
-              adb exec-out run-as "$PKG" cat databases/pos0210.db-wal > /tmp/pre.db-wal
-            fi
-            if adb shell run-as "$PKG" test -f databases/pos0210.db-shm; then
-              adb exec-out run-as "$PKG" cat databases/pos0210.db-shm > /tmp/pre.db-shm
-            fi
-            sqlite3 /tmp/pre.db 'PRAGMA wal_checkpoint(TRUNCATE); PRAGMA integrity_check;' | tee /tmp/pre_integrity.txt
-            grep -q '^ok$' /tmp/pre_integrity.txt
-            rm -f /tmp/pre.db-wal /tmp/pre.db-shm
-
-            echo '=== Inject representative legacy markers into alpha50 state ==='
-            sqlite3 /tmp/pre.db <<'SQL'
-            BEGIN;
-            UPDATE MenuItemEntity SET name='QA_ALPHA50_MENU', price=123456 WHERE id='m1';
-            UPDATE EmployeeEntity SET name='QA_ALPHA50_EMPLOYEE' WHERE id='e1';
-            UPDATE DiningTableEntity SET name='QA_ALPHA50_TABLE' WHERE id='t1';
-            INSERT OR REPLACE INTO AppSettingEntity(key,value) VALUES('qa_upgrade_marker','ALPHA50_PRESERVE_ME');
-            INSERT OR REPLACE INTO CustomerEntity(id,phone,name,tier,points,totalSpend,visitCount,lastVisitAt,active,tierManual,address)
-            VALUES('qa_customer','0900000050','QA Alpha50 Customer','VIP',321,987654,7,1700000000000,1,1,'QA Address');
-            COMMIT;
-            PRAGMA wal_checkpoint(TRUNCATE);
-            PRAGMA integrity_check;
-            SQL
-
-            python3 - <<'PY'
-            import sqlite3, json
-            db=sqlite3.connect('/tmp/pre.db')
-            tables=[r[0] for r in db.execute("select name from sqlite_master where type='table' and name not like 'sqlite_%' order by name")]
-            counts={t:db.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0] for t in tables}
-            markers={
-              'menu':db.execute("select name,price from MenuItemEntity where id='m1'").fetchone(),
-              'employee':db.execute("select name from EmployeeEntity where id='e1'").fetchone(),
-              'table':db.execute("select name from DiningTableEntity where id='t1'").fetchone(),
-              'setting':db.execute("select value from AppSettingEntity where key='qa_upgrade_marker'").fetchone(),
-              'customer':db.execute("select phone,name,tier,points,totalSpend,visitCount,address from CustomerEntity where id='qa_customer'").fetchone(),
-              'user_version':db.execute('pragma user_version').fetchone()[0],
-            }
-            json.dump({'counts':counts,'markers':markers},open('/tmp/before.json','w'),indent=2)
-            print(json.dumps({'counts':counts,'markers':markers},indent=2))
-            db.close()
-            PY
-
-            echo '=== Put marked alpha50 DB back and validate baseline opens ==='
-            adb push /tmp/pre.db /data/local/tmp/pos0210-pre.db >/dev/null
-            adb shell run-as "$PKG" rm -f databases/pos0210.db-wal databases/pos0210.db-shm
-            adb shell run-as "$PKG" cp /data/local/tmp/pos0210-pre.db databases/pos0210.db
-            adb shell run-as "$PKG" chmod 600 databases/pos0210.db
-            adb shell am start -W -n "$ACT"
-            sleep 5
-            adb shell pidof "$PKG"
-            adb shell am force-stop "$PKG"
-            sleep 2
-
-            echo '=== Install alpha51 IN PLACE (no uninstall) ==='
-            adb install -r /tmp/alpha51.apk | tee /tmp/install51.txt
-            grep -q Success /tmp/install51.txt
-            adb shell dumpsys package "$PKG" | grep -E 'versionName=1.0.0-alpha51|versionCode=61'
-
-            echo '=== Launch alpha51 to execute Room migration 10 -> 11 ==='
-            adb logcat -c
-            adb shell am start -W -n "$ACT"
-            sleep 8
-            adb shell pidof "$PKG"
-            if adb logcat -d | grep -E 'FATAL EXCEPTION|Room cannot verify the data integrity|A migration from 10 to 11 was required but not found'; then
-              echo 'Migration/runtime fatal detected'
-              exit 1
-            fi
-
-            echo '=== UI smoke: login surface exists ==='
-            adb shell uiautomator dump /sdcard/window.xml >/dev/null || true
-            adb pull /sdcard/window.xml /tmp/window.xml >/dev/null || true
-            grep -Eq 'PIN NHÂN VIÊN|ĐĂNG NHẬP|0210' /tmp/window.xml
-
-            adb shell am force-stop "$PKG"
-            sleep 2
-
-            echo '=== Extract post-upgrade database ==='
-            adb exec-out run-as "$PKG" cat databases/pos0210.db > /tmp/post.db
-            if adb shell run-as "$PKG" test -f databases/pos0210.db-wal; then
-              adb exec-out run-as "$PKG" cat databases/pos0210.db-wal > /tmp/post.db-wal
-            fi
-            if adb shell run-as "$PKG" test -f databases/pos0210.db-shm; then
-              adb exec-out run-as "$PKG" cat databases/pos0210.db-shm > /tmp/post.db-shm
-            fi
-            sqlite3 /tmp/post.db 'PRAGMA wal_checkpoint(TRUNCATE); PRAGMA integrity_check;' | tee /tmp/post_integrity.txt
-            grep -q '^ok$' /tmp/post_integrity.txt
-
-            echo '=== DATA SURVIVAL assertions ==='
-            python3 - <<'PY'
-            import sqlite3, json, sys
-            before=json.load(open('/tmp/before.json'))
-            db=sqlite3.connect('/tmp/post.db')
-            errors=[]
-            after_counts={t:db.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0] for t in before['counts']}
-            for t,n in before['counts'].items():
-                if after_counts.get(t)!=n: errors.append(f'count changed {t}: {n} -> {after_counts.get(t)}')
-            def one(sql): return db.execute(sql).fetchone()
-            checks={
-              'menu':one("select name,price from MenuItemEntity where id='m1'"),
-              'employee':one("select name from EmployeeEntity where id='e1'"),
-              'table':one("select name from DiningTableEntity where id='t1'"),
-              'setting':one("select value from AppSettingEntity where key='qa_upgrade_marker'"),
-              'customer':one("select phone,name,tier,points,totalSpend,visitCount,address from CustomerEntity where id='qa_customer'"),
-            }
-            expected={k:tuple(v) if isinstance(v,list) else v for k,v in before['markers'].items() if k!='user_version'}
-            for k,v in checks.items():
-                if v != expected[k]: errors.append(f'marker changed {k}: expected {expected[k]}, got {v}')
-            uv=one('pragma user_version')[0]
-            if uv != 11: errors.append(f'user_version expected 11 got {uv}')
-            cols={r[1] for r in db.execute('pragma table_info(MenuItemEntity)')}
-            for col in ('productCode','description'):
-                if col not in cols: errors.append(f'missing MenuItemEntity.{col}')
-            blank=one("select count(*) from MenuItemEntity where productCode is null or trim(productCode)='' ")[0]
-            dup=one("select count(*) from (select productCode,count(*) c from MenuItemEntity group by productCode having c>1)")[0]
-            if blank: errors.append(f'{blank} menu rows have blank productCode')
-            if dup: errors.append(f'{dup} duplicate productCode groups')
-            print(json.dumps({'before_counts':before['counts'],'after_counts':after_counts,'checks':checks,'user_version':uv,'blank_codes':blank,'duplicate_code_groups':dup,'errors':errors},indent=2,default=list))
-            db.close()
-            if errors:
-                sys.exit('\n'.join(errors))
-            PY
-
-            echo '=== UPGRADE GATE PASS ==='
+          script: bash alpha51/.github/scripts/pos0210-upgrade-gate.sh
 
       - name: Upload QA evidence
         if: always()
@@ -229,8 +92,11 @@ jobs:
             /tmp/install50.txt
             /tmp/install51.txt
             /tmp/pre_integrity.txt
+            /tmp/pre_integrity_after_markers.txt
             /tmp/post_integrity.txt
             /tmp/before.json
+            /tmp/after.json
             /tmp/window.xml
+            /tmp/logcat.txt
           if-no-files-found: warn
           retention-days: 30
