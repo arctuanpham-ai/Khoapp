@@ -33,36 +33,94 @@ Result: **PASS** for same-signer update compatibility.
 
 ## APK binary delta
 
-Only these ZIP entries changed between alpha50 and alpha51:
+Changed ZIP entries between alpha50 and alpha51 include:
 
 - `AndroidManifest.xml`
 - `classes3.dex`
 - `classes4.dex`
 
-`classes.dex`, resources, native libraries and other packaged entries are unchanged.
+Core resources/native libraries remain unchanged in the static comparison performed.
 
-## Database migration evidence
+## Database migration 10 -> 11
 
-Static DEX inspection of alpha51 reveals Room migration `MIGRATION_10_11` and schema additions to `MenuItemEntity`:
+Source review confirms explicit Room migration `MIGRATION_10_11`.
 
-- `ALTER TABLE MenuItemEntity ADD COLUMN description TEXT NOT NULL DEFAULT ''`
-- `ALTER TABLE MenuItemEntity ADD COLUMN productCode TEXT NOT NULL DEFAULT ''`
-- creation of unique index `index_MenuItemEntity_productCode`
-- migration-related logic that reads menu item/category data and assigns product codes
+Migration order is safe with respect to the new unique product code index:
 
-No destructive migration pattern was observed in the changed-string inspection performed for this report. However, static inspection alone does **not** prove data survival.
+1. Add `productCode TEXT NOT NULL DEFAULT ''`.
+2. Add `description TEXT NOT NULL DEFAULT ''`.
+3. Read all existing menu items/categories.
+4. Generate and assign a non-empty productCode to each existing menu item.
+5. Create unique index `index_MenuItemEntity_productCode` only after assignment.
+
+Room database construction uses `.addMigrations(...)` including `MIGRATION_10_11`.
+No `fallbackToDestructiveMigration` path was observed in `PosDatabase`.
+
+Result: **PASS — static migration design**.
+
+This does not replace runtime data-survival testing.
+
+## Backup / restore hardening review
+
+`DataBackup` includes the following safety mechanisms:
+
+- WAL checkpoint before DB copy.
+- SQLite header validation on backup and restore inputs.
+- `LATEST`, `TEMP`, and `PREVIOUS` DB files.
+- Existing valid latest DB is copied to previous before replacement.
+- Restore first copies current DB to a rollback file.
+- DB sidecar `-wal` and `-shm` files are cleared during replacement.
+- Restored database is opened and passed through `DatabaseHealth.validate`.
+- Failed restore attempts revert to the pre-restore DB.
+- Managed media is backed up separately as a ZIP archive.
+- Timestamped DB archive is paired with timestamped media archive; restore rejects a missing matching media archive rather than silently pairing unrelated data.
+
+Result: **PASS — static backup/rollback design**.
+
+## Configuration / media preservation review
+
+`ConfigBackup` exports/restores areas, tables, menu categories, menu items, product codes, descriptions, combos, combo items, employees/PIN/permissions, purchase categories, pricing rules, selected app settings, and menu/combo images.
+
+Some storage-location keys (`autoback_tree_uri`, `storage_root_uri`, `master_config_uri`) are intentionally excluded from exported config and re-bound to the selected root during restore.
+
+Result: **PASS WITH RUNTIME VERIFICATION REQUIRED**.
+
+## SAF / document permission persistence
+
+Main UI source calls `takePersistableUriPermission` for:
+
+- the selected POS0210 root tree URI with read + write permission;
+- menu/combo image document URIs with read permission;
+- invoice document/image URIs with read permission.
+
+`SafPosStorage` uses `DocumentsContract` tree/document APIs rather than string-concatenating child URIs.
+
+Result: **PASS — static SAF persistence review**.
+
+## Test-environment limitation encountered
+
+An attempted local SQLite migration simulation could not execute because the current Python runtime returned a disk-I/O error when creating SQLite tables. The system container does not provide the `sqlite3` CLI. No PASS claim is made from that failed simulation.
 
 ## Release decision
 
 **HOLD / NOT RELEASED**.
 
-Reasons:
+Passed static gates:
 
-1. Same-package/same-signer static gate is good.
-2. Candidate includes an actual Room schema migration (10 -> 11), so the mandatory DATA SURVIVAL test must be executed before approval.
-3. Runtime regression still must cover Tables -> Order -> Kitchen -> Delivery -> Payment -> History -> Revenue -> Customer plus configuration/media/backup behavior.
-4. Update must be tested by installing alpha51 over an alpha50 state containing representative data. Uninstall/reinstall is not an acceptable substitute.
+- APK integrity.
+- Same package / same signer compatibility.
+- Explicit non-destructive Room migration design.
+- Safe migration ordering for the new unique product code index.
+- Backup / rollback design.
+- Persistable SAF permissions.
+
+Still required before release:
+
+1. Real Android in-place update test: alpha50 -> alpha51 without uninstall.
+2. Before/after data comparison on representative DB/config/media.
+3. Runtime regression of Tables -> Order -> Kitchen -> Delivery -> Payment -> History -> Revenue -> Customer.
+4. Runtime verification of backup/restore, images, invoice files, printer/bank/settings and SAF access after update/restart.
 
 ## Required next gate
 
-Prepare a disposable alpha50 test state containing representative records and configuration, capture before-state counts/values, perform in-place update to alpha51, and verify all retained data and stable workflows after migration.
+Prepare a disposable Android test environment, install alpha50, populate representative records/config/media, capture before-state, install alpha51 over alpha50, then verify retained data and stable workflows. A clean install is not an acceptable substitute for this release gate.
