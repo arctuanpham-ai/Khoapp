@@ -72,7 +72,7 @@ jobs:
                   assertTrue(payload1.contains("121500"))
                   assertEquals(384, bitmap1.width)
                   assertEquals(384, bitmap1.height)
-                  assertEquals(bitmap1.sameAs(bitmap2), true)
+                  assertTrue(bitmap1.sameAs(bitmap2))
 
                   var black = 0
                   var white = 0
@@ -115,13 +115,9 @@ jobs:
             adb shell svc data disable || true
             sleep 4
             echo '=== connectivity while QR test runs ==='
-            adb shell cmd connectivity airplane-mode || true
-            adb shell dumpsys wifi | grep -E 'Wi-Fi is|mWifiEnabled|enabled=' | head -20 || true
-            if adb shell dumpsys connectivity | grep -q 'WIFI CONNECTED'; then
-              echo 'Wi-Fi still connected; force-disable again'
-              adb shell svc wifi disable || true
-              sleep 3
-            fi
+            adb shell cmd connectivity airplane-mode | grep -q enabled
+            adb shell dumpsys wifi | grep -q 'Wi-Fi is disabled'
+            adb shell dumpsys connectivity | grep -E 'WIFI|MOBILE|VALIDATED|INTERNET' | head -80 || true
             gradle -p candidate/POS0210 --no-daemon :app:connectedDebugAndroidTest --stacktrace
 
       - name: Source/API regression assertions
