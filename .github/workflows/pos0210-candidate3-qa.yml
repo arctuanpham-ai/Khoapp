@@ -1,0 +1,200 @@
+name: POS0210 Candidate3 Independent QA
+
+on:
+  push:
+    branches: [ pos0210-factory ]
+    paths:
+      - '.github/workflows/pos0210-candidate3-qa.yml'
+  workflow_dispatch:
+
+jobs:
+  offline-qr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d2d45062ecf8c919aaa497bd51a41fb39944524e
+          path: candidate
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Inject QA-only offline QR test
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('candidate/POS0210/app/build.gradle.kts')
+          s=p.read_text()
+          s=s.replace('targetSdk = 35', 'targetSdk = 35\n        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"')
+          s=s.replace('testImplementation("junit:junit:4.13.2")', 'testImplementation("junit:junit:4.13.2")\n    androidTestImplementation("androidx.test.ext:junit:1.2.1")\n    androidTestImplementation("androidx.test:runner:1.6.2")')
+          p.write_text(s)
+          manifest=Path('candidate/POS0210/app/src/main/AndroidManifest.xml')
+          m=manifest.read_text()
+          if 'android.permission.ACCESS_NETWORK_STATE' not in m:
+              pos=m.find('>')+1
+              m=m[:pos]+'\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />'+m[pos:]
+              manifest.write_text(m)
+          PY
+          mkdir -p candidate/POS0210/app/src/androidTest/java/vn/ecohome/pos0210/payment
+          cat > candidate/POS0210/app/src/androidTest/java/vn/ecohome/pos0210/payment/VietQrOfflineInstrumentedTest.kt <<'EOF'
+          package vn.ecohome.pos0210.payment
+          import android.content.Context
+          import android.net.ConnectivityManager
+          import android.net.NetworkCapabilities
+          import androidx.test.ext.junit.runners.AndroidJUnit4
+          import androidx.test.platform.app.InstrumentationRegistry
+          import org.junit.Assert.*
+          import org.junit.Test
+          import org.junit.runner.RunWith
+          @RunWith(AndroidJUnit4::class)
+          class VietQrOfflineInstrumentedTest {
+            @Test fun qrWorksOfflineAndIsDeterministic() {
+              val context=InstrumentationRegistry.getInstrumentation().targetContext
+              val cm=context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+              val caps=cm.activeNetwork?.let{cm.getNetworkCapabilities(it)}
+              assertFalse(caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)==true)
+              val p1=VietQrPayload.build("MB","123456789","0210",121500,"0210 BAN 02").getOrThrow()
+              val b1=VietQrOffline.bitmap("MB","123456789","0210",121500,"0210 BAN 02",384).getOrThrow()
+              val p2=VietQrPayload.build("MB","123456789","0210",121500,"0210 BAN 02").getOrThrow()
+              val b2=VietQrOffline.bitmap("MB","123456789","0210",121500,"0210 BAN 02",384).getOrThrow()
+              assertEquals(p1,p2); assertTrue(b1.sameAs(b2)); assertEquals(384,b1.width); assertEquals(384,b1.height)
+              assertTrue(p1.contains("121500")); assertTrue(p1.contains("123456789"))
+              println("QA_CANDIDATE3_OFFLINE_QR_PASS")
+            }
+          }
+          EOF
+      - run: gradle -p candidate/POS0210 --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+      - name: Run offline QR on emulator
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 35
+          target: aosp_atd
+          arch: x86_64
+          profile: pixel_2
+          cores: 2
+          ram-size: 2048
+          heap-size: 512
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            adb shell cmd connectivity airplane-mode enable || true
+            adb shell svc wifi disable || true
+            adb shell svc data disable || true
+            sleep 4
+            gradle -p candidate/POS0210 --no-daemon :app:connectedDebugAndroidTest --stacktrace
+      - name: QR static assertions
+        if: always()
+        run: |
+          ! grep -R "img.vietqr.io" candidate/POS0210/app/src/main || exit 1
+          grep -q "VietQrOffline.bitmap" candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+          grep -q 'versionCode = 64' candidate/POS0210/app/build.gradle.kts
+          grep -q 'versionName = "1.0.0-alpha52-candidate3"' candidate/POS0210/app/build.gradle.kts
+
+  combo-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d2d45062ecf8c919aaa497bd51a41fb39944524e
+          path: candidate
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Inject QA-only combo test
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('candidate/POS0210/app/build.gradle.kts')
+          s=p.read_text()
+          s=s.replace('targetSdk = 35', 'targetSdk = 35\n        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"')
+          s=s.replace('testImplementation("junit:junit:4.13.2")', 'testImplementation("junit:junit:4.13.2")\n    androidTestImplementation("androidx.test.ext:junit:1.2.1")\n    androidTestImplementation("androidx.test:runner:1.6.2")')
+          p.write_text(s)
+          PY
+          mkdir -p candidate/POS0210/app/src/androidTest/java/vn/ecohome/pos0210/data
+          cat > candidate/POS0210/app/src/androidTest/java/vn/ecohome/pos0210/data/ComboPersistenceInstrumentedTest.kt <<'EOF'
+          package vn.ecohome.pos0210.data
+          import androidx.test.ext.junit.runners.AndroidJUnit4
+          import androidx.test.platform.app.InstrumentationRegistry
+          import kotlinx.coroutines.flow.first
+          import kotlinx.coroutines.runBlocking
+          import org.junit.Assert.*
+          import org.junit.Test
+          import org.junit.runner.RunWith
+          @RunWith(AndroidJUnit4::class)
+          class ComboPersistenceInstrumentedTest {
+            @Test fun comboEditDeactivateReopenPersists()= runBlocking {
+              val c=InstrumentationRegistry.getInstrumentation().targetContext
+              PosDatabase.closeForRestore(); c.deleteDatabase("pos0210.db")
+              var d=PosDatabase.get(c).dao()
+              d.saveCombo(ComboEntity("qa_combo","Old",55000,"content://old",7,true,"Old desc"))
+              d.saveComboItem(ComboItemEntity("qa1","qa_combo","m1",1))
+              d.saveComboItem(ComboItemEntity("qa2","qa_combo","m2",2))
+              d.saveCombo(ComboEntity("qa_combo","New",69000,"content://new",3,true,"New desc"))
+              d.deleteComboItems("qa_combo"); d.saveComboItem(ComboItemEntity("qa3","qa_combo","m3",3)); d.setComboActive("qa_combo",false)
+              PosDatabase.closeForRestore(); d=PosDatabase.get(c).dao()
+              val combo=d.allCombosSnapshot().single{it.id=="qa_combo"}; val items=d.comboItems("qa_combo").first()
+              assertEquals("New",combo.name); assertEquals(69000L,combo.price); assertEquals("New desc",combo.description); assertEquals("content://new",combo.imageUri); assertFalse(combo.active)
+              assertEquals(1,items.size); assertEquals("m3",items.single().menuItemId); assertEquals(3,items.single().qty)
+              println("QA_CANDIDATE3_COMBO_PASS")
+            }
+          }
+          EOF
+      - run: gradle -p candidate/POS0210 --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+      - name: Run combo regression
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 35
+          target: aosp_atd
+          arch: x86_64
+          profile: pixel_2
+          cores: 2
+          ram-size: 2048
+          heap-size: 512
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: gradle -p candidate/POS0210 --no-daemon :app:connectedDebugAndroidTest --stacktrace
+
+  storage-backup-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d2d45062ecf8c919aaa497bd51a41fb39944524e
+          path: candidate
+      - name: SAF and backup regression assertions
+        run: |
+          test ! -e candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosStorage.kt
+          grep -q 'ACTION_OPEN_DOCUMENT_TREE\|OpenDocumentTree' candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+          grep -q 'takePersistableUriPermission' candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+          grep -q 'DocumentFile\|DocumentsContract' candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/data/SafPosStorage.kt
+          grep -q 'ContentResolver' candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/data/SafPosStorage.kt
+          ! grep -R 'Build.VERSION.SDK_INT.*29\|VERSION_CODES.Q' candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/data/SafPosStorage.kt candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/data/DataBackup.kt || exit 1
+          grep -q 'versionCode = 64' candidate/POS0210/app/build.gradle.kts
+          grep -q 'minSdk = 26' candidate/POS0210/app/build.gradle.kts
