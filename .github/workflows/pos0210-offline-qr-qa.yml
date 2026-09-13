@@ -1,0 +1,126 @@
+name: POS0210 Independent Offline QR Gate
+
+on:
+  push:
+    branches: [ pos0210-factory ]
+    paths:
+      - '.github/workflows/pos0210-offline-qr-qa.yml'
+  workflow_dispatch:
+
+jobs:
+  offline-qr-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact Builder candidate
+        uses: actions/checkout@v4
+        with:
+          ref: bc82a12076894fe0ee950c2b76a57c7754847a86
+          path: candidate
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Inject QA-only instrumentation test
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('candidate/POS0210/app/build.gradle.kts')
+          s=p.read_text()
+          s=s.replace('targetSdk = 35', 'targetSdk = 35\n        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"')
+          s=s.replace('testImplementation("junit:junit:4.13.2")', 'testImplementation("junit:junit:4.13.2")\n    androidTestImplementation("androidx.test.ext:junit:1.2.1")\n    androidTestImplementation("androidx.test:runner:1.6.2")')
+          p.write_text(s)
+          PY
+          mkdir -p candidate/POS0210/app/src/androidTest/java/vn/ecohome/pos0210/payment
+          cat > candidate/POS0210/app/src/androidTest/java/vn/ecohome/pos0210/payment/VietQrOfflineInstrumentedTest.kt <<'EOF'
+          package vn.ecohome.pos0210.payment
+
+          import androidx.test.ext.junit.runners.AndroidJUnit4
+          import org.junit.Assert.*
+          import org.junit.Test
+          import org.junit.runner.RunWith
+          import java.security.MessageDigest
+
+          @RunWith(AndroidJUnit4::class)
+          class VietQrOfflineInstrumentedTest {
+              @Test fun qrPayloadAndBitmapWorkWithNetworkDisabled() {
+                  val payload = VietQrPayload.build("MB", "123456789", "0210", 121500, "0210 BAN 02").getOrThrow()
+                  assertTrue(payload.startsWith("00020101021238"))
+                  assertTrue(payload.contains("970422"))
+                  assertTrue(payload.contains("123456789"))
+                  assertTrue(payload.contains("121500"))
+
+                  val bitmap = VietQrOffline.bitmap("MB", "123456789", "0210", 121500, "0210 BAN 02", 384).getOrThrow()
+                  assertEquals(384, bitmap.width)
+                  assertEquals(384, bitmap.height)
+                  var black = 0
+                  var white = 0
+                  for (y in 0 until bitmap.height step 8) for (x in 0 until bitmap.width step 8) {
+                      if ((bitmap.getPixel(x,y) and 0x00FFFFFF) == 0) black++ else white++
+                  }
+                  assertTrue("QR must contain black modules", black > 0)
+                  assertTrue("QR must contain white modules", white > 0)
+
+                  val digest = MessageDigest.getInstance("SHA-256").digest(payload.toByteArray()).joinToString("") { "%02x".format(it) }
+                  println("QA_OFFLINE_QR_PAYLOAD_SHA256=$digest")
+              }
+          }
+          EOF
+
+      - name: Build candidate and QA test APKs
+        run: |
+          cd candidate/POS0210
+          gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: Run P0 QR test with Wi-Fi and mobile data disabled
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 35
+          target: aosp_atd
+          arch: x86_64
+          profile: pixel_2
+          cores: 2
+          ram-size: 2048
+          heap-size: 512
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            adb shell svc wifi disable
+            adb shell svc data disable
+            adb shell settings put global airplane_mode_on 1
+            adb shell am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true || true
+            sleep 2
+            echo '=== connectivity while QR test runs ==='
+            adb shell dumpsys connectivity | grep -E 'WIFI|MOBILE|VALIDATED|INTERNET' | head -80 || true
+            cd candidate/POS0210
+            gradle --no-daemon :app:connectedDebugAndroidTest --stacktrace
+
+      - name: Source/API regression assertions
+        run: |
+          ! grep -R "img.vietqr.io" candidate/POS0210/app/src/main || (echo 'Remote VietQR dependency remains' && exit 1)
+          grep -q "OfflineVietQrImage" candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+          grep -q "VietQrOffline.bitmap" candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+          grep -q 'versionCode = 62' candidate/POS0210/app/build.gradle.kts
+          grep -q 'versionName = "1.0.0-alpha52-candidate1"' candidate/POS0210/app/build.gradle.kts
