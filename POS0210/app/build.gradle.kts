@@ -11,8 +11,8 @@ android {
         applicationId = "vn.ecohome.pos0210"
         minSdk = 26
         targetSdk = 35
-        versionCode = 61
-        versionName = "1.0.0-alpha51"
+        versionCode = 62
+        versionName = "1.0.0-alpha52"
     }
     signingConfigs {
         getByName("debug") {
@@ -39,4 +39,6 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     kapt("androidx.room:room-compiler:2.6.1")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("com.google.zxing:core:3.5.3")
+    testImplementation("junit:junit:4.13.2")
 }
