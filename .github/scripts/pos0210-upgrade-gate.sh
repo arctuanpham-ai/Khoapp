@@ -50,11 +50,14 @@ sqlite3 /tmp/pre.db 'PRAGMA integrity_check;' | tee /tmp/pre_integrity_after_mar
 grep -q '^ok$' /tmp/pre_integrity_after_markers.txt
 
 echo '=== Put marked alpha50 DB back and validate baseline opens ==='
-APPDIR=$(adb shell run-as "$PKG" pwd | tr -d '\r')
-test -n "$APPDIR"
-adb shell run-as "$PKG" rm -f "$APPDIR/databases/pos0210.db-wal" "$APPDIR/databases/pos0210.db-shm"
-adb exec-in run-as "$PKG" sh -c "cat > '$APPDIR/databases/pos0210.db'" < /tmp/pre.db
-adb shell run-as "$PKG" chmod 600 "$APPDIR/databases/pos0210.db"
+adb shell run-as "$PKG" rm -f databases/pos0210.db-wal databases/pos0210.db-shm
+adb push /tmp/pre.db /data/local/tmp/pos0210-pre.db >/dev/null
+adb shell chmod 644 /data/local/tmp/pos0210-pre.db
+adb shell run-as "$PKG" cp /data/local/tmp/pos0210-pre.db databases/pos0210.db
+adb shell run-as "$PKG" chmod 600 databases/pos0210.db
+adb shell rm -f /data/local/tmp/pos0210-pre.db
+adb exec-out run-as "$PKG" cat databases/pos0210.db > /tmp/roundtrip.db
+sqlite3 /tmp/roundtrip.db "SELECT name || '|' || price FROM MenuItemEntity WHERE name='QA_ALPHA50_MENU' AND price=123456" | grep -q 'QA_ALPHA50_MENU|123456'
 adb shell am start -W -n "$ACT"
 sleep 5
 adb shell pidof "$PKG"
