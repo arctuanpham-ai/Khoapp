@@ -15,7 +15,7 @@ jobs:
       - name: Checkout exact Builder candidate
         uses: actions/checkout@v4
         with:
-          ref: bc82a12076894fe0ee950c2b76a57c7754847a86
+          ref: fe414dd66a12e97b79a0646caa773747b3e4f655
           path: candidate
 
       - name: Java 17
@@ -126,5 +126,5 @@ jobs:
           ! grep -R "img.vietqr.io" candidate/POS0210/app/src/main || (echo 'Remote VietQR dependency remains' && exit 1)
           grep -q "OfflineVietQrImage" candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
           grep -q "VietQrOffline.bitmap" candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
-          grep -q 'versionCode = 62' candidate/POS0210/app/build.gradle.kts
-          grep -q 'versionName = "1.0.0-alpha52-candidate1"' candidate/POS0210/app/build.gradle.kts
+          grep -q 'versionCode = 63' candidate/POS0210/app/build.gradle.kts
+          grep -q 'versionName = "1.0.0-alpha52-candidate2"' candidate/POS0210/app/build.gradle.kts
