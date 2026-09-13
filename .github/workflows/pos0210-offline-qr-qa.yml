@@ -60,33 +60,36 @@ jobs:
           @RunWith(AndroidJUnit4::class)
           class VietQrOfflineInstrumentedTest {
               @Test fun qrPayloadAndBitmapWorkWithNetworkDisabled() {
-                  val payload = VietQrPayload.build("MB", "123456789", "0210", 121500, "0210 BAN 02").getOrThrow()
-                  assertTrue(payload.startsWith("00020101021238"))
-                  assertTrue(payload.contains("970422"))
-                  assertTrue(payload.contains("123456789"))
-                  assertTrue(payload.contains("121500"))
+                  val payload1 = VietQrPayload.build("MB", "123456789", "0210", 121500, "0210 BAN 02").getOrThrow()
+                  val bitmap1 = VietQrOffline.bitmap("MB", "123456789", "0210", 121500, "0210 BAN 02", 384).getOrThrow()
+                  val payload2 = VietQrPayload.build("MB", "123456789", "0210", 121500, "0210 BAN 02").getOrThrow()
+                  val bitmap2 = VietQrOffline.bitmap("MB", "123456789", "0210", 121500, "0210 BAN 02", 384).getOrThrow()
 
-                  val bitmap = VietQrOffline.bitmap("MB", "123456789", "0210", 121500, "0210 BAN 02", 384).getOrThrow()
-                  assertEquals(384, bitmap.width)
-                  assertEquals(384, bitmap.height)
+                  assertEquals(payload1, payload2)
+                  assertTrue(payload1.startsWith("00020101021238"))
+                  assertTrue(payload1.contains("970422"))
+                  assertTrue(payload1.contains("123456789"))
+                  assertTrue(payload1.contains("121500"))
+                  assertEquals(384, bitmap1.width)
+                  assertEquals(384, bitmap1.height)
+                  assertEquals(bitmap1.sameAs(bitmap2), true)
+
                   var black = 0
                   var white = 0
-                  for (y in 0 until bitmap.height step 8) for (x in 0 until bitmap.width step 8) {
-                      if ((bitmap.getPixel(x,y) and 0x00FFFFFF) == 0) black++ else white++
+                  for (y in 0 until bitmap1.height step 8) for (x in 0 until bitmap1.width step 8) {
+                      if ((bitmap1.getPixel(x,y) and 0x00FFFFFF) == 0) black++ else white++
                   }
                   assertTrue("QR must contain black modules", black > 0)
                   assertTrue("QR must contain white modules", white > 0)
 
-                  val digest = MessageDigest.getInstance("SHA-256").digest(payload.toByteArray()).joinToString("") { "%02x".format(it) }
+                  val digest = MessageDigest.getInstance("SHA-256").digest(payload1.toByteArray()).joinToString("") { "%02x".format(it) }
                   println("QA_OFFLINE_QR_PAYLOAD_SHA256=$digest")
               }
           }
           EOF
 
       - name: Build candidate and QA test APKs
-        run: |
-          cd candidate/POS0210
-          gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+        run: gradle -p candidate/POS0210 --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
 
       - name: Enable KVM
         run: |
@@ -94,7 +97,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm || true
 
-      - name: Run P0 QR test with all available radios disabled
+      - name: Run P0 QR test with network disabled
         uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
           api-level: 35
@@ -107,15 +110,19 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: |
+            adb shell cmd connectivity airplane-mode enable || true
             adb shell svc wifi disable || true
             adb shell svc data disable || true
-            adb shell settings put global airplane_mode_on 1 || true
-            adb shell am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true || true
-            sleep 2
+            sleep 4
             echo '=== connectivity while QR test runs ==='
-            adb shell dumpsys connectivity | grep -E 'WIFI|MOBILE|VALIDATED|INTERNET' | head -80 || true
-            cd candidate/POS0210
-            gradle --no-daemon :app:connectedDebugAndroidTest --stacktrace
+            adb shell cmd connectivity airplane-mode || true
+            adb shell dumpsys wifi | grep -E 'Wi-Fi is|mWifiEnabled|enabled=' | head -20 || true
+            if adb shell dumpsys connectivity | grep -q 'WIFI CONNECTED'; then
+              echo 'Wi-Fi still connected; force-disable again'
+              adb shell svc wifi disable || true
+              sleep 3
+            fi
+            gradle -p candidate/POS0210 --no-daemon :app:connectedDebugAndroidTest --stacktrace
 
       - name: Source/API regression assertions
         if: always()
