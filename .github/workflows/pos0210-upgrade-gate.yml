@@ -2,7 +2,7 @@ name: POS0210 Upgrade Data Survival Gate
 
 on:
   push:
-    branches: [ pos0210-v1-rebuild ]
+    branches: [ pos0210-v1-rebuild, builder/issue-3-offline-qr ]
     paths:
       - '.github/workflows/pos0210-upgrade-gate.yml'
       - '.github/scripts/pos0210-upgrade-gate.sh'
@@ -24,7 +24,7 @@ jobs:
           ref: 9ae84b456b25aeb67ea51a2f3b3e8e6dc1e8c105
           path: alpha50
 
-      - name: Checkout alpha51 candidate source
+      - name: Checkout Builder candidate source
         uses: actions/checkout@v4
         with:
           ref: pos0210-v1-rebuild
@@ -87,7 +87,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: alpha50-to-alpha51-upgrade-evidence-${{ github.sha }}
+          name: alpha50-to-builder-candidate-upgrade-evidence-${{ github.sha }}
           path: |
             /tmp/install50.txt
             /tmp/install51.txt

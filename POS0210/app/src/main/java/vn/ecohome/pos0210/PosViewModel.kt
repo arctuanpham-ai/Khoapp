@@ -1,6 +1,5 @@
 package vn.ecohome.pos0210
 import android.app.Application
-import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.*
@@ -11,6 +10,7 @@ import vn.ecohome.pos0210.data.*
 import vn.ecohome.pos0210.printing.PrinterText
 import vn.ecohome.pos0210.printing.BluetoothPrinter
 import vn.ecohome.pos0210.printing.ReceiptRenderer
+import vn.ecohome.pos0210.payment.VietQrOffline
 import java.util.UUID
 class PosViewModel(app:Application):AndroidViewModel(app){
  private val db=PosDatabase.get(app);private val repo=PosRepository(db);private val dao=db.dao();private val masterMutex=Mutex()
@@ -78,18 +78,14 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  private fun printerMode()=setting("printer_mode").ifBlank{"TEST"}
  private fun printerMac()=setting("printer_mac")
  private fun printerName()=setting("printer_name").ifBlank{BluetoothPrinter.PROFILE_NAME}
- private fun qrUrl(amount:Long,info:String):String{
-  val bank=setting("bank_name").trim().replace(" ","")
-  val account=setting("bank_account").trim()
-  if(bank.isBlank()||account.isBlank())return ""
-  return "https://img.vietqr.io/image/${Uri.encode(bank)}-${Uri.encode(account)}-compact2.png?amount=$amount&addInfo=${Uri.encode(info.take(50))}&accountName=${Uri.encode(setting("bank_holder").trim())}"
- }
+ private fun qrBitmap(amount:Long,info:String)=
+  VietQrOffline.bitmap(setting("bank_name"),setting("bank_account"),setting("bank_holder"),amount,info).getOrNull()
  fun testBluetoothPrint(){
   viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
    if(printerMode()!="BLUETOOTH"){printerMessage.value="Hãy chọn chế độ BLUETOOTH trước";return@launch}
    if(printerMac().isBlank()){printerMessage.value="Chưa chọn máy in Bluetooth";return@launch}
    printerMessage.value="Đang in thử..."
-   val qr=qrUrl(135000,"0210 TEST").takeIf{it.isNotBlank()}?.let{BluetoothPrinter.downloadBitmap(it)}
+   val qr=qrBitmap(135000,"0210 TEST")
    val result=BluetoothPrinter.printBitmap(getApplication(),printerMac(),ReceiptRenderer.sampleBill(qr))
    printerMessage.value=if(result.isSuccess)"IN THỬ THÀNH CÔNG · ${printerName()}" else "IN THỬ LỖI: ${result.exceptionOrNull()?.message}"
   }
@@ -584,7 +580,7 @@ fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
     val lines=mutableListOf<Triple<String,Int,Long>>()
     bs.forEach{b->dao.batchItems(b.id).first().forEach{it2->lines.add(Triple(it2.itemNameSnapshot,it2.qty,it2.unitPriceSnapshot))}}
     val info="0210 ${table?.name ?: bill.billNo}"
-    val qr=qrUrl(preview.total,info).takeIf{it.isNotBlank()}?.let{BluetoothPrinter.downloadBitmap(it)}
+    val qr=qrBitmap(preview.total,info)
     val period="${java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date(session.openedAt))}–${java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date(bill.closedAt ?: System.currentTimeMillis()))}"
     val receiptAdjustments=buildList {
      preview.surchargeRules.forEach{rule->add("PHỤ THU ${rule.name}  +${rule.percent}%")}

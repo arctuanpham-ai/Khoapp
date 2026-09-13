@@ -8,7 +8,6 @@ import android.graphics.*
 import android.os.Build
 import androidx.core.content.ContextCompat
 import java.io.ByteArrayOutputStream
-import java.net.URL
 import java.util.UUID
 
 data class PrinterDevice(val name:String,val address:String)
@@ -52,10 +51,6 @@ object BluetoothPrinter {
             }
         }
     }
-
-    fun downloadBitmap(url:String):Bitmap? = runCatching {
-        URL(url).openStream().use { BitmapFactory.decodeStream(it) }
-    }.getOrNull()
 
     private fun rasterCommand(src:Bitmap):ByteArray{
         val width=PRINT_WIDTH_PX

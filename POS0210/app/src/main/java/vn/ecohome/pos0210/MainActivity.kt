@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -30,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -40,6 +42,7 @@ import coil.compose.AsyncImage
 import vn.ecohome.pos0210.data.*
 import vn.ecohome.pos0210.printing.PrinterText
 import vn.ecohome.pos0210.printing.BluetoothPrinter
+import vn.ecohome.pos0210.payment.VietQrOffline
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -54,10 +57,22 @@ private val WaitingPriority2 = Color(0xFFF3C15F)
 private fun money(v: Long) = "%,dđ".format(v).replace(',', '.')
 private fun time(v: Long) = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date(v))
 
-private fun vietQrUrl(bank: String, account: String, holder: String, amount: Long, info: String): String {
-    val bankId = bank.trim().replace(" ", "")
-    return "https://img.vietqr.io/image/${Uri.encode(bankId)}-${Uri.encode(account.trim())}-compact2.png" +
-        "?amount=$amount&addInfo=${Uri.encode(info.take(50))}&accountName=${Uri.encode(holder.trim())}"
+@Composable
+private fun OfflineVietQrImage(
+    bank: String,
+    account: String,
+    holder: String,
+    amount: Long,
+    info: String,
+    modifier: Modifier
+) {
+    val result = remember(bank, account, holder, amount, info) {
+        VietQrOffline.bitmap(bank, account, holder, amount, info)
+    }
+    result.fold(
+        onSuccess = { bitmap -> Image(bitmap.asImageBitmap(), "Mã VietQR thanh toán offline", modifier) },
+        onFailure = { error -> Text("KHÔNG TẠO ĐƯỢC VIETQR\n${error.message}", modifier, color = Color.Red, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) }
+    )
 }
 
 class MainActivity : ComponentActivity() {
@@ -651,9 +666,7 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
     val loyaltyRule = tierDiscountRule(effectiveTier, settings)
     val preview = calculatePricing(subtotal, rules + listOfNotNull(loyaltyRule), appliedCode)
     val qrInfo = "${setting("qr_prefix").ifBlank { "0210" }} ${t.name}"
-    val qrUrl = if (setting("bank_name").isNotBlank() && setting("bank_account").isNotBlank()) {
-        vietQrUrl(setting("bank_name"), setting("bank_account"), setting("bank_holder"), preview.total, qrInfo)
-    } else ""
+    val qrConfigured = setting("bank_name").isNotBlank() && setting("bank_account").isNotBlank()
 
     Column {
         Header("Thanh toán") { vm.screen.value = "SENT" }
@@ -755,8 +768,8 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
                 Card {
                     Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("VIETQR", fontWeight = FontWeight.Bold)
-                        if (qrUrl.isBlank()) Text("Chưa cấu hình tài khoản VietQR") else {
-                            AsyncImage(model = qrUrl, contentDescription = "Mã VietQR thanh toán", modifier = Modifier.size(280.dp))
+                        if (!qrConfigured) Text("Chưa cấu hình tài khoản VietQR") else {
+                            OfflineVietQrImage(setting("bank_name"), setting("bank_account"), setting("bank_holder"), preview.total, qrInfo, Modifier.size(280.dp))
                             Text("${setting("bank_name")} · ${setting("bank_account")}")
                             Text("${money(preview.total)} · $qrInfo")
                         }
@@ -1170,7 +1183,7 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Nhật ký hệ thống", "Audit thao tác · người thực hiện · thời điểm · dữ liệu thay đổi") { vm.screen.value = "SETTINGS" }
             }
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
-            Text("POS0210 v1.0.0-alpha51 · versionCode 61", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("POS0210 v1.0.0-alpha52-candidate1 · versionCode 62", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Text("Tương thích Android 8.0 (API 26) trở lên · Thiết bị hiện tại: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})", fontSize = 11.sp)
             if (Build.VERSION.SDK_INT < 26) Text("Thiết bị không được hỗ trợ. Cần Android 8.0 trở lên.", color = Color.Red, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(30.dp))
@@ -2522,11 +2535,7 @@ fun VietQr(vm: PosViewModel) {
             if (saved) Text("Đã lưu cấu hình VietQR", Modifier.padding(top = 8.dp))
             if (bank.isNotBlank() && acc.isNotBlank()) {
                 Text("QR mẫu 1.000đ", Modifier.padding(top = 14.dp))
-                AsyncImage(
-                    model = vietQrUrl(bank, acc, holder, 1000, "0210 TEST"),
-                    contentDescription = "QR mẫu VietQR",
-                    modifier = Modifier.size(240.dp)
-                )
+                OfflineVietQrImage(bank, acc, holder, 1000, "0210 TEST", Modifier.size(240.dp))
             }
         }
     }
@@ -2702,9 +2711,7 @@ fun BillPrintPreview(vm: PosViewModel) {
     val subtotal = 135000L
     val discount = 13500L
     val amount = subtotal - discount
-    val qrUrl = if (setting("bank_name").isNotBlank() && setting("bank_account").isNotBlank()) {
-        vietQrUrl(setting("bank_name"), setting("bank_account"), setting("bank_holder"), amount, "0210 BAN 02")
-    } else ""
+    val qrConfigured = setting("bank_name").isNotBlank() && setting("bank_account").isNotBlank()
 
     Column(
         Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp),
@@ -2734,12 +2741,8 @@ fun BillPrintPreview(vm: PosViewModel) {
 
         HorizontalDivider(Modifier.padding(vertical = 9.dp))
         Text("QUÉT MÃ THANH TOÁN", fontSize = 20.sp, fontWeight = FontWeight.Black)
-        if (qrUrl.isNotBlank()) {
-            AsyncImage(
-                model = qrUrl,
-                contentDescription = "VietQR trên bill",
-                modifier = Modifier.fillMaxWidth(0.78f).aspectRatio(1f).padding(top = 4.dp)
-            )
+        if (qrConfigured) {
+            OfflineVietQrImage(setting("bank_name"), setting("bank_account"), setting("bank_holder"), amount, "0210 BAN 02", Modifier.fillMaxWidth(0.78f).aspectRatio(1f).padding(top = 4.dp))
             Text("SỐ TIỀN: ${money(amount)}", fontSize = 17.sp, fontWeight = FontWeight.Black)
             Text("${setting("bank_name")} · ${setting("bank_account")}", fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Text("Nội dung: 0210 BAN 02", fontSize = 14.sp)

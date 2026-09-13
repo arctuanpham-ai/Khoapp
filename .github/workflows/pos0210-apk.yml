@@ -2,7 +2,7 @@ name: Build POS0210 APK
 
 on:
   push:
-    branches: [ pos0210-v1-rebuild ]
+    branches: [ pos0210-v1-rebuild, builder/issue-3-offline-qr ]
     paths:
       - 'POS0210/**'
       - '.github/workflows/pos0210-apk.yml'
@@ -42,8 +42,8 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build full installable APK
-        run: gradle --no-daemon :app:assembleDebug --stacktrace
+      - name: Test and build full installable APK
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug --stacktrace
 
       - name: Read app version
         id: app_version
