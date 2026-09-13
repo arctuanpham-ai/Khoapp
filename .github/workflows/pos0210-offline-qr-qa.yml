@@ -94,7 +94,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm || true
 
-      - name: Run P0 QR test with Wi-Fi and mobile data disabled
+      - name: Run P0 QR test with all available radios disabled
         uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
           api-level: 35
@@ -107,9 +107,9 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: |
-            adb shell svc wifi disable
-            adb shell svc data disable
-            adb shell settings put global airplane_mode_on 1
+            adb shell svc wifi disable || true
+            adb shell svc data disable || true
+            adb shell settings put global airplane_mode_on 1 || true
             adb shell am broadcast -a android.intent.action.AIRPLANE_MODE --ez state true || true
             sleep 2
             echo '=== connectivity while QR test runs ==='
@@ -118,6 +118,7 @@ jobs:
             gradle --no-daemon :app:connectedDebugAndroidTest --stacktrace
 
       - name: Source/API regression assertions
+        if: always()
         run: |
           ! grep -R "img.vietqr.io" candidate/POS0210/app/src/main || (echo 'Remote VietQR dependency remains' && exit 1)
           grep -q "OfflineVietQrImage" candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
