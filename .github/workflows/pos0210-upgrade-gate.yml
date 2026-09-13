@@ -27,7 +27,7 @@ jobs:
       - name: Checkout Builder candidate source
         uses: actions/checkout@v4
         with:
-          ref: pos0210-v1-rebuild
+          ref: ${{ github.sha }}
           path: alpha51
 
       - name: Java 17
