@@ -64,12 +64,12 @@ adb shell pidof "$PKG"
 adb shell am force-stop "$PKG"
 sleep 2
 
-echo '=== Install alpha51 IN PLACE (no uninstall) ==='
+echo '=== Install candidate IN PLACE (no uninstall) ==='
 adb install -r /tmp/alpha51.apk | tee /tmp/install51.txt
 grep -q Success /tmp/install51.txt
-adb shell dumpsys package "$PKG" | grep -E 'versionName=1.0.0-alpha51|versionCode=61'
+adb shell dumpsys package "$PKG" | grep -E 'versionName=1.0.0-alpha52-candidate1|versionCode=62'
 
-echo '=== Launch alpha51 to execute Room migration 10 -> 11 ==='
+echo '=== Launch candidate to execute Room migration 10 -> 11 ==='
 adb logcat -c
 adb shell am start -W -n "$ACT"
 sleep 8
