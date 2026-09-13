@@ -51,7 +51,11 @@ jobs:
           cat > candidate/POS0210/app/src/androidTest/java/vn/ecohome/pos0210/payment/VietQrOfflineInstrumentedTest.kt <<'EOF'
           package vn.ecohome.pos0210.payment
 
+          import android.content.Context
+          import android.net.ConnectivityManager
+          import android.net.NetworkCapabilities
           import androidx.test.ext.junit.runners.AndroidJUnit4
+          import androidx.test.platform.app.InstrumentationRegistry
           import org.junit.Assert.*
           import org.junit.Test
           import org.junit.runner.RunWith
@@ -60,6 +64,11 @@ jobs:
           @RunWith(AndroidJUnit4::class)
           class VietQrOfflineInstrumentedTest {
               @Test fun qrPayloadAndBitmapWorkWithNetworkDisabled() {
+                  val context = InstrumentationRegistry.getInstrumentation().targetContext
+                  val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                  val caps = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+                  assertFalse("QA precondition failed: device still has validated Internet", caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true)
+
                   val payload1 = VietQrPayload.build("MB", "123456789", "0210", 121500, "0210 BAN 02").getOrThrow()
                   val bitmap1 = VietQrOffline.bitmap("MB", "123456789", "0210", 121500, "0210 BAN 02", 384).getOrThrow()
                   val payload2 = VietQrPayload.build("MB", "123456789", "0210", 121500, "0210 BAN 02").getOrThrow()
@@ -115,8 +124,7 @@ jobs:
             adb shell svc data disable || true
             sleep 4
             echo '=== connectivity while QR test runs ==='
-            adb shell cmd connectivity airplane-mode | grep -q enabled
-            adb shell dumpsys wifi | grep -q 'Wi-Fi is disabled'
+            adb shell cmd connectivity airplane-mode || true
             adb shell dumpsys connectivity | grep -E 'WIFI|MOBILE|VALIDATED|INTERNET' | head -80 || true
             gradle -p candidate/POS0210 --no-daemon :app:connectedDebugAndroidTest --stacktrace
 
