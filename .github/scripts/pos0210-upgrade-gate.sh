@@ -8,7 +8,8 @@ echo '=== Install alpha50 baseline ==='
 adb install -r /tmp/alpha50.apk | tee /tmp/install50.txt
 grep -q Success /tmp/install50.txt
 adb shell am start -W -n "$ACT"
-sleep 6
+SDK_LEVEL=$(adb shell getprop ro.build.version.sdk | tr -d '\r')
+if [ "$SDK_LEVEL" -le 28 ]; then sleep 20; else sleep 6; fi
 adb shell pidof "$PKG"
 adb shell am force-stop "$PKG"
 sleep 2
