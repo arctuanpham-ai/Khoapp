@@ -16,12 +16,8 @@ sleep 2
 
 echo '=== Extract alpha50 database including WAL if present ==='
 adb exec-out run-as "$PKG" cat databases/pos0210.db > /tmp/pre.db
-if adb shell run-as "$PKG" test -f databases/pos0210.db-wal; then
-  adb exec-out run-as "$PKG" cat databases/pos0210.db-wal > /tmp/pre.db-wal
-fi
-if adb shell run-as "$PKG" test -f databases/pos0210.db-shm; then
-  adb exec-out run-as "$PKG" cat databases/pos0210.db-shm > /tmp/pre.db-shm
-fi
+adb exec-out run-as "$PKG" cat databases/pos0210.db-wal > /tmp/pre.db-wal 2>/dev/null || rm -f /tmp/pre.db-wal
+adb exec-out run-as "$PKG" cat databases/pos0210.db-shm > /tmp/pre.db-shm 2>/dev/null || rm -f /tmp/pre.db-shm
 sqlite3 /tmp/pre.db 'PRAGMA wal_checkpoint(TRUNCATE); PRAGMA integrity_check;' | tee /tmp/pre_integrity.txt
 grep -q '^ok$' /tmp/pre_integrity.txt
 rm -f /tmp/pre.db-wal /tmp/pre.db-shm
@@ -92,8 +88,8 @@ sleep 2
 
 echo '=== Extract post-upgrade database ==='
 adb exec-out run-as "$PKG" cat databases/pos0210.db > /tmp/post.db
-if adb shell run-as "$PKG" test -f databases/pos0210.db-wal; then adb exec-out run-as "$PKG" cat databases/pos0210.db-wal > /tmp/post.db-wal; fi
-if adb shell run-as "$PKG" test -f databases/pos0210.db-shm; then adb exec-out run-as "$PKG" cat databases/pos0210.db-shm > /tmp/post.db-shm; fi
+adb exec-out run-as "$PKG" cat databases/pos0210.db-wal > /tmp/post.db-wal 2>/dev/null || rm -f /tmp/post.db-wal
+adb exec-out run-as "$PKG" cat databases/pos0210.db-shm > /tmp/post.db-shm 2>/dev/null || rm -f /tmp/post.db-shm
 sqlite3 /tmp/post.db 'PRAGMA integrity_check;' | tee /tmp/post_integrity.txt
 grep -q '^ok$' /tmp/post_integrity.txt
 
