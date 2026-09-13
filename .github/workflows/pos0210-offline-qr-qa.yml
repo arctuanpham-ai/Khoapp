@@ -46,6 +46,14 @@ jobs:
           s=s.replace('targetSdk = 35', 'targetSdk = 35\n        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"')
           s=s.replace('testImplementation("junit:junit:4.13.2")', 'testImplementation("junit:junit:4.13.2")\n    androidTestImplementation("androidx.test.ext:junit:1.2.1")\n    androidTestImplementation("androidx.test:runner:1.6.2")')
           p.write_text(s)
+          manifest=Path('candidate/POS0210/app/src/main/AndroidManifest.xml')
+          m=manifest.read_text()
+          if 'android.permission.ACCESS_NETWORK_STATE' not in m:
+              m=m.replace('<manifest', '<manifest', 1)
+              insert='\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />'
+              pos=m.find('>')+1
+              m=m[:pos]+insert+m[pos:]
+              manifest.write_text(m)
           PY
           mkdir -p candidate/POS0210/app/src/androidTest/java/vn/ecohome/pos0210/payment
           cat > candidate/POS0210/app/src/androidTest/java/vn/ecohome/pos0210/payment/VietQrOfflineInstrumentedTest.kt <<'EOF'
