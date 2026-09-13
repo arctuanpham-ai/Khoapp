@@ -34,15 +34,16 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  private suspend fun audit(type:String,id:String,action:String,payload:String=""){dao.audit(AuditEventEntity(UUID.randomUUID().toString(),type,id,action,currentEmployee.value?.id,"ANDROID",System.currentTimeMillis(),payload))}
  private fun autoBackup(){
   val root=setting("storage_root_uri")
-  if(root.isNotBlank()) DataBackup.backupLatest(getApplication(),root,includeMedia=false)
+  if(root.isNotBlank()&&setting("storage_write_enabled")!="false") DataBackup.backupLatest(getApplication(),root,includeMedia=false)
  }
  private fun autoBackupMedia(){
   val root=setting("storage_root_uri")
-  if(root.isNotBlank()) DataBackup.backupMediaLatest(getApplication(),root)
+  if(root.isNotBlank()&&setting("storage_write_enabled")!="false") DataBackup.backupMediaLatest(getApplication(),root)
  }
  private suspend fun autoMasterConfig(){
   val root=dao.allSettingsSnapshot().firstOrNull{it.key=="storage_root_uri"}?.value.orEmpty()
-  if(root.isBlank())return
+  val writes=dao.allSettingsSnapshot().firstOrNull{it.key=="storage_write_enabled"}?.value!="false"
+  if(root.isBlank()||!writes)return
   masterMutex.withLock {
    ConfigBackup.saveMaster(getApplication(),root)
   }
@@ -295,6 +296,17 @@ fun saveSetting(key:String,value:String){
   val safePayload=if(key=="bank_account")"updated" else value.take(120)
   audit("SETTING",key,"SAVE",safePayload)
   if(key!="master_config_uri"&&key!="autoback_tree_uri"&&key!="storage_root_uri")autoMasterConfig()
+ }
+}
+fun attachStorageRoot(uri:String,allowWrites:Boolean){
+ val e=currentEmployee.value?:return
+ if(e.role!="ADMIN"&&!e.canManageSystem)return
+ viewModelScope.launch{
+  db.withTransaction{
+   dao.saveSetting(AppSettingEntity("storage_root_uri",uri))
+   dao.saveSetting(AppSettingEntity("storage_write_enabled",allowWrites.toString()))
+  }
+  audit("STORAGE","POS0210","ATTACH","writes=$allowWrites")
  }
 }
 fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""

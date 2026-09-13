@@ -97,7 +97,7 @@ import kotlinx.coroutines.flow.Flow
 @Query("UPDATE PricingRuleEntity SET active=0") suspend fun deactivateAllPricingRules()
 @Query("UPDATE EmployeeEntity SET active=0") suspend fun deactivateAllEmployees()
 @Query("UPDATE PurchaseCategoryEntity SET active=0") suspend fun deactivateAllPurchaseCategories()
-@Query("DELETE FROM AppSettingEntity WHERE key NOT IN ('autoback_tree_uri','master_config_uri','storage_root_uri')") suspend fun clearConfigSettings()
+@Query("DELETE FROM AppSettingEntity WHERE key NOT IN ('autoback_tree_uri','master_config_uri','storage_root_uri','storage_write_enabled')") suspend fun clearConfigSettings()
 @Query("UPDATE EmployeeEntity SET active=:active WHERE id=:id") suspend fun setEmployeeActive(id:String,active:Boolean)
 @Query("UPDATE OrderBatchEntity SET status=:newStatus,sentAt=:sentAt WHERE id=:id AND status=:expected") suspend fun transitionBatch(id:String,expected:String,newStatus:String,sentAt:Long?):Int
 @Query("UPDATE OrderBatchEntity SET status='DELIVERED',deliveredAt=:at,deliveredBy=:employeeId WHERE id=:id AND status='WAITING'") suspend fun markDelivered(id:String,at:Long,employeeId:String):Int

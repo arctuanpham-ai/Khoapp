@@ -133,7 +133,7 @@ object ConfigBackup {
         })
         root.put("settings", JSONArray().apply {
             snapshot.settings
-                .filterNot { it.key == "autoback_tree_uri" || it.key == "storage_root_uri" || it.key == "master_config_uri" }
+                .filterNot { it.key == "autoback_tree_uri" || it.key == "storage_root_uri" || it.key == "master_config_uri" || it.key == "storage_write_enabled" }
                 .forEach { s -> put(JSONObject().apply { put("key", s.key); put("value", s.value) }) }
         })
 

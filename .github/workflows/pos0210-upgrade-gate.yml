@@ -17,6 +17,14 @@ jobs:
   upgrade-test:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 28
+            target: google_apis
+          - api: 35
+            target: aosp_atd
     steps:
       - name: Checkout alpha50 source
         uses: actions/checkout@v4
@@ -72,8 +80,8 @@ jobs:
       - name: Run real Android in-place upgrade gate
         uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
-          api-level: 35
-          target: aosp_atd
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
           arch: x86_64
           profile: pixel_2
           cores: 2
@@ -87,7 +95,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: alpha50-to-builder-candidate-upgrade-evidence-${{ github.sha }}
+          name: alpha50-to-builder-candidate-upgrade-evidence-api${{ matrix.api }}-${{ github.sha }}
           path: |
             /tmp/install50.txt
             /tmp/install51.txt

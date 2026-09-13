@@ -1180,7 +1180,7 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Nhật ký hệ thống", "Audit thao tác · người thực hiện · thời điểm · dữ liệu thay đổi") { vm.screen.value = "SETTINGS" }
             }
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
-            Text("POS0210 v1.0.0-alpha52-candidate2 · versionCode 63", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("POS0210 v1.0.0-alpha52-candidate3 · versionCode 64", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Text("Tương thích Android 8.0 (API 26) trở lên · Thiết bị hiện tại: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})", fontSize = 11.sp)
             if (Build.VERSION.SDK_INT < 26) Text("Thiết bị không được hỗ trợ. Cần Android 8.0 trở lên.", color = Color.Red, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(30.dp))
@@ -1191,28 +1191,39 @@ fun Manage(vm: PosViewModel) {
 @Composable
 fun BackupCenter(vm: PosViewModel) {
     val context = LocalContext.current
+    val appMenu by vm.menu.collectAsState()
+    val appBills by vm.bills.collectAsState()
     var message by remember { mutableStateOf("") }
     var refreshTick by remember { mutableStateOf(0) }
     var rootUri by remember { mutableStateOf(vm.setting("storage_root_uri")) }
     val savedRootUri = vm.setting("storage_root_uri")
+    val storageWritesEnabled = vm.setting("storage_write_enabled") != "false"
     LaunchedEffect(savedRootUri) {
         if (savedRootUri.isNotBlank()) rootUri = savedRootUri
     }
 
     val chooseRoot = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
-            runCatching {
+            val result = runCatching {
                 context.contentResolver.takePersistableUriPermission(
                     uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 )
+                SafPosStorage.ensureSelectedRoot(context, uri.toString()).getOrThrow()
             }
-            val result = SafPosStorage.ensureSelectedRoot(context, uri.toString())
             if (result.isSuccess) {
                 rootUri = uri.toString()
-                vm.saveSetting("storage_root_uri", uri.toString())
+                val existingMaster = ConfigBackup.findMaster(context, uri.toString()) != null
+                val existingData = DataBackup.findLatest(context, uri.toString()) != null
+                val existingMedia = DataBackup.findMediaLatest(context, uri.toString()) != null
+                val existingBackup = existingMaster || existingData || existingMedia
+                vm.attachStorageRoot(uri.toString(), allowWrites = !existingBackup)
                 refreshTick++
-                message = "Đã gắn thư mục POS0210. Nếu chưa có file, bấm GHI MASTER và BACKUP NGAY để tạo từ dữ liệu hiện tại."
+                message = if (existingBackup) {
+                    "Đã gắn lại cây POS0210 có backup cũ. Tạm khóa ghi tự động để không ghi đè; hãy KHÔI PHỤC TOÀN BỘ trước."
+                } else {
+                    "Đã gắn cây POS0210 mới và tạo CONFIG / DATA / ARCHIVE. Có thể ghi backup từ dữ liệu hiện tại."
+                }
             } else {
                 message = "Không gắn được thư mục: ${result.exceptionOrNull()?.message}"
             }
@@ -1263,6 +1274,9 @@ fun BackupCenter(vm: PosViewModel) {
     val mediaFound = remember(refreshTick, rootUri) {
         rootUri.isNotBlank() && DataBackup.findMediaLatest(context, rootUri) != null
     }
+    val rootAccess = remember(refreshTick, rootUri) {
+        rootUri.isNotBlank() && SafPosStorage.hasPersistedAccess(context, rootUri)
+    }
 
     Column {
         Header("Dữ liệu & Backup") { vm.screen.value = "MANAGE" }
@@ -1273,25 +1287,23 @@ fun BackupCenter(vm: PosViewModel) {
                 Column(Modifier.padding(16.dp)) {
                     Text("NƠI LƯU POS0210", fontWeight = FontWeight.Black, fontSize = 20.sp)
                     Text(
-                        if (rootUri.isBlank()) "CHƯA GẮN THƯ MỤC" else "ĐÃ GẮN THƯ MỤC",
+                        when {
+                            rootUri.isBlank() -> "CHƯA GẮN THƯ MỤC"
+                            !rootAccess -> "ĐÃ MẤT QUYỀN · CẦN GẮN LẠI"
+                            storageWritesEnabled -> "ĐÃ GẮN · ĐƯỢC PHÉP GHI BACKUP"
+                            else -> "ĐÃ GẮN · ĐANG KHÓA GHI ĐỂ BẢO VỆ BACKUP CŨ"
+                        },
                         Modifier.padding(vertical = 6.dp),
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        "Android không cho chọn trực tiếp thư mục gốc Download. App sẽ tự tạo trước:\n" +
-                        "Download/POS0210/CONFIG\nDownload/POS0210/DATA\nDownload/POS0210/ARCHIVE\n" +
-                        "Sau đó hãy mở Download → POS0210 và chọn chính thư mục POS0210.",
+                        "Trong cửa sổ hệ thống, mở Download rồi chọn hoặc tạo thư mục POS0210. " +
+                        "App sẽ tạo CONFIG / DATA / ARCHIVE bên trong bằng SAF. Không cần quyền truy cập toàn bộ bộ nhớ.",
                         fontSize = 13.sp
                     )
                     Button(
                         onClick = {
-                            val prep = PosStorage.ensureFolders(context)
-                            if (prep.isSuccess) {
-                                message = "Đã tạo/kiểm tra cây Download/POS0210. Hãy chọn chính thư mục POS0210."
-                                chooseRoot.launch(null)
-                            } else {
-                                message = "Không tạo được cây POS0210: ${prep.exceptionOrNull()?.message}"
-                            }
+                            chooseRoot.launch(null)
                         },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                     ) { Text(if (rootUri.isBlank()) "TẠO & GẮN THƯ MỤC POS0210" else "ĐỔI / GẮN LẠI POS0210") }
@@ -1300,10 +1312,18 @@ fun BackupCenter(vm: PosViewModel) {
 
             Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                 Column(Modifier.padding(16.dp)) {
+                    Text("DỮ LIỆU ĐANG DÙNG TRONG APP", fontWeight = FontWeight.Black, fontSize = 18.sp)
+                    Text("Menu: ${appMenu.size} món · Bill đã thanh toán: ${appBills.size}", Modifier.padding(top = 6.dp), fontWeight = FontWeight.Bold)
+                    Text("Các con số này phản ánh database đang mở trong app, không phụ thuộc việc đã gắn cây backup hay chưa.", fontSize = 12.sp)
+                }
+            }
+
+            Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                Column(Modifier.padding(16.dp)) {
                     Text("MASTER CONFIG", fontWeight = FontWeight.Black, fontSize = 20.sp)
                     Text("Menu · ảnh món · bàn · nhân viên/PIN · VietQR · máy in · phân mục", fontSize = 13.sp)
                     Text(
-                        "POS0210/CONFIG/POS0210_MASTER.0210\nTrạng thái: ${if (masterFound) "ĐÃ TÌM THẤY" else if (rootUri.isNotBlank()) "CHƯA CÓ FILE · BẤM GHI MASTER" else "CHƯA GẮN THƯ MỤC"}",
+                        "POS0210/CONFIG/POS0210_MASTER.0210\nFILE BACKUP: ${if (masterFound) "ĐÃ TÌM THẤY" else if (rootAccess) "CHƯA GHI FILE MASTER TRONG CÂY" else "KHÔNG THỂ KIỂM TRA · CẦN GẮN THƯ MỤC"}",
                         Modifier.padding(vertical = 8.dp),
                         fontWeight = FontWeight.Bold
                     )
@@ -1319,7 +1339,7 @@ fun BackupCenter(vm: PosViewModel) {
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        enabled = rootUri.isNotBlank()
+                        enabled = rootAccess && storageWritesEnabled
                     ) { Text("GHI MASTER NGAY") }
 
                     if (masterFound) {
@@ -1355,7 +1375,8 @@ fun BackupCenter(vm: PosViewModel) {
                     Text(
                         "POS0210/DATA/POS0210_DATA_LATEST.db\n" +
                         "POS0210/DATA/POS0210_MEDIA_LATEST.0210\n" +
-                        "DATA: ${if (dataFound) "ĐÃ CÓ" else "CHƯA CÓ"} · MEDIA: ${if (mediaFound) "ĐÃ CÓ" else "CHƯA CÓ"}",
+                        "FILE BACKUP DATA: ${if (dataFound) "ĐÃ TÌM THẤY" else if (rootAccess) "CHƯA GHI TRONG CÂY" else "KHÔNG THỂ KIỂM TRA"}\n" +
+                        "FILE BACKUP MEDIA: ${if (mediaFound) "ĐÃ TÌM THẤY" else if (rootAccess) "CHƯA GHI TRONG CÂY" else "KHÔNG THỂ KIỂM TRA"}",
                         Modifier.padding(vertical = 8.dp),
                         fontWeight = FontWeight.Bold
                     )
@@ -1371,7 +1392,7 @@ fun BackupCenter(vm: PosViewModel) {
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        enabled = rootUri.isNotBlank()
+                        enabled = rootAccess && storageWritesEnabled
                     ) { Text("BACKUP NGAY → DATA_LATEST") }
 
                     OutlinedButton(
@@ -1385,7 +1406,7 @@ fun BackupCenter(vm: PosViewModel) {
                             }
                         },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        enabled = rootUri.isNotBlank()
+                        enabled = rootAccess && storageWritesEnabled
                     ) { Text("TẠO SNAPSHOT ARCHIVE") }
 
                     if (dataFound) {
