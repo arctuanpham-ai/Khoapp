@@ -193,8 +193,9 @@ jobs:
           test ! -e candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosStorage.kt
           grep -q 'ACTION_OPEN_DOCUMENT_TREE\|OpenDocumentTree' candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
           grep -q 'takePersistableUriPermission' candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
-          grep -q 'DocumentFile\|DocumentsContract' candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/data/SafPosStorage.kt
-          grep -q 'ContentResolver' candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/data/SafPosStorage.kt
+          grep -q 'DocumentsContract' candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/data/SafPosStorage.kt
+          grep -q 'contentResolver' candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/data/SafPosStorage.kt
+          grep -q 'persistedUriPermissions' candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/data/SafPosStorage.kt
           ! grep -R 'Build.VERSION.SDK_INT.*29\|VERSION_CODES.Q' candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/data/SafPosStorage.kt candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/data/DataBackup.kt || exit 1
           grep -q 'versionCode = 64' candidate/POS0210/app/build.gradle.kts
           grep -q 'minSdk = 26' candidate/POS0210/app/build.gradle.kts
