@@ -82,7 +82,7 @@ object ConfigBackup {
         root.put("combos", JSONArray().apply {
             snapshot.combos.forEach { combo ->
                 val obj = JSONObject().apply {
-                    put("id", combo.id); put("name", combo.name); put("price", combo.price)
+                    put("id", combo.id); put("name", combo.name); put("price", combo.price); put("description", combo.description)
                     put("sortOrder", combo.sortOrder); put("active", combo.active)
                 }
                 if (!combo.imageUri.isNullOrBlank()) {
@@ -270,7 +270,8 @@ object ConfigBackup {
                             price = o.getLong("price"),
                             imageUri = localUri,
                             sortOrder = o.optInt("sortOrder"),
-                            active = o.optBoolean("active", true)
+                            active = o.optBoolean("active", true),
+                            description = o.optString("description", "")
                         )
                     )
                 }

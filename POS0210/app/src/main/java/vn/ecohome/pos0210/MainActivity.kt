@@ -328,16 +328,13 @@ fun Order(vm: PosViewModel, t: DiningTableEntity) {
                     val key = "combo:" + combo.id
                     val q = cart[key] ?: 0
                     val note = cartNotes[key].orEmpty()
+                    val parts by vm.comboItems(combo.id).collectAsState(initial = emptyList())
                     Card(
                         Modifier.fillMaxWidth().clickable { vm.addCombo(combo) },
                         colors = CardDefaults.cardColors(containerColor = if(note.isNotBlank()) Color(0xFFFFF0D8) else Color(0xFFFBF8F2))
                     ) {
                         Column {
-                            if (!combo.imageUri.isNullOrBlank()) {
-                                AsyncImage(model = combo.imageUri, contentDescription = combo.name, modifier = Modifier.fillMaxWidth().height(92.dp))
-                            } else {
-                                Box(Modifier.fillMaxWidth().height(70.dp), contentAlignment = Alignment.Center) { Text("COMBO", fontWeight = FontWeight.Black) }
-                            }
+                            ComboArtwork(combo, parts, ms, Modifier.fillMaxWidth().height(92.dp))
                             Column(Modifier.padding(8.dp)) {
                                 Text(combo.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 Text(money(combo.price), fontSize = 12.sp)
@@ -1183,7 +1180,7 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Nhật ký hệ thống", "Audit thao tác · người thực hiện · thời điểm · dữ liệu thay đổi") { vm.screen.value = "SETTINGS" }
             }
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
-            Text("POS0210 v1.0.0-alpha52-candidate1 · versionCode 62", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("POS0210 v1.0.0-alpha52-candidate2 · versionCode 63", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Text("Tương thích Android 8.0 (API 26) trở lên · Thiết bị hiện tại: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})", fontSize = 11.sp)
             if (Build.VERSION.SDK_INT < 26) Text("Thiết bị không được hỗ trợ. Cần Android 8.0 trở lên.", color = Color.Red, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(30.dp))
@@ -1728,6 +1725,7 @@ fun ComboManager(vm: PosViewModel) {
     val combos by vm.combos.collectAsState()
     val menu by vm.menu.collectAsState()
     var showAdd by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf<Pair<ComboEntity, Map<String, Int>>?>(null) }
     Column {
         Header("Combo") { vm.screen.value = "MANAGE" }
         Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
@@ -1738,16 +1736,17 @@ fun ComboManager(vm: PosViewModel) {
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
                 items(combos) { combo ->
+                    val parts by vm.comboItems(combo.id).collectAsState(initial = emptyList())
                     Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            if (!combo.imageUri.isNullOrBlank()) {
-                                AsyncImage(model = combo.imageUri, contentDescription = combo.name, modifier = Modifier.size(62.dp))
-                                Spacer(Modifier.width(10.dp))
-                            }
+                            ComboArtwork(combo, parts, menu, Modifier.size(width = 104.dp, height = 68.dp))
+                            Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(combo.name, fontWeight = FontWeight.Bold)
                                 Text(money(combo.price))
+                                if (combo.description.isNotBlank()) Text(combo.description, fontSize = 11.sp, maxLines = 2)
                                 ComboComponentNames(vm, combo.id, menu)
+                                TextButton(onClick = { editing = combo to parts.associate { it.menuItemId to it.qty } }) { Text("SỬA") }
                             }
                             Switch(checked = combo.active, onCheckedChange = { vm.toggleCombo(combo) })
                         }
@@ -1757,9 +1756,39 @@ fun ComboManager(vm: PosViewModel) {
         }
     }
     if (showAdd) {
-        ComboAddDialog(menu.filter { it.active }, onDismiss = { showAdd = false }) { name, price, imageUri, selected ->
-            vm.saveCombo(name, price, imageUri, selected)
+        ComboEditDialog(menu.filter { it.active }, null, emptyMap(), onDismiss = { showAdd = false }) { name, price, description, imageUri, selected ->
+            vm.saveCombo(name, price, description, imageUri, selected)
             showAdd = false
+        }
+    }
+    editing?.let { (combo, selected) ->
+        ComboEditDialog(menu.filter { it.active || it.id in selected }, combo, selected, onDismiss = { editing = null }) { name, price, description, imageUri, items ->
+            vm.saveCombo(name, price, description, imageUri, items, combo)
+            editing = null
+        }
+    }
+}
+
+@Composable
+fun ComboArtwork(combo: ComboEntity, parts: List<ComboItemEntity>, menu: List<MenuItemEntity>, modifier: Modifier) {
+    if (!combo.imageUri.isNullOrBlank()) {
+        AsyncImage(model = combo.imageUri, contentDescription = combo.name, modifier = modifier)
+        return
+    }
+    val componentImages = parts.flatMap { part -> List(part.qty.coerceIn(1, 2)) { menu.firstOrNull { it.id == part.menuItemId } } }.filterNotNull().take(2)
+    Surface(modifier, color = Tint, shape = RoundedCornerShape(8.dp)) {
+        if (componentImages.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("COMBO", fontWeight = FontWeight.Black, fontSize = 11.sp) }
+        } else {
+            Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                componentImages.forEachIndexed { index, item ->
+                    if (index > 0) Text("+", Modifier.padding(horizontal = 3.dp), fontWeight = FontWeight.Black, color = Coffee)
+                    Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                        if (!item.imageUri.isNullOrBlank()) AsyncImage(model = item.imageUri, contentDescription = item.name, modifier = Modifier.fillMaxSize())
+                        else Text(item.name.take(2).uppercase(), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    }
+                }
+            }
         }
     }
 }
@@ -1772,16 +1801,19 @@ fun ComboComponentNames(vm: PosViewModel, comboId: String, menu: List<MenuItemEn
 }
 
 @Composable
-fun ComboAddDialog(
+fun ComboEditDialog(
     menu: List<MenuItemEntity>,
+    initial: ComboEntity?,
+    initialItems: Map<String, Int>,
     onDismiss: () -> Unit,
-    onSave: (String, Long, String?, Map<String, Int>) -> Unit
+    onSave: (String, Long, String, String?, Map<String, Int>) -> Unit
 ) {
     val context = LocalContext.current
-    var name by remember { mutableStateOf("") }
-    var priceText by remember { mutableStateOf("") }
-    var imageUri by remember { mutableStateOf<String?>(null) }
-    val selected = remember { mutableStateMapOf<String, Int>() }
+    var name by remember(initial?.id) { mutableStateOf(initial?.name.orEmpty()) }
+    var priceText by remember(initial?.id) { mutableStateOf(initial?.price?.toString().orEmpty()) }
+    var description by remember(initial?.id) { mutableStateOf(initial?.description.orEmpty()) }
+    var imageUri by remember(initial?.id) { mutableStateOf(initial?.imageUri) }
+    val selected = remember(initial?.id) { mutableStateMapOf<String, Int>().apply { putAll(initialItems) } }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
@@ -1791,10 +1823,10 @@ fun ComboAddDialog(
     val normalTotal = selected.entries.sumOf { (id, q) -> (menu.firstOrNull { it.id == id }?.price ?: 0L) * q }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Tạo combo") },
+        title = { Text(if (initial == null) "Tạo combo" else "Sửa combo") },
         confirmButton = {
             Button(
-                onClick = { onSave(name, priceText.toLongOrNull() ?: 0L, imageUri, selected.toMap()) },
+                onClick = { onSave(name, priceText.toLongOrNull() ?: 0L, description, imageUri, selected.toMap()) },
                 enabled = name.isNotBlank() && (priceText.toLongOrNull() ?: 0L) > 0 && selected.isNotEmpty()
             ) { Text("LƯU COMBO") }
         },
@@ -1804,9 +1836,11 @@ fun ComboAddDialog(
                 item {
                     OutlinedTextField(name, { name = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Tên combo") })
                     OutlinedTextField(priceText, { priceText = it.filter(Char::isDigit) }, modifier = Modifier.fillMaxWidth(), label = { Text("Giá combo") })
+                    OutlinedTextField(description, { description = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Mô tả / ghi chú combo") }, minLines = 2)
                     OutlinedButton(onClick = { picker.launch(arrayOf("image/*")) }, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                         Text(if (imageUri == null) "＋ ẢNH COMBO" else "✓ ĐÃ CHỌN ẢNH")
                     }
+                    if (imageUri != null) TextButton(onClick = { imageUri = null }, modifier = Modifier.fillMaxWidth()) { Text("DÙNG ẢNH GHÉP TỪ CÁC MÓN") }
                     Text("Giá lẻ các món đã chọn: ${money(normalTotal)}", fontWeight = FontWeight.Bold)
                     val comboPrice = priceText.toLongOrNull() ?: 0L
                     if (comboPrice > 0 && normalTotal > comboPrice) Text("Tiết kiệm: ${money(normalTotal - comboPrice)}", fontSize = 12.sp)

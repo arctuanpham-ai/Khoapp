@@ -2,6 +2,7 @@ package vn.ecohome.pos0210
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.room.withTransaction
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -215,17 +216,23 @@ class PosViewModel(app:Application):AndroidViewModel(app){
    autoBackup();autoMasterConfig()
   }
  };
- fun saveCombo(name:String,price:Long,imageUri:String?,items:Map<String,Int>){
+ fun saveCombo(name:String,price:Long,description:String,imageUri:String?,items:Map<String,Int>,initial:ComboEntity?=null){
   val e=currentEmployee.value?:return
   if((e.role!="ADMIN"&&!e.canManageMenu)||name.isBlank()||price<=0||items.isEmpty())return
   viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
-   val id=UUID.randomUUID().toString()
-   val managed=runCatching{ManagedMedia.importImage(getApplication(),imageUri,"combo_"+id)}.getOrNull()
-   dao.saveCombo(ComboEntity(id,name.trim(),price,managed,combos.value.size+1,true))
-   items.filterValues{it>0}.forEach{(menuItemId,qty)->
-    dao.saveComboItem(ComboItemEntity(UUID.randomUUID().toString(),id,menuItemId,qty))
+   val id=initial?.id?:UUID.randomUUID().toString()
+   val managed=if(imageUri==initial?.imageUri) initial?.imageUri else runCatching{ManagedMedia.importImage(getApplication(),imageUri,"combo_"+id)}.getOrNull()
+   val cleanItems=items.filterValues{it>0}
+   db.withTransaction {
+    dao.saveCombo(ComboEntity(id,name.trim(),price,managed,initial?.sortOrder?:combos.value.size+1,initial?.active?:true,description.trim()))
+    if(initial!=null)dao.deleteComboItems(id)
+    cleanItems.forEach{(menuItemId,qty)->
+     dao.saveComboItem(ComboItemEntity(UUID.randomUUID().toString(),id,menuItemId,qty))
+    }
    }
-   audit("COMBO",id,"CREATE","name=${name.trim()},price=$price,items=${items.size}")
+   val action=if(initial==null)"CREATE" else "UPDATE"
+   val before=initial?.let{"name=${it.name},price=${it.price},description=${it.description}"}.orEmpty()
+   audit("COMBO",id,action,"$before -> name=${name.trim()},price=$price,description=${description.trim()},items=${cleanItems.size}")
    autoBackup();autoBackupMedia();autoMasterConfig()
   }
  }

@@ -6,7 +6,7 @@ import androidx.room.PrimaryKey
 @Entity data class AreaEntity(@PrimaryKey val id:String,val name:String,val sortOrder:Int=0,val active:Boolean=true)
 @Entity(indices=[Index("areaId")]) data class DiningTableEntity(@PrimaryKey val id:String,val areaId:String,val name:String,val sortOrder:Int=0,val active:Boolean=true)
 @Entity data class MenuCategoryEntity(@PrimaryKey val id:String,val name:String,val sortOrder:Int=0,val active:Boolean=true)
-@Entity data class ComboEntity(@PrimaryKey val id:String,val name:String,val price:Long,val imageUri:String?=null,val sortOrder:Int=0,val active:Boolean=true)
+@Entity data class ComboEntity(@PrimaryKey val id:String,val name:String,val price:Long,val imageUri:String?=null,val sortOrder:Int=0,val active:Boolean=true,val description:String="")
 @Entity(indices=[Index("comboId"),Index("menuItemId")]) data class ComboItemEntity(@PrimaryKey val id:String,val comboId:String,val menuItemId:String,val qty:Int=1)
 @Entity(indices=[Index("categoryId"),Index(value=["productCode"],unique=true)]) data class MenuItemEntity(@PrimaryKey val id:String,val categoryId:String,val name:String,val price:Long,val imageUri:String?=null,val sortOrder:Int=0,val active:Boolean=true,val productCode:String="",val description:String="")
 @Entity(indices=[Index(value=["tableId","status"])]) data class TableSessionEntity(@PrimaryKey val id:String,val tableId:String,val openedAt:Long,val openedBy:String,val status:String="OPEN",val version:Long=1)
