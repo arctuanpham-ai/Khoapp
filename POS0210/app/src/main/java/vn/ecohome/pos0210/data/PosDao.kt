@@ -1,6 +1,7 @@
 package vn.ecohome.pos0210.data
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
+data class TableServiceTimingRow(val sessionId:String,val firstOrderAt:Long?,val lastOrderSentAt:Long?,val sentBatchCount:Int,val waitingBatchCount:Int)
 @Dao interface PosDao{
 @Query("SELECT * FROM AreaEntity WHERE active=1 ORDER BY sortOrder,name") fun areas():Flow<List<AreaEntity>>
 @Query("SELECT * FROM DiningTableEntity WHERE active=1 ORDER BY sortOrder,name") fun tables():Flow<List<DiningTableEntity>>
@@ -13,6 +14,13 @@ import kotlinx.coroutines.flow.Flow
 @Query("SELECT * FROM EmployeeEntity ORDER BY name") fun employees():Flow<List<EmployeeEntity>>
 @Query("SELECT * FROM SupplierEntity ORDER BY name") fun suppliers():Flow<List<SupplierEntity>>
 @Query("SELECT * FROM TableSessionEntity WHERE status='OPEN'") fun openSessions():Flow<List<TableSessionEntity>>
+@Query("""SELECT s.id AS sessionId,
+MIN(CASE WHEN ob.status NOT IN ('DRAFT','CANCELLED') THEN COALESCE(ob.sentAt,ob.createdAt) END) AS firstOrderAt,
+MAX(CASE WHEN ob.status NOT IN ('DRAFT','CANCELLED') THEN COALESCE(ob.sentAt,ob.createdAt) END) AS lastOrderSentAt,
+COALESCE(SUM(CASE WHEN ob.status NOT IN ('DRAFT','CANCELLED') THEN 1 ELSE 0 END),0) AS sentBatchCount,
+COALESCE(SUM(CASE WHEN ob.status='WAITING' THEN 1 ELSE 0 END),0) AS waitingBatchCount
+FROM TableSessionEntity s LEFT JOIN OrderBatchEntity ob ON ob.sessionId=s.id
+WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<TableServiceTimingRow>>
 @Query("SELECT * FROM TableSessionEntity WHERE id=:id LIMIT 1") fun sessionById(id:String):Flow<TableSessionEntity?>
 @Query("SELECT * FROM TableSessionEntity WHERE tableId=:tableId AND status='OPEN' LIMIT 1") suspend fun openSessionForTable(tableId:String):TableSessionEntity?
 @Query("SELECT * FROM OrderBatchEntity WHERE sessionId=:sessionId ORDER BY sequence") fun batches(sessionId:String):Flow<List<OrderBatchEntity>>

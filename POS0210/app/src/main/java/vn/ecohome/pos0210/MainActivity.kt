@@ -170,7 +170,16 @@ fun Tables(vm: PosViewModel) {
     val ts by vm.tables.collectAsState()
     val ss by vm.sessions.collectAsState()
     val waiting by vm.waitingBatches.collectAsState()
+    val serviceTimings by vm.tableServiceTimings.collectAsState()
     val areas by vm.areas.collectAsState()
+    var timerNow by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val now = System.currentTimeMillis()
+            kotlinx.coroutines.delay((60_000L - now % 60_000L).coerceAtLeast(1_000L))
+            timerNow = System.currentTimeMillis()
+        }
+    }
     val current by vm.currentEmployee.collectAsState()
     val canReport = current?.role == "ADMIN" || current?.canViewReport == true
     val waitingOrdered = waiting.sortedWith(compareBy<OrderBatchEntity> { it.serviceNo }.thenBy { it.createdAt })
@@ -216,6 +225,11 @@ fun Tables(vm: PosViewModel) {
                     val waitingForTable = open?.let { s -> waiting.filter { it.sessionId == s.id } } ?: emptyList()
                     val nextService = waitingForTable.minWithOrNull(compareBy<OrderBatchEntity> { it.serviceNo }.thenBy { it.createdAt })
                     val priorityRank = nextService?.let { waitingRankById[it.id] }
+                    val serviceTimer = open?.let { session ->
+                        serviceTimings.firstOrNull { it.sessionId == session.id }?.let { timing ->
+                            serviceTimerPresentation(timing.firstOrderAt, timing.lastOrderSentAt, timing.sentBatchCount, timing.waitingBatchCount, timerNow)
+                        }
+                    }
                     Card(
                         Modifier.fillMaxWidth().height(cardHeight).clickable { vm.selectTable(tb) },
                         colors = CardDefaults.cardColors(
@@ -258,8 +272,18 @@ fun Tables(vm: PosViewModel) {
                                         fontWeight = FontWeight.Black,
                                         fontSize = 11.sp
                                     )
-                                } else if (cardHeight > 95.dp) {
-                                    Text(time(open.openedAt), fontSize = 10.sp)
+                                }
+                                serviceTimer?.let { timer ->
+                                    val timerColor = when (timer.ageBand) {
+                                        ServiceAgeBand.NORMAL -> Coffee
+                                        ServiceAgeBand.WARM -> Color(0xFF8A6A2F)
+                                        ServiceAgeBand.ORANGE -> Color(0xFFA65E2E)
+                                        ServiceAgeBand.OVERDUE -> Color(0xFF9A4B3D)
+                                    }
+                                    Text("⏱ ${timer.totalMinutes}' · ${timer.statusLabel}", color = timerColor, fontWeight = FontWeight.Bold, fontSize = if (columns >= 4) 10.sp else 11.sp)
+                                    timer.lastOrderMinutes?.let { minutes ->
+                                        Text("+ món mới ${minutes}'", color = timerColor, fontSize = if (columns >= 4) 9.sp else 10.sp)
+                                    }
                                 }
                             }
                         }
@@ -1180,7 +1204,7 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Nhật ký hệ thống", "Audit thao tác · người thực hiện · thời điểm · dữ liệu thay đổi") { vm.screen.value = "SETTINGS" }
             }
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
-            Text("POS0210 v1.0.0-alpha52-candidate3 · versionCode 64", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("POS0210 v1.0.0-alpha52-candidate4 · versionCode 65", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Text("Tương thích Android 8.0 (API 26) trở lên · Thiết bị hiện tại: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})", fontSize = 11.sp)
             if (Build.VERSION.SDK_INT < 26) Text("Thiết bị không được hỗ trợ. Cần Android 8.0 trở lên.", color = Color.Red, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(30.dp))
