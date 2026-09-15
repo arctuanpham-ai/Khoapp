@@ -40,7 +40,9 @@ data class PrinterTransportProfile(
     }
     companion object{
         // Conservative pacing for the small Bluetooth receive buffer used by XP-NB8H.
-        val XP_NB8H_58=PrinterTransportProfile(8,60,2048,150,6,false,200,1200)
+        // About 20 mm of combined raster whitespace + line feed: enough to tear
+        // cleanly without wasting the roughly 45-50 mm produced by candidate9.
+        val XP_NB8H_58=PrinterTransportProfile(8,60,2048,150,2,false,96,1200)
         // Preserve candidate7 throughput/feed behavior for generic 80mm printers.
         val STANDARD_80=PrinterTransportProfile(96,0,32768,0,3,false,0,0)
     }

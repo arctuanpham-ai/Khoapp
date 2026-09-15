@@ -50,13 +50,13 @@ class EscPosRasterTest{
 
     @Test fun xpNb8hAddsRasterWhitespaceBeforeFeed(){
         val blank=EscPosRaster.blank(PrinterProfile.MM58,PrinterTransportProfile.XP_NB8H_58.trailingBlankDots)
-        assertEquals(25,blank.size)
+        assertEquals(12,blank.size)
         assertTrue(blank.all{it.size==392})
         assertTrue(blank.all{command->command.drop(8).all{it==0.toByte()}})
     }
 
-    @Test fun noCutterGetsSixLineManualFeedAndCutterProfileStaysShort(){
-        assertArrayEquals(byteArrayOf(0x1B,0x64,0x06),EscPosTransport.trailingCommand(PrinterTransportProfile.XP_NB8H_58))
+    @Test fun noCutterGetsCompactManualFeedAndCutterProfileStaysShort(){
+        assertArrayEquals(byteArrayOf(0x1B,0x64,0x02),EscPosTransport.trailingCommand(PrinterTransportProfile.XP_NB8H_58))
         val cutter=PrinterTransportProfile.STANDARD_80.copy(trailingFeedLines=1,hasAutoCutter=true)
         assertArrayEquals(byteArrayOf(0x1B,0x64,0x01,0x1D,0x56,0x00),EscPosTransport.trailingCommand(cutter))
     }
