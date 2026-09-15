@@ -5,7 +5,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-@Database(entities=[EmployeeEntity::class,AreaEntity::class,DiningTableEntity::class,MenuCategoryEntity::class,ComboEntity::class,ComboItemEntity::class,MenuItemEntity::class,TableSessionEntity::class,OrderBatchEntity::class,OrderItemEntity::class,BillEntity::class,PaymentEntity::class,CustomerEntity::class,CustomerPointTransactionEntity::class,PricingRuleEntity::class,BillAdjustmentEntity::class,SupplierEntity::class,PurchaseEntity::class,PurchaseCategoryEntity::class,PurchaseItemEntity::class,PrintJobEntity::class,AuditEventEntity::class,AppSettingEntity::class],version=12,exportSchema=false)
+@Database(entities=[EmployeeEntity::class,AreaEntity::class,DiningTableEntity::class,MenuCategoryEntity::class,ComboEntity::class,ComboItemEntity::class,MenuItemEntity::class,TableSessionEntity::class,OrderBatchEntity::class,OrderItemEntity::class,BillEntity::class,PaymentEntity::class,CustomerEntity::class,CustomerPointTransactionEntity::class,PricingRuleEntity::class,BillAdjustmentEntity::class,SupplierEntity::class,PurchaseEntity::class,PurchaseCategoryEntity::class,PurchaseItemEntity::class,MonthlyAccountingEntity::class,ProfitPartnerEntity::class,PrintJobEntity::class,AuditEventEntity::class,AppSettingEntity::class],version=13,exportSchema=false)
 abstract class PosDatabase:RoomDatabase(){
  abstract fun dao():PosDao
  companion object{
@@ -103,9 +103,19 @@ abstract class PosDatabase:RoomDatabase(){
     db.execSQL("ALTER TABLE ComboEntity ADD COLUMN description TEXT NOT NULL DEFAULT ''")
    }
   }
+  private val MIGRATION_12_13=object:Migration(12,13){
+   override fun migrate(db:SupportSQLiteDatabase){
+    db.execSQL("ALTER TABLE PurchaseEntity ADD COLUMN expenseCategory TEXT NOT NULL DEFAULT 'UNCLASSIFIED'")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_PurchaseEntity_expenseCategory ON PurchaseEntity(expenseCategory)")
+    db.execSQL("CREATE TABLE IF NOT EXISTS MonthlyAccountingEntity (monthKey TEXT NOT NULL, cogs INTEGER, cogsSource TEXT NOT NULL, openingCash INTEGER NOT NULL, reserveBasisPoints INTEGER NOT NULL, PRIMARY KEY(monthKey))")
+    db.execSQL("CREATE TABLE IF NOT EXISTS ProfitPartnerEntity (id TEXT NOT NULL, name TEXT NOT NULL, shareBasisPoints INTEGER NOT NULL, sortOrder INTEGER NOT NULL, active INTEGER NOT NULL, PRIMARY KEY(id))")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_ProfitPartnerEntity_active ON ProfitPartnerEntity(active)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_ProfitPartnerEntity_sortOrder ON ProfitPartnerEntity(sortOrder)")
+   }
+  }
   fun get(context:Context):PosDatabase=instance?:synchronized(this){
    instance?:Room.databaseBuilder(context.applicationContext,PosDatabase::class.java,"pos0210.db")
-    .addMigrations(MIGRATION_3_4,MIGRATION_4_5,MIGRATION_5_6,MIGRATION_6_7,MIGRATION_7_8,MIGRATION_8_9,MIGRATION_9_10,MIGRATION_10_11,MIGRATION_11_12)
+    .addMigrations(MIGRATION_3_4,MIGRATION_4_5,MIGRATION_5_6,MIGRATION_6_7,MIGRATION_7_8,MIGRATION_8_9,MIGRATION_9_10,MIGRATION_10_11,MIGRATION_11_12,MIGRATION_12_13)
     .build().also{instance=it}
   }
   fun closeForRestore(){synchronized(this){instance?.close();instance=null}}

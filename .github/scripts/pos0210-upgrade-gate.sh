@@ -67,9 +67,9 @@ sleep 2
 echo '=== Install candidate IN PLACE (no uninstall) ==='
 adb install -r /tmp/alpha51.apk | tee /tmp/install51.txt
 grep -q Success /tmp/install51.txt
-adb shell dumpsys package "$PKG" | grep -E 'versionName=1.0.0-alpha52-candidate3|versionCode=64'
+adb shell dumpsys package "$PKG" | grep -E 'versionName=1.0.0-alpha52-candidate5|versionCode=66'
 
-echo '=== Launch candidate to execute Room migration 10 -> 12 ==='
+echo '=== Launch candidate to execute Room migration to 13 ==='
 adb logcat -c
 adb shell am start -W -n "$ACT"
 sleep 8
@@ -109,17 +109,23 @@ for k,v in checks.items():
     exp=tuple(before['markers'][k]) if isinstance(before['markers'][k],list) else before['markers'][k]
     if v != exp: errors.append(f'marker changed {k}: expected {exp}, got {v}')
 uv=one('pragma user_version')[0]
-if uv != 12: errors.append(f'user_version expected 12 got {uv}')
+if uv != 13: errors.append(f'user_version expected 13 got {uv}')
 cols={r[1] for r in db.execute('pragma table_info(MenuItemEntity)')}
 for col in ('productCode','description'):
     if col not in cols: errors.append(f'missing MenuItemEntity.{col}')
 combo_cols={r[1] for r in db.execute('pragma table_info(ComboEntity)')}
 if 'description' not in combo_cols: errors.append('missing ComboEntity.description')
+purchase_cols={r[1] for r in db.execute('pragma table_info(PurchaseEntity)')}
+if 'expenseCategory' not in purchase_cols: errors.append('missing PurchaseEntity.expenseCategory')
+old_classified=one("select count(*) from PurchaseEntity where expenseCategory!='UNCLASSIFIED'")[0]
+if old_classified: errors.append(f'{old_classified} legacy purchases were unexpectedly classified')
+for table in ('MonthlyAccountingEntity','ProfitPartnerEntity'):
+    if not one("select count(*) from sqlite_master where type='table' and name=?",(table,))[0]: errors.append(f'missing {table}')
 blank=one("select count(*) from MenuItemEntity where productCode is null or trim(productCode)='' ")[0]
 dup=one("select count(*) from (select productCode,count(*) c from MenuItemEntity group by productCode having c>1)")[0]
 if blank: errors.append(f'{blank} menu rows have blank productCode')
 if dup: errors.append(f'{dup} duplicate productCode groups')
-result={'before_counts':before['counts'],'after_counts':after_counts,'checks':checks,'user_version':uv,'blank_codes':blank,'duplicate_code_groups':dup,'errors':errors}
+result={'before_counts':before['counts'],'after_counts':after_counts,'checks':checks,'user_version':uv,'blank_codes':blank,'duplicate_code_groups':dup,'legacy_non_unclassified':old_classified,'errors':errors}
 json.dump(result,open('/tmp/after.json','w'),indent=2,default=list); print(json.dumps(result,indent=2,default=list)); db.close()
 if errors: sys.exit('\n'.join(errors))
 PY
