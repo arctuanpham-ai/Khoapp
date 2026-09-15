@@ -21,6 +21,18 @@ object ExpenseCategories {
     }
 }
 
+object FinancialTransactionTypes {
+    const val OPERATING_EXPENSE="OPERATING_EXPENSE"
+    const val ASSET_PURCHASE="ASSET_PURCHASE"
+    const val CAPITAL_INJECTION="CAPITAL_INJECTION"
+    const val PROFIT_WITHDRAWAL="PROFIT_WITHDRAWAL"
+    const val OTHER_ADJUSTMENT="OTHER_ADJUSTMENT"
+    val all=listOf(OPERATING_EXPENSE,ASSET_PURCHASE,CAPITAL_INJECTION,PROFIT_WITHDRAWAL,OTHER_ADJUSTMENT)
+    fun label(v:String)=when(v){OPERATING_EXPENSE->"Chi phí vận hành";ASSET_PURCHASE->"Mua tài sản";CAPITAL_INJECTION->"Góp vốn";PROFIT_WITHDRAWAL->"Rút lợi nhuận";else->"Điều chỉnh khác"}
+    fun legacyExpenseCode(v:String,operatingCode:String)=when(v){ASSET_PURCHASE->ExpenseCategories.CAPITAL_ASSET;CAPITAL_INJECTION->ExpenseCategories.OWNER_CONTRIBUTION;PROFIT_WITHDRAWAL->ExpenseCategories.PROFIT_WITHDRAWAL;OTHER_ADJUSTMENT->ExpenseCategories.UNCLASSIFIED;else->operatingCode}
+    fun fromLegacy(code:String)=when(code){ExpenseCategories.CAPITAL_ASSET->ASSET_PURCHASE;ExpenseCategories.OWNER_CONTRIBUTION,ExpenseCategories.WORKING_CAPITAL->CAPITAL_INJECTION;ExpenseCategories.PROFIT_WITHDRAWAL->PROFIT_WITHDRAWAL;ExpenseCategories.UNCLASSIFIED->OTHER_ADJUSTMENT;else->OPERATING_EXPENSE}
+}
+
 data class ProfitShareInput(val id:String,val name:String,val shareBasisPoints:Int)
 data class PartnerProfit(val id:String,val name:String,val shareBasisPoints:Int,val amount:Long)
 data class MonthlyAccountingInput(

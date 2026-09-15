@@ -54,4 +54,10 @@ class MonthlyAccountingTest {
   assertEquals(69_000_000L,p.remainingToRecover);assertEquals(3100,p.paybackBasisPoints);assertEquals(6.9,p.estimatedMonthsRemaining!!,0.001)
   assertNull(calculatePayback(100,0,listOf(-10L,0L)).estimatedMonthsRemaining)
  }
+ @Test fun legacyTransactionClassificationRemainsReadable(){
+  assertEquals(FinancialTransactionTypes.OPERATING_EXPENSE,FinancialTransactionTypes.fromLegacy(ExpenseCategories.FIXED_EXPENSE))
+  assertEquals(FinancialTransactionTypes.ASSET_PURCHASE,FinancialTransactionTypes.fromLegacy(ExpenseCategories.CAPITAL_ASSET))
+  assertEquals(FinancialTransactionTypes.CAPITAL_INJECTION,FinancialTransactionTypes.fromLegacy(ExpenseCategories.OWNER_CONTRIBUTION))
+  assertEquals(FinancialTransactionTypes.PROFIT_WITHDRAWAL,FinancialTransactionTypes.fromLegacy(ExpenseCategories.PROFIT_WITHDRAWAL))
+ }
 }

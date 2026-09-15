@@ -2212,6 +2212,7 @@ fun Purchases(vm: PosViewModel) {
     }
     val purchases by vm.purchases.collectAsState()
     val purchaseCategories by vm.purchaseCategories.collectAsState()
+    val assetCategories by vm.assetCategories.collectAsState()
     val context = LocalContext.current
     var itemName by remember { mutableStateOf("") }
     var qtyText by remember { mutableStateOf("") }
@@ -2221,7 +2222,10 @@ fun Purchases(vm: PosViewModel) {
     var note by remember { mutableStateOf("") }
     var invoiceImage by remember { mutableStateOf<String?>(null) }
     var selectedPurchase by remember { mutableStateOf<PurchaseEntity?>(null) }
+    var transactionType by remember { mutableStateOf(FinancialTransactionTypes.OPERATING_EXPENSE) }
     var expenseCategory by remember { mutableStateOf(ExpenseCategories.UNCLASSIFIED) }
+    var selectedAssetCategory by remember(assetCategories){mutableStateOf(assetCategories.firstOrNull())}
+    var usefulLifeText by remember{mutableStateOf("")};var liquidationText by remember{mutableStateOf("")}
     var selectedCategoryId by remember(purchaseCategories) {
         mutableStateOf(purchaseCategories.firstOrNull()?.id ?: "pc_production")
     }
@@ -2255,13 +2259,24 @@ fun Purchases(vm: PosViewModel) {
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("Phân mục", Modifier.weight(1f), fontWeight = FontWeight.Black, fontSize = 18.sp)
-            OutlinedButton(onClick = { showCategoryManager = true }) { Text("QUẢN LÝ PHÂN MỤC") }
+            Text("Giao dịch tài chính", Modifier.weight(1f), fontWeight = FontWeight.Black, fontSize = 18.sp)
+            OutlinedButton(onClick = { showCategoryManager = true }) { Text("DANH MỤC CHI TIẾT") }
         }
 
         LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
             item {
-                if (purchaseCategories.isNotEmpty()) {
+                Text("1. Loại giao dịch", fontWeight = FontWeight.Bold)
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)){
+                    FinancialTransactionTypes.all.forEach{value->FilterChip(transactionType==value,{transactionType=value;expenseCategory=FinancialTransactionTypes.legacyExpenseCode(value,ExpenseCategories.OTHER_EXPENSE)},{Text(FinancialTransactionTypes.label(value))})}
+                }
+                if(transactionType==FinancialTransactionTypes.OPERATING_EXPENSE){
+                    Text("Nhóm chi phí",Modifier.padding(top=8.dp),fontWeight=FontWeight.Bold)
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)){
+                        listOf(ExpenseCategories.INVENTORY_PURCHASE,ExpenseCategories.FIXED_EXPENSE,ExpenseCategories.VARIABLE_EXPENSE,ExpenseCategories.OTHER_EXPENSE).forEach{value->FilterChip(expenseCategory==value,{expenseCategory=value},{Text(ExpenseCategories.label(value))})}
+                    }
+                }
+                if (purchaseCategories.isNotEmpty() && transactionType in setOf(FinancialTransactionTypes.OPERATING_EXPENSE,FinancialTransactionTypes.OTHER_ADJUSTMENT)) {
+                    Text("2. Phân mục chi tiết",Modifier.padding(top=8.dp),fontWeight=FontWeight.Bold)
                     Row(
                         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -2278,13 +2293,13 @@ fun Purchases(vm: PosViewModel) {
                         }
                     }
                 }
-                Text("Loại giao dịch", Modifier.padding(top = 10.dp), fontWeight = FontWeight.Bold)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    ExpenseCategories.all.forEach { value ->
-                        FilterChip(expenseCategory == value, { expenseCategory = value }, { Text(ExpenseCategories.label(value)) })
-                    }
+                if(transactionType==FinancialTransactionTypes.ASSET_PURCHASE){
+                    Text("2. Nhóm tài sản",Modifier.padding(top=8.dp),fontWeight=FontWeight.Bold)
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)){assetCategories.forEach{c->FilterChip(selectedAssetCategory?.id==c.id,{selectedAssetCategory=c;if(usefulLifeText.isBlank())usefulLifeText=c.defaultUsefulLifeMonths.toString()},{Text(c.name)})}}
+                    selectedAssetCategory?.let{Text("Thời gian khấu hao tham khảo: ${it.minUsefulLifeMonths}–${it.maxUsefulLifeMonths} tháng",fontSize=12.sp,fontWeight=FontWeight.Bold)}
+                    OutlinedTextField(usefulLifeText,{usefulLifeText=it.filter(Char::isDigit)},Modifier.fillMaxWidth(),label={Text("Thời gian khấu hao (tháng)")})
+                    OutlinedTextField(liquidationText,{liquidationText=it.filter(Char::isDigit)},Modifier.fillMaxWidth(),label={Text("Giá trị thanh lý dự kiến")})
                 }
-
                 OutlinedTextField(
                     dateText,
                     { dateText = it },
@@ -2356,8 +2371,9 @@ fun Purchases(vm: PosViewModel) {
                             supplierName = supplier,
                             imageUri = invoiceImage,
                             categoryId = selectedCategoryId,
-                            expenseCategory = expenseCategory
+                            expenseCategory = FinancialTransactionTypes.legacyExpenseCode(transactionType,expenseCategory)
                         )
+                        if(transactionType==FinancialTransactionTypes.ASSET_PURCHASE){selectedAssetCategory?.let{c->vm.saveAsset(AssetEntity(UUID.randomUUID().toString(),itemName.trim(),c.id,parsedAt,unitPrice?:0,qty?.toInt()?.coerceAtLeast(1)?:1,total,usefulLifeMonths=usefulLifeText.toIntOrNull()?:c.defaultUsefulLifeMonths,estimatedLiquidationValue=liquidationText.toLongOrNull()?:0,note=note))}}
                         message = "Đã tạo phiếu nhập · ${selectedCategory?.name ?: ""} · ${money(total)}"
                         itemName = ""
                         qtyText = ""
@@ -2366,7 +2382,7 @@ fun Purchases(vm: PosViewModel) {
                         invoiceImage = null
                     },
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                    enabled = selectedCategoryId.isNotBlank() && itemName.isNotBlank() && (qty ?: 0.0) > 0 && (unitPrice ?: 0L) > 0
+                    enabled = selectedCategoryId.isNotBlank() && itemName.isNotBlank() && (qty ?: 0.0) > 0 && (unitPrice ?: 0L) > 0 && (transactionType!=FinancialTransactionTypes.ASSET_PURCHASE||selectedAssetCategory!=null)
                 ) { Text("TẠO PHIẾU NHẬP") }
 
                 if (message.isNotBlank()) {
@@ -2486,11 +2502,12 @@ fun PurchaseDetailDialog(vm: PosViewModel, p: PurchaseEntity, onDismiss: () -> U
                 item {
                     Text("Nhà cung cấp: $supplierName")
                     Text("Người nhập: $enteredBy")
-                    Text("Phân loại: ${ExpenseCategories.label(p.expenseCategory)}", fontWeight = FontWeight.Bold)
+                    Text("Loại giao dịch: ${FinancialTransactionTypes.label(FinancialTransactionTypes.fromLegacy(p.expenseCategory))}", fontWeight = FontWeight.Bold)
+                    Text("Nhóm báo cáo: ${ExpenseCategories.label(p.expenseCategory)}", fontSize=12.sp)
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                         ExpenseCategories.all.forEach { value -> FilterChip(expenseCategory==value,{expenseCategory=value},{Text(ExpenseCategories.label(value))}) }
                     }
-                    Button(onClick={vm.updatePurchaseExpenseCategory(p,expenseCategory)},enabled=expenseCategory!=p.expenseCategory,modifier=Modifier.fillMaxWidth()) { Text("LƯU PHÂN LOẠI") }
+                    Button(onClick={vm.updatePurchaseExpenseCategory(p,expenseCategory)},enabled=expenseCategory!=p.expenseCategory,modifier=Modifier.fillMaxWidth()) { Text("LƯU LOẠI GIAO DỊCH") }
                     if (p.note.isNotBlank()) Text("Ghi chú: ${p.note}")
                     Spacer(Modifier.height(8.dp))
                 }
