@@ -351,6 +351,7 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
   val e=currentEmployee.value?:return
   if(!e.canPurchase&&e.role!="ADMIN")return
   if(name.isBlank()||qty<=0||unitPrice<=0)return
+  if(asset!=null&&(asset.usefulLifeMonths<=0||asset.residualValue !in 0..asset.totalCost||asset.totalCost<=0))return
   viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
    val id=UUID.randomUUID().toString()
    val managed=runCatching{ManagedMedia.importImage(getApplication(),imageUri,"invoice_"+id)}.getOrNull()
