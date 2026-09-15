@@ -60,11 +60,13 @@ jobs:
       - name: Build alpha50 and alpha51
         run: |
           (cd alpha50/POS0210 && gradle --no-daemon :app:assembleDebug --stacktrace)
-          (cd alpha51/POS0210 && gradle --no-daemon :app:assembleDebug --stacktrace)
+          (cd alpha51/POS0210 && gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace)
           cp alpha50/POS0210/app/build/outputs/apk/debug/app-debug.apk /tmp/alpha50.apk
           cp alpha51/POS0210/app/build/outputs/apk/debug/app-debug.apk /tmp/alpha51.apk
+          cp alpha51/POS0210/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk /tmp/alpha51-androidTest.apk
           test -s /tmp/alpha50.apk
           test -s /tmp/alpha51.apk
+          test -s /tmp/alpha51-androidTest.apk
           $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose --print-certs /tmp/alpha50.apk
           $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose --print-certs /tmp/alpha51.apk
 
@@ -106,5 +108,7 @@ jobs:
             /tmp/after.json
             /tmp/window.xml
             /tmp/logcat.txt
+            /tmp/install_android_test.txt
+            /tmp/table_card_tests.txt
           if-no-files-found: warn
           retention-days: 30

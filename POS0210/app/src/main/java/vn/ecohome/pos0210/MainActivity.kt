@@ -199,27 +199,7 @@ fun Tables(vm: PosViewModel) {
             }
         }
 
-        BoxWithConstraints(
-            Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-        ) {
-            val count = ts.size.coerceAtLeast(1)
-            val columns = when {
-                count <= 4 -> 2
-                count <= 9 -> 3
-                count <= 16 -> 4
-                else -> 5
-            }
-            val rows = ((count + columns - 1) / columns).coerceAtLeast(1)
-            val rawHeight = (maxHeight - 8.dp * (rows - 1).toFloat()) / rows.toFloat()
-            val cardHeight = rawHeight.coerceIn(76.dp, 150.dp)
-
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(columns),
-                modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                gridItems(ts, key = { it.id }) { tb ->
+        val tableCards = ts.map { tb ->
                     val open = ss.firstOrNull { it.tableId == tb.id }
                     val areaName = areas.firstOrNull { it.id == tb.areaId }?.name ?: tb.areaId
                     val waitingForTable = open?.let { s -> waiting.filter { it.sessionId == s.id } } ?: emptyList()
@@ -230,67 +210,9 @@ fun Tables(vm: PosViewModel) {
                             serviceTimerPresentation(timing.firstOrderAt, timing.lastOrderSentAt, timing.sentBatchCount, timing.waitingBatchCount, timerNow)
                         }
                     }
-                    Card(
-                        Modifier.fillMaxWidth().height(cardHeight).clickable { vm.selectTable(tb) },
-                        colors = CardDefaults.cardColors(
-                            containerColor = when {
-                                priorityRank == 0 -> WaitingPriority1
-                                priorityRank == 1 -> WaitingPriority2
-                                nextService != null -> WaitingDelivery
-                                open == null -> Tint
-                                else -> Occupied
-                            }
-                        )
-                    ) {
-                        Column(
-                            Modifier.fillMaxSize().padding(8.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Text(
-                                tb.name,
-                                fontWeight = FontWeight.Black,
-                                fontSize = if (columns >= 4) 16.sp else 19.sp
-                            )
-                            Text(areaName, fontSize = if (columns >= 4) 10.sp else 11.sp)
-                            Spacer(Modifier.height(4.dp))
-                            if (open == null) {
-                                Text("Trống", fontSize = if (columns >= 4) 12.sp else 14.sp)
-                            } else {
-                                Text(
-                                    "● CÓ KHÁCH",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = if (columns >= 4) 11.sp else 13.sp
-                                )
-                                if (nextService != null) {
-                                    Text(
-                                        when (priorityRank) {
-                                            0 -> "#${nextService.serviceNo.toString().padStart(3,'0')} · ƯU TIÊN 1"
-                                            1 -> "#${nextService.serviceNo.toString().padStart(3,'0')} · ƯU TIÊN 2"
-                                            else -> "#${nextService.serviceNo.toString().padStart(3,'0')} · CHỜ GIAO"
-                                        },
-                                        fontWeight = FontWeight.Black,
-                                        fontSize = 11.sp
-                                    )
-                                }
-                                serviceTimer?.let { timer ->
-                                    val timerColor = when (timer.ageBand) {
-                                        ServiceAgeBand.NORMAL -> Coffee
-                                        ServiceAgeBand.WARM -> Color(0xFF8A6A2F)
-                                        ServiceAgeBand.ORANGE -> Color(0xFFA65E2E)
-                                        ServiceAgeBand.OVERDUE -> Color(0xFF9A4B3D)
-                                    }
-                                    Text("⏱ ${timer.totalMinutes}' · ${timer.statusLabel}", color = timerColor, fontWeight = FontWeight.Bold, fontSize = if (columns >= 4) 10.sp else 11.sp)
-                                    timer.lastOrderMinutes?.let { minutes ->
-                                        Text("+ món mới ${minutes}'", color = timerColor, fontSize = if (columns >= 4) 9.sp else 10.sp)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+                    TableCardUi(tb.id,tb.name,areaName,open!=null,nextService?.serviceNo,priorityRank,serviceTimer)
         }
+        ResponsiveTableGrid(tableCards,Modifier.weight(1f).fillMaxWidth().padding(horizontal=12.dp,vertical=8.dp)){id->ts.firstOrNull{it.id==id}?.let(vm::selectTable)}
 
         if (waiting.isNotEmpty()) {
             Button(
@@ -1204,7 +1126,7 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Nhật ký hệ thống", "Audit thao tác · người thực hiện · thời điểm · dữ liệu thay đổi") { vm.screen.value = "SETTINGS" }
             }
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
-            Text("POS0210 v1.0.0-alpha52-candidate5 · versionCode 66", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("POS0210 v1.0.0-alpha52-candidate6 · versionCode 67", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Text("Tương thích Android 8.0 (API 26) trở lên · Thiết bị hiện tại: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})", fontSize = 11.sp)
             if (Build.VERSION.SDK_INT < 26) Text("Thiết bị không được hỗ trợ. Cần Android 8.0 trở lên.", color = Color.Red, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(30.dp))

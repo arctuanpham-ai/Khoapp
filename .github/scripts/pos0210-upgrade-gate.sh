@@ -67,7 +67,7 @@ sleep 2
 echo '=== Install candidate IN PLACE (no uninstall) ==='
 adb install -r /tmp/alpha51.apk | tee /tmp/install51.txt
 grep -q Success /tmp/install51.txt
-adb shell dumpsys package "$PKG" | grep -E 'versionName=1.0.0-alpha52-candidate5|versionCode=66'
+adb shell dumpsys package "$PKG" | grep -E 'versionName=1.0.0-alpha52-candidate6|versionCode=67'
 
 echo '=== Launch candidate to execute Room migration to 13 ==='
 adb logcat -c
@@ -129,5 +129,11 @@ result={'before_counts':before['counts'],'after_counts':after_counts,'checks':ch
 json.dump(result,open('/tmp/after.json','w'),indent=2,default=list); print(json.dumps(result,indent=2,default=list)); db.close()
 if errors: sys.exit('\n'.join(errors))
 PY
+
+echo '=== RESPONSIVE TABLE CARD UI TESTS ==='
+adb install -r /tmp/alpha51-androidTest.apk | tee /tmp/install_android_test.txt
+grep -q Success /tmp/install_android_test.txt
+adb shell am instrument -w "$PKG.test/androidx.test.runner.AndroidJUnitRunner" | tee /tmp/table_card_tests.txt
+grep -q '^OK (4 tests)' /tmp/table_card_tests.txt
 
 echo '=== UPGRADE GATE PASS ==='

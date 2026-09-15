@@ -43,7 +43,7 @@ jobs:
           gradle-version: '8.9'
 
       - name: Test and build full installable APK
-        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug --stacktrace
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
 
       - name: Read app version
         id: app_version
