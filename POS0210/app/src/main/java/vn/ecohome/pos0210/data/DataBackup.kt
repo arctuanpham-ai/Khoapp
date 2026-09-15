@@ -218,7 +218,10 @@ object DataBackup {
             ConfigBackup.importConfig(context, master).getOrThrow()
         }
         kotlinx.coroutines.runBlocking {
-            PosDatabase.get(context).dao().saveSetting(AppSettingEntity("storage_root_uri", rootTreeUriString))
+            PosDatabase.get(context).dao().apply {
+                saveSetting(AppSettingEntity("storage_root_uri", rootTreeUriString))
+                saveSetting(AppSettingEntity("storage_write_enabled", "true"))
+            }
         }
     }
 
@@ -294,7 +297,10 @@ object DataBackup {
             ConfigBackup.importConfig(context, master).getOrThrow()
         }
         kotlinx.coroutines.runBlocking {
-            PosDatabase.get(context).dao().saveSetting(AppSettingEntity("storage_root_uri", rootTreeUriString))
+            PosDatabase.get(context).dao().apply {
+                saveSetting(AppSettingEntity("storage_root_uri", rootTreeUriString))
+                saveSetting(AppSettingEntity("storage_write_enabled", "true"))
+            }
         }
     }
 }

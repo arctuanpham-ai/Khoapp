@@ -13,35 +13,28 @@ object SafPosStorage {
     fun isPosRoot(context: Context, uri: Uri): Boolean =
         documentName(context, uri).equals(ROOT_NAME, ignoreCase = true)
 
+    fun hasPersistedAccess(context: Context, rootTreeUriString: String): Boolean {
+        if (rootTreeUriString.isBlank()) return false
+        val uri = runCatching { Uri.parse(rootTreeUriString) }.getOrNull() ?: return false
+        return context.contentResolver.persistedUriPermissions.any {
+            it.uri == uri && it.isReadPermission && it.isWritePermission
+        }
+    }
+
     fun ensureSelectedRoot(context: Context, rootTreeUriString: String): Result<Structure> = runCatching {
         require(rootTreeUriString.isNotBlank()) { "Chưa chọn thư mục POS0210" }
         val rootTree = Uri.parse(rootTreeUriString)
         require(DocumentsContract.isTreeUri(rootTree)) { "URI thư mục không hợp lệ" }
+        require(hasPersistedAccess(context, rootTreeUriString)) { "Quyền truy cập thư mục đã mất. Hãy GẮN LẠI THƯ MỤC POS0210" }
 
         val root = asDocumentUri(rootTree)
+        require(documentName(context, root).equals(ROOT_NAME, ignoreCase = true)) {
+            "Hãy chọn đúng thư mục POS0210 (không chọn Download hoặc thư mục khác)"
+        }
         val config = findChild(context, root, CONFIG_NAME) ?: createDir(context, root, CONFIG_NAME)
         val data = findChild(context, root, DATA_NAME) ?: createDir(context, root, DATA_NAME)
         val archive = findChild(context, root, ARCHIVE_NAME) ?: createDir(context, root, ARCHIVE_NAME)
         Structure(rootTree, config, data, archive)
-    }
-
-    fun ensureStructure(context: Context, parentTreeUriString: String): Result<Structure> = runCatching {
-        require(parentTreeUriString.isNotBlank()) { "Chưa chọn nơi lưu POS0210" }
-        val tree = Uri.parse(parentTreeUriString)
-        require(DocumentsContract.isTreeUri(tree)) { "URI thư mục không hợp lệ" }
-
-        val selectedDoc = asDocumentUri(tree)
-        val selectedName = documentName(context, selectedDoc)
-        val root = if (selectedName.equals(ROOT_NAME, ignoreCase = true)) {
-            selectedDoc
-        } else {
-            findChild(context, selectedDoc, ROOT_NAME) ?: createDir(context, selectedDoc, ROOT_NAME)
-        }
-
-        val config = findChild(context, root, CONFIG_NAME) ?: createDir(context, root, CONFIG_NAME)
-        val data = findChild(context, root, DATA_NAME) ?: createDir(context, root, DATA_NAME)
-        val archive = findChild(context, root, ARCHIVE_NAME) ?: createDir(context, root, ARCHIVE_NAME)
-        Structure(tree, config, data, archive)
     }
 
     fun findFile(context: Context, folderUri: Uri, name: String): Uri? =

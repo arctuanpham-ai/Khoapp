@@ -2,7 +2,7 @@ name: Build POS0210 APK
 
 on:
   push:
-    branches: [ pos0210-v1-rebuild ]
+    branches: [ pos0210-v1-rebuild, builder/issue-3-offline-qr ]
     paths:
       - 'POS0210/**'
       - '.github/workflows/pos0210-apk.yml'
@@ -15,6 +15,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     defaults:
       run:
         working-directory: POS0210
@@ -29,21 +32,18 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install SDK packages
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 
       - name: Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Build full installable APK
-        run: gradle --no-daemon :app:assembleDebug --stacktrace
+      - name: Test and build full installable APK
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
 
       - name: Read app version
         id: app_version

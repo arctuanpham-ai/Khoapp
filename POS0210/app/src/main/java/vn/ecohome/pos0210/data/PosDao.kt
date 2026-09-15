@@ -1,6 +1,7 @@
 package vn.ecohome.pos0210.data
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
+data class TableServiceTimingRow(val sessionId:String,val firstOrderAt:Long?,val lastOrderSentAt:Long?,val sentBatchCount:Int,val waitingBatchCount:Int)
 @Dao interface PosDao{
 @Query("SELECT * FROM AreaEntity WHERE active=1 ORDER BY sortOrder,name") fun areas():Flow<List<AreaEntity>>
 @Query("SELECT * FROM DiningTableEntity WHERE active=1 ORDER BY sortOrder,name") fun tables():Flow<List<DiningTableEntity>>
@@ -13,6 +14,13 @@ import kotlinx.coroutines.flow.Flow
 @Query("SELECT * FROM EmployeeEntity ORDER BY name") fun employees():Flow<List<EmployeeEntity>>
 @Query("SELECT * FROM SupplierEntity ORDER BY name") fun suppliers():Flow<List<SupplierEntity>>
 @Query("SELECT * FROM TableSessionEntity WHERE status='OPEN'") fun openSessions():Flow<List<TableSessionEntity>>
+@Query("""SELECT s.id AS sessionId,
+MIN(CASE WHEN ob.status NOT IN ('DRAFT','CANCELLED') THEN COALESCE(ob.sentAt,ob.createdAt) END) AS firstOrderAt,
+MAX(CASE WHEN ob.status NOT IN ('DRAFT','CANCELLED') THEN COALESCE(ob.sentAt,ob.createdAt) END) AS lastOrderSentAt,
+COALESCE(SUM(CASE WHEN ob.status NOT IN ('DRAFT','CANCELLED') THEN 1 ELSE 0 END),0) AS sentBatchCount,
+COALESCE(SUM(CASE WHEN ob.status='WAITING' THEN 1 ELSE 0 END),0) AS waitingBatchCount
+FROM TableSessionEntity s LEFT JOIN OrderBatchEntity ob ON ob.sessionId=s.id
+WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<TableServiceTimingRow>>
 @Query("SELECT * FROM TableSessionEntity WHERE id=:id LIMIT 1") fun sessionById(id:String):Flow<TableSessionEntity?>
 @Query("SELECT * FROM TableSessionEntity WHERE tableId=:tableId AND status='OPEN' LIMIT 1") suspend fun openSessionForTable(tableId:String):TableSessionEntity?
 @Query("SELECT * FROM OrderBatchEntity WHERE sessionId=:sessionId ORDER BY sequence") fun batches(sessionId:String):Flow<List<OrderBatchEntity>>
@@ -47,10 +55,17 @@ import kotlinx.coroutines.flow.Flow
 @Query("SELECT * FROM PurchaseCategoryEntity WHERE active=1 ORDER BY sortOrder,name") fun purchaseCategories():Flow<List<PurchaseCategoryEntity>>
 @Query("SELECT * FROM PurchaseCategoryEntity ORDER BY sortOrder,name") suspend fun allPurchaseCategoriesSnapshot():List<PurchaseCategoryEntity>
 @Query("SELECT * FROM PurchaseItemEntity WHERE purchaseId=:purchaseId") fun purchaseItems(purchaseId:String):Flow<List<PurchaseItemEntity>>
+@Query("SELECT * FROM MonthlyAccountingEntity") fun monthlyAccounting():Flow<List<MonthlyAccountingEntity>>
+@Query("SELECT * FROM ProfitPartnerEntity WHERE active=1 ORDER BY sortOrder,name") fun profitPartners():Flow<List<ProfitPartnerEntity>>
 @Query("SELECT * FROM PrintJobEntity ORDER BY createdAt DESC") fun printJobs():Flow<List<PrintJobEntity>>
 @Query("SELECT * FROM PrintJobEntity WHERE batchId=:batchId AND type=\'KITCHEN\' LIMIT 1") suspend fun kitchenPrintJob(batchId:String):PrintJobEntity?
 @Query("SELECT * FROM AuditEventEntity ORDER BY occurredAt DESC LIMIT 500") fun audits():Flow<List<AuditEventEntity>>
 @Query("SELECT * FROM AppSettingEntity") fun settings():Flow<List<AppSettingEntity>>
+@Query("SELECT * FROM PaymentSessionEntity WHERE tableSessionId=:tableSessionId AND status IN ('WAITING','PAYMENT_DETECTED') ORDER BY openedAt DESC LIMIT 1") fun activePaymentSession(tableSessionId:String):Flow<PaymentSessionEntity?>
+@Query("SELECT * FROM PaymentSessionEntity WHERE tableSessionId=:tableSessionId AND status IN ('WAITING','PAYMENT_DETECTED') ORDER BY openedAt DESC LIMIT 1") suspend fun activePaymentSessionSnapshot(tableSessionId:String):PaymentSessionEntity?
+@Query("SELECT ps.* FROM PaymentSessionEntity ps INNER JOIN TableSessionEntity ts ON ts.id=ps.tableSessionId WHERE ps.status='WAITING' AND ps.expectedAmount=:amount AND ps.expiresAt>=:now AND ts.status='OPEN'") suspend fun waitingPaymentSessions(amount:Long,now:Long):List<PaymentSessionEntity>
+@Query("SELECT * FROM BankNotificationEventEntity ORDER BY receivedAt DESC LIMIT 20") fun recentBankNotifications():Flow<List<BankNotificationEventEntity>>
+@Query("SELECT value FROM AppSettingEntity WHERE key=:key LIMIT 1") suspend fun settingValue(key:String):String?
 @Query("SELECT * FROM AreaEntity ORDER BY sortOrder,name") suspend fun allAreasSnapshot():List<AreaEntity>
 @Query("SELECT * FROM DiningTableEntity ORDER BY sortOrder,name") suspend fun allTablesSnapshot():List<DiningTableEntity>
 @Query("SELECT * FROM MenuCategoryEntity ORDER BY sortOrder,name") suspend fun allCategoriesSnapshot():List<MenuCategoryEntity>
@@ -80,11 +95,21 @@ import kotlinx.coroutines.flow.Flow
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveSupplier(v:SupplierEntity)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun savePurchaseCategory(v:PurchaseCategoryEntity)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveSetting(v:AppSettingEntity)
+@Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertPaymentSession(v:PaymentSessionEntity)
+@Insert(onConflict=OnConflictStrategy.IGNORE) suspend fun insertBankNotification(v:BankNotificationEventEntity):Long
+@Query("UPDATE PaymentSessionEntity SET status='CANCELLED' WHERE tableSessionId=:tableSessionId AND status IN ('WAITING','PAYMENT_DETECTED')") suspend fun cancelPaymentSessions(tableSessionId:String):Int
+@Query("UPDATE PaymentSessionEntity SET status='PAYMENT_DETECTED',detectedFingerprint=:fingerprint,detectedBank=:bank,detectedAmount=:amount,detectedAt=:detectedAt,confidence=:confidence WHERE id=:id AND status='WAITING'") suspend fun markPaymentDetected(id:String,fingerprint:String,bank:String,amount:Long,detectedAt:Long,confidence:String):Int
+@Query("UPDATE PaymentSessionEntity SET status='CONFIRMED',billId=:billId WHERE id=:id AND status IN ('WAITING','PAYMENT_DETECTED')") suspend fun confirmPaymentSession(id:String,billId:String):Int
+@Query("UPDATE BankNotificationEventEntity SET matchStatus=:status,paymentSessionId=:paymentSessionId WHERE fingerprint=:fingerprint") suspend fun updateBankNotificationMatch(fingerprint:String,status:String,paymentSessionId:String?):Int
+@Query("DELETE FROM BankNotificationEventEntity WHERE fingerprint NOT IN (SELECT fingerprint FROM BankNotificationEventEntity ORDER BY receivedAt DESC LIMIT 20)") suspend fun trimBankNotifications()
+@Query("DELETE FROM BankNotificationEventEntity") suspend fun clearBankNotifications()
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun savePricingRule(v:PricingRuleEntity)
 @Query("UPDATE PricingRuleEntity SET active=:active WHERE id=:id") suspend fun setPricingRuleActive(id:String,active:Boolean)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertBillAdjustments(v:List<BillAdjustmentEntity>)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertPurchase(v:PurchaseEntity)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertPurchaseItems(v:List<PurchaseItemEntity>)
+@Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveMonthlyAccounting(v:MonthlyAccountingEntity)
+@Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveProfitPartners(v:List<ProfitPartnerEntity>)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun audit(v:AuditEventEntity)
 @Query("UPDATE MenuItemEntity SET active=:active WHERE id=:id") suspend fun setMenuActive(id:String,active:Boolean)
 @Query("UPDATE MenuCategoryEntity SET active=:active WHERE id=:id") suspend fun setCategoryActive(id:String,active:Boolean)
@@ -97,7 +122,7 @@ import kotlinx.coroutines.flow.Flow
 @Query("UPDATE PricingRuleEntity SET active=0") suspend fun deactivateAllPricingRules()
 @Query("UPDATE EmployeeEntity SET active=0") suspend fun deactivateAllEmployees()
 @Query("UPDATE PurchaseCategoryEntity SET active=0") suspend fun deactivateAllPurchaseCategories()
-@Query("DELETE FROM AppSettingEntity WHERE key NOT IN ('autoback_tree_uri','master_config_uri','storage_root_uri')") suspend fun clearConfigSettings()
+@Query("DELETE FROM AppSettingEntity WHERE key NOT IN ('autoback_tree_uri','master_config_uri','storage_root_uri','storage_write_enabled')") suspend fun clearConfigSettings()
 @Query("UPDATE EmployeeEntity SET active=:active WHERE id=:id") suspend fun setEmployeeActive(id:String,active:Boolean)
 @Query("UPDATE OrderBatchEntity SET status=:newStatus,sentAt=:sentAt WHERE id=:id AND status=:expected") suspend fun transitionBatch(id:String,expected:String,newStatus:String,sentAt:Long?):Int
 @Query("UPDATE OrderBatchEntity SET status='DELIVERED',deliveredAt=:at,deliveredBy=:employeeId WHERE id=:id AND status='WAITING'") suspend fun markDelivered(id:String,at:Long,employeeId:String):Int
@@ -115,4 +140,6 @@ import kotlinx.coroutines.flow.Flow
 @Query("UPDATE CustomerEntity SET tier=:tier,tierManual=:manual WHERE id=:id") suspend fun updateCustomerTierFields(id:String,tier:String,manual:Boolean):Int
 @Query("UPDATE PurchaseEntity SET status='DELETED' WHERE id=:id AND status='ACTIVE'") suspend fun softDeletePurchase(id:String):Int
 @Query("UPDATE PurchaseEntity SET invoiceImageUri=:uri WHERE id=:id") suspend fun updatePurchaseImage(id:String,uri:String?)
+@Query("UPDATE PurchaseEntity SET expenseCategory=:category WHERE id=:id") suspend fun updatePurchaseExpenseCategory(id:String,category:String):Int
+@Query("UPDATE ProfitPartnerEntity SET active=0") suspend fun deactivateProfitPartners()
 }

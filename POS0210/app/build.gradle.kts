@@ -1,3 +1,13 @@
+[detached HEAD e7b701a] feat(pos0210): detect bank transfer notifications
+ Date: Tue Sep 15 17:01:46 2026 +0900
+ 15 files changed, 352 insertions(+), 12 deletions(-)
+ create mode 100644 POS0210/app/src/main/java/vn/ecohome/pos0210/banknotification/BankNotificationListenerService.kt
+ create mode 100644 POS0210/app/src/main/java/vn/ecohome/pos0210/banknotification/BankNotificationParser.kt
+ create mode 100644 POS0210/app/src/main/java/vn/ecohome/pos0210/banknotification/BankPaymentAnnouncer.kt
+ create mode 100644 POS0210/app/src/main/java/vn/ecohome/pos0210/banknotification/NotificationAccess.kt
+ create mode 100644 POS0210/app/src/main/java/vn/ecohome/pos0210/banknotification/PaymentMatcher.kt
+ create mode 100644 POS0210/app/src/test/java/vn/ecohome/pos0210/banknotification/BankNotificationParserTest.kt
+ create mode 100644 POS0210/app/src/test/java/vn/ecohome/pos0210/banknotification/PaymentMatcherTest.kt
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -5,14 +15,16 @@ plugins {
     id("org.jetbrains.kotlin.kapt")
 }
 android {
+    // Candidate10: additive bank-notification module; existing POS and print pipelines stay intact.
     namespace = "vn.ecohome.pos0210"
     compileSdk = 35
     defaultConfig {
         applicationId = "vn.ecohome.pos0210"
         minSdk = 26
         targetSdk = 35
-        versionCode = 62
-        versionName = "1.0.0-alpha52"
+        versionCode = 71
+        versionName = "1.0.0-alpha52-candidate10"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
         getByName("debug") {
@@ -41,4 +53,8 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.google.zxing:core:3.5.3")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

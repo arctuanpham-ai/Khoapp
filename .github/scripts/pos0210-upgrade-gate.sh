@@ -8,19 +8,16 @@ echo '=== Install alpha50 baseline ==='
 adb install -r /tmp/alpha50.apk | tee /tmp/install50.txt
 grep -q Success /tmp/install50.txt
 adb shell am start -W -n "$ACT"
-sleep 6
+SDK_LEVEL=$(adb shell getprop ro.build.version.sdk | tr -d '\r')
+if [ "$SDK_LEVEL" -le 28 ]; then sleep 20; else sleep 6; fi
 adb shell pidof "$PKG"
 adb shell am force-stop "$PKG"
 sleep 2
 
 echo '=== Extract alpha50 database including WAL if present ==='
 adb exec-out run-as "$PKG" cat databases/pos0210.db > /tmp/pre.db
-if adb shell run-as "$PKG" test -f databases/pos0210.db-wal; then
-  adb exec-out run-as "$PKG" cat databases/pos0210.db-wal > /tmp/pre.db-wal
-fi
-if adb shell run-as "$PKG" test -f databases/pos0210.db-shm; then
-  adb exec-out run-as "$PKG" cat databases/pos0210.db-shm > /tmp/pre.db-shm
-fi
+adb exec-out run-as "$PKG" cat databases/pos0210.db-wal > /tmp/pre.db-wal 2>/dev/null || rm -f /tmp/pre.db-wal
+adb exec-out run-as "$PKG" cat databases/pos0210.db-shm > /tmp/pre.db-shm 2>/dev/null || rm -f /tmp/pre.db-shm
 sqlite3 /tmp/pre.db 'PRAGMA wal_checkpoint(TRUNCATE); PRAGMA integrity_check;' | tee /tmp/pre_integrity.txt
 grep -q '^ok$' /tmp/pre_integrity.txt
 rm -f /tmp/pre.db-wal /tmp/pre.db-shm
@@ -53,23 +50,26 @@ sqlite3 /tmp/pre.db 'PRAGMA integrity_check;' | tee /tmp/pre_integrity_after_mar
 grep -q '^ok$' /tmp/pre_integrity_after_markers.txt
 
 echo '=== Put marked alpha50 DB back and validate baseline opens ==='
-APPDIR=$(adb shell run-as "$PKG" pwd | tr -d '\r')
-test -n "$APPDIR"
-adb shell run-as "$PKG" rm -f "$APPDIR/databases/pos0210.db-wal" "$APPDIR/databases/pos0210.db-shm"
-adb exec-in run-as "$PKG" sh -c "cat > '$APPDIR/databases/pos0210.db'" < /tmp/pre.db
-adb shell run-as "$PKG" chmod 600 "$APPDIR/databases/pos0210.db"
+adb shell run-as "$PKG" rm -f databases/pos0210.db-wal databases/pos0210.db-shm
+adb push /tmp/pre.db /data/local/tmp/pos0210-pre.db >/dev/null
+adb shell chmod 644 /data/local/tmp/pos0210-pre.db
+adb shell run-as "$PKG" cp /data/local/tmp/pos0210-pre.db databases/pos0210.db
+adb shell run-as "$PKG" chmod 600 databases/pos0210.db
+adb shell rm -f /data/local/tmp/pos0210-pre.db
+adb exec-out run-as "$PKG" cat databases/pos0210.db > /tmp/roundtrip.db
+sqlite3 /tmp/roundtrip.db "SELECT name || '|' || price FROM MenuItemEntity WHERE name='QA_ALPHA50_MENU' AND price=123456" | grep -q 'QA_ALPHA50_MENU|123456'
 adb shell am start -W -n "$ACT"
 sleep 5
 adb shell pidof "$PKG"
 adb shell am force-stop "$PKG"
 sleep 2
 
-echo '=== Install alpha51 IN PLACE (no uninstall) ==='
+echo '=== Install candidate IN PLACE (no uninstall) ==='
 adb install -r /tmp/alpha51.apk | tee /tmp/install51.txt
 grep -q Success /tmp/install51.txt
-adb shell dumpsys package "$PKG" | grep -E 'versionName=1.0.0-alpha51|versionCode=61'
+adb shell dumpsys package "$PKG" | grep -E 'versionName=1.0.0-alpha52-candidate10|versionCode=71'
 
-echo '=== Launch alpha51 to execute Room migration 10 -> 11 ==='
+echo '=== Launch candidate to execute Room migration to 13 ==='
 adb logcat -c
 adb shell am start -W -n "$ACT"
 sleep 8
@@ -91,8 +91,8 @@ sleep 2
 
 echo '=== Extract post-upgrade database ==='
 adb exec-out run-as "$PKG" cat databases/pos0210.db > /tmp/post.db
-if adb shell run-as "$PKG" test -f databases/pos0210.db-wal; then adb exec-out run-as "$PKG" cat databases/pos0210.db-wal > /tmp/post.db-wal; fi
-if adb shell run-as "$PKG" test -f databases/pos0210.db-shm; then adb exec-out run-as "$PKG" cat databases/pos0210.db-shm > /tmp/post.db-shm; fi
+adb exec-out run-as "$PKG" cat databases/pos0210.db-wal > /tmp/post.db-wal 2>/dev/null || rm -f /tmp/post.db-wal
+adb exec-out run-as "$PKG" cat databases/pos0210.db-shm > /tmp/post.db-shm 2>/dev/null || rm -f /tmp/post.db-shm
 sqlite3 /tmp/post.db 'PRAGMA integrity_check;' | tee /tmp/post_integrity.txt
 grep -q '^ok$' /tmp/post_integrity.txt
 
@@ -109,17 +109,34 @@ for k,v in checks.items():
     exp=tuple(before['markers'][k]) if isinstance(before['markers'][k],list) else before['markers'][k]
     if v != exp: errors.append(f'marker changed {k}: expected {exp}, got {v}')
 uv=one('pragma user_version')[0]
-if uv != 11: errors.append(f'user_version expected 11 got {uv}')
+if uv != 14: errors.append(f'user_version expected 14 got {uv}')
+tables={r[0] for r in db.execute("select name from sqlite_master where type='table'")}
+for required in ('PaymentSessionEntity','BankNotificationEventEntity'):
+    if required not in tables: errors.append(f'missing additive table {required}')
 cols={r[1] for r in db.execute('pragma table_info(MenuItemEntity)')}
 for col in ('productCode','description'):
     if col not in cols: errors.append(f'missing MenuItemEntity.{col}')
+combo_cols={r[1] for r in db.execute('pragma table_info(ComboEntity)')}
+if 'description' not in combo_cols: errors.append('missing ComboEntity.description')
+purchase_cols={r[1] for r in db.execute('pragma table_info(PurchaseEntity)')}
+if 'expenseCategory' not in purchase_cols: errors.append('missing PurchaseEntity.expenseCategory')
+old_classified=one("select count(*) from PurchaseEntity where expenseCategory!='UNCLASSIFIED'")[0]
+if old_classified: errors.append(f'{old_classified} legacy purchases were unexpectedly classified')
+for table in ('MonthlyAccountingEntity','ProfitPartnerEntity'):
+    if not one("select count(*) from sqlite_master where type='table' and name=?",(table,))[0]: errors.append(f'missing {table}')
 blank=one("select count(*) from MenuItemEntity where productCode is null or trim(productCode)='' ")[0]
 dup=one("select count(*) from (select productCode,count(*) c from MenuItemEntity group by productCode having c>1)")[0]
 if blank: errors.append(f'{blank} menu rows have blank productCode')
 if dup: errors.append(f'{dup} duplicate productCode groups')
-result={'before_counts':before['counts'],'after_counts':after_counts,'checks':checks,'user_version':uv,'blank_codes':blank,'duplicate_code_groups':dup,'errors':errors}
+result={'before_counts':before['counts'],'after_counts':after_counts,'checks':checks,'user_version':uv,'blank_codes':blank,'duplicate_code_groups':dup,'legacy_non_unclassified':old_classified,'errors':errors}
 json.dump(result,open('/tmp/after.json','w'),indent=2,default=list); print(json.dumps(result,indent=2,default=list)); db.close()
 if errors: sys.exit('\n'.join(errors))
 PY
+
+echo '=== RESPONSIVE TABLE CARD UI TESTS ==='
+adb install -r /tmp/alpha51-androidTest.apk | tee /tmp/install_android_test.txt
+grep -q Success /tmp/install_android_test.txt
+adb shell am instrument -w "$PKG.test/androidx.test.runner.AndroidJUnitRunner" | tee /tmp/table_card_tests.txt
+grep -Eq '^OK \((7|[8-9]|[1-9][0-9]+) tests?\)' /tmp/table_card_tests.txt
 
 echo '=== UPGRADE GATE PASS ==='

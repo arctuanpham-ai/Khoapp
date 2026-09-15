@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 47829)
+Total output lines: 3558
+
 package vn.ecohome.pos0210
 
 import android.net.Uri
@@ -13,6 +16,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -30,16 +34,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.AsyncImage
 import vn.ecohome.pos0210.data.*
 import vn.ecohome.pos0210.printing.PrinterText
 import vn.ecohome.pos0210.printing.BluetoothPrinter
+import vn.ecohome.pos0210.payment.VietQrOffline
+import vn.ecohome.pos0210.banknotification.NotificationAccess
+import vn.ecohome.pos0210.banknotification.BankPaymentAnnouncer
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -54,10 +65,22 @@ private val WaitingPriority2 = Color(0xFFF3C15F)
 private fun money(v: Long) = "%,dđ".format(v).replace(',', '.')
 private fun time(v: Long) = SimpleDateFormat("dd/MM HH:mm", Locale.getDefault()).format(Date(v))
 
-private fun vietQrUrl(bank: String, account: String, holder: String, amount: Long, info: String): String {
-    val bankId = bank.trim().replace(" ", "")
-    return "https://img.vietqr.io/image/${Uri.encode(bankId)}-${Uri.encode(account.trim())}-compact2.png" +
-        "?amount=$amount&addInfo=${Uri.encode(info.take(50))}&accountName=${Uri.encode(holder.trim())}"
+@Composable
+private fun OfflineVietQrImage(
+    bank: String,
+    account: String,
+    holder: String,
+    amount: Long,
+    info: String,
+    modifier: Modifier
+) {
+    val result = remember(bank, account, holder, amount, info) {
+        VietQrOffline.bitmap(bank, account, holder, amount, info)
+    }
+    result.fold(
+        onSuccess = { bitmap -> Image(bitmap.asImageBitmap(), "Mã VietQR thanh toán offline", modifier) },
+        onFailure = { error -> Text("KHÔNG TẠO ĐƯỢC VIETQR\n${error.message}", modifier, color = Color.Red, textAlign = TextAlign.Center, fontWeight = FontWeight.Bold) }
+    )
 }
 
 class MainActivity : ComponentActivity() {
@@ -99,6 +122,8 @@ fun App(vm: PosViewModel = viewModel()) {
         "BACKUP" -> BackupCenter(vm)
         "HEALTH" -> DataHealth(vm)
         "SETTINGS" -> Settings(vm)
+        "BANK_PAYMENT_SETTINGS" -> BankPaymentSettings(vm)
+        "BANK_NOTIFICATION_TEST" -> BankNotificationTest(vm)
     }
 }
 
@@ -155,7 +180,16 @@ fun Tables(vm: PosViewModel) {
     val ts by vm.tables.collectAsState()
     val ss by vm.sessions.collectAsState()
     val waiting by vm.waitingBatches.collectAsState()
+    val serviceTimings by vm.tableServiceTimings.collectAsState()
     val areas by vm.areas.collectAsState()
+    var timerNow by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val now = System.currentTimeMillis()
+            kotlinx.coroutines.delay((60_000L - now % 60_000L).coerceAtLeast(1_000L))
+            timerNow = System.currentTimeMillis()
+        }
+    }
     val current by vm.currentEmployee.collectAsState()
     val canReport = current?.role == "ADMIN" || current?.canViewReport == true
     val waitingOrdered = waiting.sortedWith(compareBy<OrderBatchEntity> { it.serviceNo }.thenBy { it.createdAt })
@@ -175,83 +209,20 @@ fun Tables(vm: PosViewModel) {
             }
         }
 
-        BoxWithConstraints(
-            Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-        ) {
-            val count = ts.size.coerceAtLeast(1)
-            val columns = when {
-                count <= 4 -> 2
-                count <= 9 -> 3
-                count <= 16 -> 4
-                else -> 5
-            }
-            val rows = ((count + columns - 1) / columns).coerceAtLeast(1)
-            val rawHeight = (maxHeight - 8.dp * (rows - 1).toFloat()) / rows.toFloat()
-            val cardHeight = rawHeight.coerceIn(76.dp, 150.dp)
-
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(columns),
-                modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                gridItems(ts, key = { it.id }) { tb ->
+        val tableCards = ts.map { tb ->
                     val open = ss.firstOrNull { it.tableId == tb.id }
                     val areaName = areas.firstOrNull { it.id == tb.areaId }?.name ?: tb.areaId
                     val waitingForTable = open?.let { s -> waiting.filter { it.sessionId == s.id } } ?: emptyList()
                     val nextService = waitingForTable.minWithOrNull(compareBy<OrderBatchEntity> { it.serviceNo }.thenBy { it.createdAt })
                     val priorityRank = nextService?.let { waitingRankById[it.id] }
-                    Card(
-                        Modifier.fillMaxWidth().height(cardHeight).clickable { vm.selectTable(tb) },
-                        colors = CardDefaults.cardColors(
-                            containerColor = when {
-                                priorityRank == 0 -> WaitingPriority1
-                                priorityRank == 1 -> WaitingPriority2
-                                nextService != null -> WaitingDelivery
-                                open == null -> Tint
-                                else -> Occupied
-                            }
-                        )
-                    ) {
-                        Column(
-                            Modifier.fillMaxSize().padding(8.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            Text(
-                                tb.name,
-                                fontWeight = FontWeight.Black,
-                                fontSize = if (columns >= 4) 16.sp else 19.sp
-                            )
-                            Text(areaName, fontSize = if (columns >= 4) 10.sp else 11.sp)
-                            Spacer(Modifier.height(4.dp))
-                            if (open == null) {
-                                Text("Trống", fontSize = if (columns >= 4) 12.sp else 14.sp)
-                            } else {
-                                Text(
-                                    "● CÓ KHÁCH",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = if (columns >= 4) 11.sp else 13.sp
-                                )
-                                if (nextService != null) {
-                                    Text(
-                                        when (priorityRank) {
-                                            0 -> "#${nextService.serviceNo.toString().padStart(3,'0')} · ƯU TIÊN 1"
-                                            1 -> "#${nextService.serviceNo.toString().padStart(3,'0')} · ƯU TIÊN 2"
-                                            else -> "#${nextService.serviceNo.toString().padStart(3,'0')} · CHỜ GIAO"
-                                        },
-                                        fontWeight = FontWeight.Black,
-                                        fontSize = 11.sp
-                                    )
-                                } else if (cardHeight > 95.dp) {
-                                    Text(time(open.openedAt), fontSize = 10.sp)
-                                }
-                            }
+                    val serviceTimer = open?.let { session ->
+                        serviceTimings.firstOrNull { it.sessionId == session.id }?.let { timing ->
+                            serviceTimerPresentation(timing.firstOrderAt, timing.lastOrderSentAt, timing.sentBatchCount, timing.waitingBatchCount, timerNow)
                         }
                     }
-                }
-            }
+                    TableCardUi(tb.id,tb.name,areaName,open!=null,nextService?.serviceNo,priorityRank,serviceTimer)
         }
+        ResponsiveTableGrid(tableCards,Modifier.weight(1f).fillMaxWidth().padding(horizontal=12.dp,vertical=8.dp)){id->ts.firstOrNull{it.id==id}?.let(vm::selectTable)}
 
         if (waiting.isNotEmpty()) {
             Button(
@@ -313,16 +284,13 @@ fun Order(vm: PosViewModel, t: DiningTableEntity) {
                     val key = "combo:" + combo.id
                     val q = cart[key] ?: 0
                     val note = cartNotes[key].orEmpty()
+                    val parts by vm.comboItems(combo.id).collectAsState(initial = emptyList())
                     Card(
                         Modifier.fillMaxWidth().clickable { vm.addCombo(combo) },
                         colors = CardDefaults.cardColors(containerColor = if(note.isNotBlank()) Color(0xFFFFF0D8) else Color(0xFFFBF8F2))
                     ) {
                         Column {
-                            if (!combo.imageUri.isNullOrBlank()) {
-                                AsyncImage(model = combo.imageUri, contentDescription = combo.name, modifier = Modifier.fillMaxWidth().height(92.dp))
-                            } else {
-                                Box(Modifier.fillMaxWidth().height(70.dp), contentAlignment = Alignment.Center) { Text("COMBO", fontWeight = FontWeight.Black) }
-                            }
+                            ComboArtwork(combo, parts, ms, Modifier.fillMaxWidth().height(92.dp))
                             Column(Modifier.padding(8.dp)) {
                                 Text(combo.name, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                 Text(money(combo.price), fontSize = 12.sp)
@@ -635,7 +603,6 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
     val sessionBatches by vm.batches(s.id).collectAsState(initial = emptyList())
     val pendingDelivery = sessionBatches.filter { it.status == "DRAFT" || it.status == "WAITING" }.sortedBy { it.serviceNo }
     fun setting(key: String) = settings.firstOrNull { it.key == key }?.value ?: ""
-    var method by remember { mutableStateOf("CASH") }
     var codeText by remember { mutableStateOf("") }
     var appliedCode by remember { mutableStateOf("") }
     val customers by vm.customers.collectAsState()
@@ -650,10 +617,18 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
     )
     val loyaltyRule = tierDiscountRule(effectiveTier, settings)
     val preview = calculatePricing(subtotal, rules + listOfNotNull(loyaltyRule), appliedCode)
-    val qrInfo = "${setting("qr_prefix").ifBlank { "0210" }} ${t.name}"
-    val qrUrl = if (setting("bank_name").isNotBlank() && setting("bank_account").isNotBlank()) {
-        vietQrUrl(setting("bank_name"), setting("bank_account"), setting("bank_holder"), preview.total, qrInfo)
-    } else ""
+    val paymentSession by vm.paymentSession(s.id).collectAsState(initial = null)
+    val printedCheckoutKey by vm.printedCheckoutKey.collectAsState()
+    val bankEvents by vm.recentBankNotifications.collectAsState()
+    LaunchedEffect(preview.total, s.id) { vm.openPaymentSession(s,t,preview.total) }
+    val validPaymentSession=paymentSession?.takeIf{it.expectedAmount==preview.total}
+    val tableDigits=t.name.filter(Char::isDigit).takeLast(2)
+    val shortTable=if(tableDigits.isNotBlank())"B$tableDigits" else t.id.filter(Char::isLetterOrDigit).takeLast(3).uppercase()
+    val qrInfo = "${setting("qr_prefix").ifBlank { "0210" }} $shortTable ${validPaymentSession?.paymentCode.orEmpty()}".trim()
+    val checkoutKey="${s.id}:${preview.total}:$qrInfo"
+    val billPrinted=printedCheckoutKey==checkoutKey
+    val qrConfigured = setting("bank_name").isNotBlank() && setting("bank_account").isNotBlank()
+    val ambiguousEvent=bankEvents.firstOrNull{it.matchStatus=="AMBIGUOUS"&&it.amount==preview.total&&it.receivedAt>=s.openedAt}
 
     Column {
         Header("Thanh toán") { vm.screen.value = "SENT" }
@@ -745,31 +720,47 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
             }
             Text("Tích điểm: 10.000đ thực trả = 1 điểm", fontSize = 11.sp)
 
-            Row {
-                FilterChip(method == "CASH", { method = "CASH" }, { Text("TIỀN MẶT") })
-                Spacer(Modifier.width(8.dp))
-                FilterChip(method == "TRANSFER", { method = "TRANSFER" }, { Text("CHUYỂN KHOẢN") })
-            }
             Text("🔒 Thu tiền: ${e?.name}", Modifier.padding(vertical = 14.dp))
-            if (method == "TRANSFER") {
+            if (billPrinted) {
+                Text("✓ BILL ĐÃ IN · Chờ khách kiểm tra và thanh toán",fontWeight=FontWeight.Black,color=Color(0xFF41633A))
                 Card {
                     Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("VIETQR", fontWeight = FontWeight.Bold)
-                        if (qrUrl.isBlank()) Text("Chưa cấu hình tài khoản VietQR") else {
-                            AsyncImage(model = qrUrl, contentDescription = "Mã VietQR thanh toán", modifier = Modifier.size(280.dp))
+                        if (!qrConfigured) Text("Chưa cấu hình tài khoản VietQR") else if(validPaymentSession==null) Text("Đang tạo mã thanh toán riêng cho bill…") else {
+                            OfflineVietQrImage(setting("bank_name"), setting("bank_account"), setting("bank_holder"), preview.total, qrInfo, Modifier.size(280.dp))
                             Text("${setting("bank_name")} · ${setting("bank_account")}")
                             Text("${money(preview.total)} · $qrInfo")
                         }
                     }
                 }
+                if(validPaymentSession?.status=="PAYMENT_DETECTED"){
+                    Card(Modifier.fillMaxWidth().padding(top=10.dp),colors=CardDefaults.cardColors(containerColor=Color(0xFFDCE8D8))){
+                        Column(Modifier.padding(14.dp)){
+                            Text("✓ ĐÃ PHÁT HIỆN THANH TOÁN",fontWeight=FontWeight.Black)
+                            Text("Đã nhận: ${money(validPaymentSession.detectedAmount?:preview.total)}")
+                            Text("Ngân hàng: ${validPaymentSession.detectedBank.orEmpty()}",fontSize=12.sp)
+                            Text("Nhân viên vẫn phải xác nhận để đóng bill.",fontSize=11.sp)
+                        }
+                    }
+                }else if(ambiguousEvent!=null){
+                    Text("Đã phát hiện giao dịch cùng số tiền nhưng chưa xác định được bill.",Modifier.padding(top=8.dp),color=Color(0xFF9A5B28),fontSize=12.sp,fontWeight=FontWeight.Bold)
+                }else Text("Đang chờ thông báo ngân hàng · vẫn có thể xác nhận thủ công",Modifier.padding(top=8.dp),fontSize=11.sp)
             }
         }
-        Button(
-            onClick = { vm.close(method, preview, customerPhone, customerName) },
-            modifier = Modifier.fillMaxWidth().padding(18.dp),
-            enabled = preview.total > 0 && pendingDelivery.isEmpty()
-        ) {
-            Text(if (pendingDelivery.isEmpty()) "XÁC NHẬN THANH TOÁN" else "CHƯA GIAO ĐỦ · CHƯA THỂ THANH TOÁN")
+        Column(Modifier.fillMaxWidth().padding(18.dp)) {
+            if(!billPrinted){
+                Button(
+                    onClick={vm.printCheckoutBill(preview,qrInfo,matchedCustomer?.name?:customerName)},
+                    modifier=Modifier.fillMaxWidth(),
+                    enabled=preview.total>0&&pendingDelivery.isEmpty()&&qrConfigured&&validPaymentSession!=null
+                ){Text(if(pendingDelivery.isNotEmpty())"CHƯA GIAO ĐỦ · CHƯA THỂ IN BILL" else "IN BILL TRƯỚC")}
+                Text("Phải in bill để khách kiểm tra trước khi xác nhận thanh toán.",Modifier.padding(top=6.dp),fontSize=11.sp)
+            }else{
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)){
+                    OutlinedButton(onClick={vm.close("CASH",preview,customerPhone,customerName)},modifier=Modifier.weight(1f)){Text("XÁC NHẬN\nTIỀN MẶT",textAlign=TextAlign.Center)}
+                    Button(onClick={vm.close("TRANSFER",preview,customerPhone,customerName)},modifier=Modifier.weight(1f)){Text("XÁC NHẬN\nCHUYỂN KHOẢN",textAlign=TextAlign.Center)}
+                }
+            }
         }
     }
 }
@@ -1156,1364 +1147,7 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Bàn & khu vực", "Thêm · sửa · Trong nhà / Ngoài trời") { vm.screen.value = "TABLE_ADMIN" }
             }
             if (employee?.role == "ADMIN" || employee?.canPurchase == true) {
-                Rowx("Nhập đầu vào", "Lương · vật tư cố định · vật tư sản xuất") { vm.screen.value = "PURCHASE" }
-            }
-            if (employee?.role == "ADMIN" || employee?.role == "MANAGER") {
-                Rowx("VietQR", "Lưu tài khoản · tạo QR") { vm.screen.value = "VIETQR" }
-            }
-            Rowx("Máy in", "XP-N58H · Bluetooth · ESC/POS") { vm.screen.value = "PRINTER" }
-            if (employee?.role == "ADMIN" || employee?.canManageSystem == true) {
-                Rowx("Dữ liệu & Backup", "MASTER · Autobackup · Backup/Restore") { vm.screen.value = "BACKUP" }
-            }
-            if (employee?.role == "ADMIN") {
-                Rowx("Kiểm tra dữ liệu", "Đối soát Payment · Bill · Customer · điểm · trạng thái bàn") { vm.screen.value = "HEALTH" }
-                Rowx("Nhật ký hệ thống", "Audit thao tác · người thực hiện · thời điểm · dữ liệu thay đổi") { vm.screen.value = "SETTINGS" }
-            }
-            HorizontalDivider(Modifier.padding(vertical = 12.dp))
-            Text("POS0210 v1.0.0-alpha51 · versionCode 61", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-            Text("Tương thích Android 8.0 (API 26) trở lên · Thiết bị hiện tại: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})", fontSize = 11.sp)
-            if (Build.VERSION.SDK_INT < 26) Text("Thiết bị không được hỗ trợ. Cần Android 8.0 trở lên.", color = Color.Red, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(30.dp))
-        }
-    }
-}
-
-@Composable
-fun BackupCenter(vm: PosViewModel) {
-    val context = LocalContext.current
-    var message by remember { mutableStateOf("") }
-    var refreshTick by remember { mutableStateOf(0) }
-    var rootUri by remember { mutableStateOf(vm.setting("storage_root_uri")) }
-    val savedRootUri = vm.setting("storage_root_uri")
-    LaunchedEffect(savedRootUri) {
-        if (savedRootUri.isNotBlank()) rootUri = savedRootUri
-    }
-
-    val chooseRoot = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                )
-            }
-            val result = SafPosStorage.ensureSelectedRoot(context, uri.toString())
-            if (result.isSuccess) {
-                rootUri = uri.toString()
-                vm.saveSetting("storage_root_uri", uri.toString())
-                refreshTick++
-                message = "Đã gắn thư mục POS0210. Nếu chưa có file, bấm GHI MASTER và BACKUP NGAY để tạo từ dữ liệu hiện tại."
-            } else {
-                message = "Không gắn được thư mục: ${result.exceptionOrNull()?.message}"
-            }
-        }
-    }
-
-    val importMaster = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            val result = ConfigBackup.importConfig(context, uri)
-            if (result.isSuccess) {
-                if (rootUri.isNotBlank()) {
-                    ConfigBackup.copyMaster(context, rootUri, uri)
-                }
-                Toast.makeText(context, "Đã LOAD MASTER. App sẽ mở lại.", Toast.LENGTH_LONG).show()
-                android.os.Process.killProcess(android.os.Process.myPid())
-            } else {
-                message = "LOAD MASTER lỗi: ${result.exceptionOrNull()?.message}"
-            }
-        }
-    }
-
-    val restoreBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            val result = if (rootUri.isNotBlank()) {
-                DataBackup.restoreDatabaseAndApplyMaster(context, uri, rootUri)
-            } else {
-                DataBackup.restoreDatabase(context, uri)
-            }
-            if (result.isSuccess) {
-                Toast.makeText(
-                    context,
-                    if (rootUri.isNotBlank()) "Đã RESTORE DATA + áp lại MASTER. App sẽ mở lại." else "Đã RESTORE DATA. Chưa có MASTER root để áp lại.",
-                    Toast.LENGTH_LONG
-                ).show()
-                android.os.Process.killProcess(android.os.Process.myPid())
-            } else {
-                message = "RESTORE DATA lỗi: ${result.exceptionOrNull()?.message}"
-            }
-        }
-    }
-
-    val masterFound = remember(refreshTick, rootUri) {
-        rootUri.isNotBlank() && ConfigBackup.findMaster(context, rootUri) != null
-    }
-    val dataFound = remember(refreshTick, rootUri) {
-        rootUri.isNotBlank() && DataBackup.findLatest(context, rootUri) != null
-    }
-    val mediaFound = remember(refreshTick, rootUri) {
-        rootUri.isNotBlank() && DataBackup.findMediaLatest(context, rootUri) != null
-    }
-
-    Column {
-        Header("Dữ liệu & Backup") { vm.screen.value = "MANAGE" }
-        Column(
-            Modifier.fillMaxSize().padding(horizontal = 16.dp).verticalScroll(rememberScrollState())
-        ) {
-            Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("NƠI LƯU POS0210", fontWeight = FontWeight.Black, fontSize = 20.sp)
-                    Text(
-                        if (rootUri.isBlank()) "CHƯA GẮN THƯ MỤC" else "ĐÃ GẮN THƯ MỤC",
-                        Modifier.padding(vertical = 6.dp),
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        "Android không cho chọn trực tiếp thư mục gốc Download. App sẽ tự tạo trước:\n" +
-                        "Download/POS0210/CONFIG\nDownload/POS0210/DATA\nDownload/POS0210/ARCHIVE\n" +
-                        "Sau đó hãy mở Download → POS0210 và chọn chính thư mục POS0210.",
-                        fontSize = 13.sp
-                    )
-                    Button(
-                        onClick = {
-                            val prep = PosStorage.ensureFolders(context)
-                            if (prep.isSuccess) {
-                                message = "Đã tạo/kiểm tra cây Download/POS0210. Hãy chọn chính thư mục POS0210."
-                                chooseRoot.launch(null)
-                            } else {
-                                message = "Không tạo được cây POS0210: ${prep.exceptionOrNull()?.message}"
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                    ) { Text(if (rootUri.isBlank()) "TẠO & GẮN THƯ MỤC POS0210" else "ĐỔI / GẮN LẠI POS0210") }
-                }
-            }
-
-            Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("MASTER CONFIG", fontWeight = FontWeight.Black, fontSize = 20.sp)
-                    Text("Menu · ảnh món · bàn · nhân viên/PIN · VietQR · máy in · phân mục", fontSize = 13.sp)
-                    Text(
-                        "POS0210/CONFIG/POS0210_MASTER.0210\nTrạng thái: ${if (masterFound) "ĐÃ TÌM THẤY" else if (rootUri.isNotBlank()) "CHƯA CÓ FILE · BẤM GHI MASTER" else "CHƯA GẮN THƯ MỤC"}",
-                        Modifier.padding(vertical = 8.dp),
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Button(
-                        onClick = {
-                            if (rootUri.isBlank()) {
-                                message = "Hãy chọn nơi lưu POS0210 trước."
-                            } else {
-                                val result = ConfigBackup.saveMaster(context, rootUri)
-                                refreshTick++
-                                message = if (result.isSuccess) "Đã ghi đè đúng MASTER chuẩn." else "GHI MASTER lỗi: ${result.exceptionOrNull()?.message}"
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = rootUri.isNotBlank()
-                    ) { Text("GHI MASTER NGAY") }
-
-                    if (masterFound) {
-                        OutlinedButton(
-                            onClick = {
-                                val uri = ConfigBackup.findMaster(context, rootUri)
-                                if (uri != null) {
-                                    val result = ConfigBackup.importConfig(context, uri)
-                                    if (result.isSuccess) {
-                                        vm.saveSetting("storage_root_uri", rootUri)
-                                        Toast.makeText(context, "Đã LOAD MASTER chuẩn. App sẽ mở lại.", Toast.LENGTH_LONG).show()
-                                        android.os.Process.killProcess(android.os.Process.myPid())
-                                    } else {
-                                        message = "LOAD MASTER lỗi: ${result.exceptionOrNull()?.message}"
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                        ) { Text("LOAD MASTER CHUẨN") }
-                    }
-
-                    OutlinedButton(
-                        onClick = { importMaster.launch(arrayOf("*/*")) },
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                    ) { Text("LOAD MASTER TỪ FILE KHÁC") }
-                }
-            }
-
-            Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("DATA VẬN HÀNH", fontWeight = FontWeight.Black, fontSize = 20.sp)
-                    Text("Bill · order · thanh toán · nhập hàng · lịch sử · audit", fontSize = 13.sp)
-                    Text(
-                        "POS0210/DATA/POS0210_DATA_LATEST.db\n" +
-                        "POS0210/DATA/POS0210_MEDIA_LATEST.0210\n" +
-                        "DATA: ${if (dataFound) "ĐÃ CÓ" else "CHƯA CÓ"} · MEDIA: ${if (mediaFound) "ĐÃ CÓ" else "CHƯA CÓ"}",
-                        Modifier.padding(vertical = 8.dp),
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Button(
-                        onClick = {
-                            if (rootUri.isBlank()) {
-                                message = "Hãy chọn nơi lưu POS0210 trước."
-                            } else {
-                                val result = DataBackup.backupLatest(context, rootUri)
-                                refreshTick++
-                                message = if (result.isSuccess) "BACKUP DATA + MEDIA thành công." else "BACKUP lỗi: ${result.exceptionOrNull()?.message}"
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        enabled = rootUri.isNotBlank()
-                    ) { Text("BACKUP NGAY → DATA_LATEST") }
-
-                    OutlinedButton(
-                        onClick = {
-                            if (rootUri.isBlank()) {
-                                message = "Hãy chọn nơi lưu POS0210 trước."
-                            } else {
-                                val result = DataBackup.archiveSnapshot(context, rootUri)
-                                refreshTick++
-                                message = if (result.isSuccess) "Đã tạo snapshot trong ARCHIVE." else "ARCHIVE lỗi: ${result.exceptionOrNull()?.message}"
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        enabled = rootUri.isNotBlank()
-                    ) { Text("TẠO SNAPSHOT ARCHIVE") }
-
-                    if (dataFound) {
-                        Button(
-                            onClick = {
-                                val result = DataBackup.restoreLatest(context, rootUri)
-                                if (result.isSuccess) {
-                                    Toast.makeText(context, "Đã RESTORE DATA + MEDIA + MASTER. App sẽ mở lại.", Toast.LENGTH_LONG).show()
-                                    android.os.Process.killProcess(android.os.Process.myPid())
-                                } else {
-                                    message = "RESTORE DATA_LATEST lỗi: ${result.exceptionOrNull()?.message}"
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                        ) { Text("KHÔI PHỤC TOÀN BỘ TỪ POS0210") }
-                    }
-
-                    OutlinedButton(
-                        onClick = { restoreBackup.launch(arrayOf("application/octet-stream", "*/*")) },
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                    ) { Text("RESTORE DATA TỪ FILE KHÁC") }
-                }
-            }
-
-            Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("HƯỚNG DẪN LƯU TRỮ & KHÔI PHỤC", fontWeight = FontWeight.Black, fontSize = 18.sp)
-                    Text(
-                        "CẤU TRÚC ĐÚNG:\n" +
-                        "Download/POS0210/CONFIG/POS0210_MASTER.0210\n" +
-                        "Download/POS0210/DATA/POS0210_DATA_LATEST.db\n" +
-                        "Download/POS0210/DATA/POS0210_MEDIA_LATEST.0210\n" +
-                        "Download/POS0210/ARCHIVE/...\n\n" +
-                        "LƯU TRỮ:\n" +
-                        "• MASTER: bấm GHI MASTER NGAY khi thay menu, bàn, nhân viên/PIN, phân quyền, VietQR, máy in.\n" +
-                        "• DATA_LATEST: app tự cập nhật sau các thao tác vận hành quan trọng.\n" +
-                        "• MEDIA_LATEST: giữ ảnh món/combo/hóa đơn; cập nhật khi có thay đổi ảnh hoặc BACKUP NGAY.\n" +
-                        "• ARCHIVE: tạo cả snapshot DB và media cùng mốc thời gian.\n\n" +
-                        "CHUYỂN SANG MÁY KHÁC:\n" +
-                        "1. Copy nguyên thư mục POS0210 vào Download của máy mới.\n" +
-                        "2. Cài POS0210 và vào Dữ liệu & Backup.\n" +
-                        "3. Gắn đúng thư mục Download/POS0210.\n" +
-                        "4. Bấm KHÔI PHỤC TOÀN BỘ TỪ POS0210.\n" +
-                        "5. App sẽ khôi phục DATA_LATEST + MEDIA_LATEST + MASTER, sau đó mở lại.\n\n" +
-                        "LƯU Ý:\n" +
-                        "• Sau khi cài lại app phải gắn lại thư mục vì Android có thể mất quyền SAF của app cũ.\n" +
-                        "• Nên copy cả thư mục POS0210, không copy riêng từng file.",
-                        Modifier.padding(top = 8.dp),
-                        fontSize = 13.sp
-                    )
-                }
-            }
-
-            Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("QUY TẮC AN TOÀN", fontWeight = FontWeight.Black)
-                    Text(
-                        "• App không tự tạo MASTER/DATA khi chưa gắn thư mục.\n" +
-                        "• Restore DATA luôn áp MASTER lại để PIN/quyền/menu không bị snapshot DB cũ ghi đè.\n" +
-                        "• Trước khi chuyển máy nên bấm GHI MASTER NGAY và BACKUP NGAY để chắc chắn lấy dữ liệu mới nhất.",
-                        Modifier.padding(top = 8.dp)
-                    )
-                }
-            }
-
-            if (message.isNotBlank()) {
-                Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                    Text(message, Modifier.padding(14.dp), fontWeight = FontWeight.Bold)
-                }
-            }
-            Spacer(Modifier.height(30.dp))
-        }
-    }
-}
-
-@Composable
-fun TableManager(vm: PosViewModel) {
-    val tables by vm.tables.collectAsState()
-    val areas by vm.areas.collectAsState()
-    val sessions by vm.sessions.collectAsState()
-    var editing by remember { mutableStateOf<DiningTableEntity?>(null) }
-    var adding by remember { mutableStateOf(false) }
-
-    Column {
-        Header("Bàn & khu vực") { vm.screen.value = "MANAGE" }
-        Button(
-            onClick = { adding = true },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
-        ) { Text("＋ THÊM BÀN") }
-
-        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-            items(tables) { t ->
-                val areaName = areas.firstOrNull { it.id == t.areaId }?.name ?: t.areaId
-                val occupied = sessions.any { it.tableId == t.id }
-                Card(
-                    Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { editing = t }
-                ) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(t.name, fontWeight = FontWeight.Bold)
-                            Text(areaName, fontSize = 12.sp)
-                        }
-                        if (occupied) Text("ĐANG CÓ KHÁCH", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        else Text("SỬA", fontSize = 11.sp)
-                    }
-                }
-            }
-        }
-    }
-
-    if (adding) {
-        TableEditorDialog(
-            initial = null,
-            areas = areas,
-            onDismiss = { adding = false },
-            onSave = { name, areaId ->
-                vm.addTable(areaId, name)
-                adding = false
-            },
-            onHide = null
-        )
-    }
-
-    editing?.let { t ->
-        val occupied = sessions.any { it.tableId == t.id }
-        TableEditorDialog(
-            initial = t,
-            areas = areas,
-            onDismiss = { editing = null },
-            onSave = { name, areaId ->
-                vm.updateTable(t, name, areaId)
-                editing = null
-            },
-            onHide = if (occupied) null else {
-                {
-                    vm.hideTable(t)
-                    editing = null
-                }
-            }
-        )
-    }
-}
-
-@Composable
-fun TableEditorDialog(
-    initial: DiningTableEntity?,
-    areas: List<AreaEntity>,
-    onDismiss: () -> Unit,
-    onSave: (String, String) -> Unit,
-    onHide: (() -> Unit)?
-) {
-    var name by remember(initial?.id) { mutableStateOf(initial?.name ?: "") }
-    var areaId by remember(initial?.id, areas) {
-        mutableStateOf(initial?.areaId ?: areas.firstOrNull()?.id.orEmpty())
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "Thêm bàn" else "Sửa bàn") },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Tên bàn") },
-                    placeholder = { Text("Để trống sẽ tự đặt Bàn xx") }
-                )
-                Spacer(Modifier.height(10.dp))
-                Text("Khu vực", fontWeight = FontWeight.Bold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    areas.forEach { a ->
-                        FilterChip(
-                            selected = areaId == a.id,
-                            onClick = { areaId = a.id },
-                            label = { Text(a.name) }
-                        )
-                    }
-                }
-                if (initial != null && onHide == null) {
-                    Text(
-                        "Bàn đang có khách nên chưa thể ẩn.",
-                        Modifier.padding(top = 10.dp),
-                        fontSize = 12.sp
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onSave(name, areaId) },
-                enabled = areaId.isNotBlank()
-            ) { Text("LƯU") }
-        },
-        dismissButton = {
-            Row {
-                if (onHide != null) {
-                    TextButton(onClick = onHide) { Text("ẨN BÀN") }
-                }
-                TextButton(onClick = onDismiss) { Text("HỦY") }
-            }
-        }
-    )
-}
-
-@Composable
-fun Rowx(t: String, s: String, go: () -> Unit) {
-    Card(Modifier.fillMaxWidth().padding(5.dp).clickable { go() }) {
-        Column(Modifier.padding(16.dp)) {
-            Text(t, fontWeight = FontWeight.Bold)
-            Text(s, fontSize = 12.sp)
-        }
-    }
-}
-
-@Composable
-fun Employees(vm: PosViewModel) {
-    val es by vm.employees.collectAsState()
-    val current by vm.currentEmployee.collectAsState()
-    var editing by remember { mutableStateOf<EmployeeEntity?>(null) }
-    var adding by remember { mutableStateOf(false) }
-    Column {
-        Header("Nhân viên") { vm.screen.value = "MANAGE" }
-        if (current?.role == "ADMIN") {
-            Button(
-                onClick = { adding = true },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
-            ) { Text("＋ THÊM NHÂN VIÊN") }
-        }
-        LazyColumn {
-            items(es) { e ->
-                Card(Modifier.fillMaxWidth().padding(6.dp).clickable { if (current?.role == "ADMIN") editing = e }) {
-                    Column(Modifier.padding(14.dp)) {
-                        Text("${e.name} · ${e.role}", fontWeight = FontWeight.Bold)
-                        Text("Order ${e.canOrder} · Bếp ${e.canSendKitchen} · Thu ${e.canCheckout} · Nhập ${e.canPurchase}")
-                        Text("Chạm để sửa quyền", fontSize = 12.sp)
-                    }
-                }
-            }
-        }
-    }
-    if (adding) {
-        EmployeeEditor(null, onDismiss = { adding = false }) { name, pin, role, order, kitchen, checkout, purchase, report, menu, system ->
-            vm.saveEmployee(name, pin, role, checkout, purchase, order, kitchen, report, menu, system)
-            adding = false
-        }
-    }
-    editing?.let { e ->
-        EmployeeEditor(e, onDismiss = { editing = null }) { name, pin, role, order, kitchen, checkout, purchase, report, menu, system ->
-            vm.updateEmployee(
-                e.copy(
-                    name = name,
-                    pin = pin,
-                    role = role,
-                    canOrder = order,
-                    canSendKitchen = kitchen,
-                    canCheckout = checkout,
-                    canPurchase = purchase,
-                    canViewReport = report,
-                    canManageMenu = menu,
-                    canManageSystem = system
-                )
-            )
-            editing = null
-        }
-    }
-}
-
-@Composable
-fun EmployeeEditor(
-    initial: EmployeeEntity?,
-    onDismiss: () -> Unit,
-    onSave: (String, String, String, Boolean, Boolean, Boolean, Boolean, Boolean, Boolean, Boolean) -> Unit
-) {
-    var name by remember(initial?.id) { mutableStateOf(initial?.name ?: "") }
-    var pin by remember(initial?.id) { mutableStateOf(initial?.pin ?: "") }
-    var role by remember(initial?.id) { mutableStateOf(initial?.role ?: "STAFF") }
-    var order by remember(initial?.id) { mutableStateOf(initial?.canOrder ?: true) }
-    var kitchen by remember(initial?.id) { mutableStateOf(initial?.canSendKitchen ?: true) }
-    var checkout by remember(initial?.id) { mutableStateOf(initial?.canCheckout ?: false) }
-    var purchase by remember(initial?.id) { mutableStateOf(initial?.canPurchase ?: false) }
-    var report by remember(initial?.id) { mutableStateOf(initial?.canViewReport ?: false) }
-    var menu by remember(initial?.id) { mutableStateOf(initial?.canManageMenu ?: false) }
-    var system by remember(initial?.id) { mutableStateOf(initial?.canManageSystem ?: false) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "Thêm nhân viên" else "Sửa nhân viên") },
-        confirmButton = {
-            Button(
-                onClick = { onSave(name, pin, role, order, kitchen, checkout, purchase, report, menu, system) },
-                enabled = name.isNotBlank() && pin.length == 4
-            ) { Text("LƯU") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("HỦY") } },
-        text = {
-            LazyColumn {
-                item {
-                    OutlinedTextField(name, { name = it }, label = { Text("Tên nhân viên") })
-                    OutlinedTextField(
-                        pin,
-                        { pin = it.filter(Char::isDigit).take(4) },
-                        label = { Text("PIN 4 số") },
-                        visualTransformation = PasswordVisualTransformation()
-                    )
-                    Row {
-                        FilterChip(role == "STAFF", { role = "STAFF" }, { Text("STAFF") })
-                        Spacer(Modifier.width(8.dp))
-                        FilterChip(role == "MANAGER", { role = "MANAGER" }, { Text("MANAGER") })
-                    }
-                    PermissionSwitch("Order món", order) { order = it }
-                    PermissionSwitch("Gửi bếp", kitchen) { kitchen = it }
-                    PermissionSwitch("Thanh toán", checkout) { checkout = it }
-                    PermissionSwitch("Nhập đầu vào", purchase) { purchase = it }
-                    PermissionSwitch("Xem báo cáo", report) { report = it }
-                    PermissionSwitch("Quản lý menu", menu) { menu = it }
-                    PermissionSwitch("Cấu hình hệ thống", system) { system = it }
-                }
-            }
-        }
-    )
-}
-
-@Composable
-fun PermissionSwitch(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onChange)
-    }
-}
-
-@Composable
-fun ComboManager(vm: PosViewModel) {
-    val combos by vm.combos.collectAsState()
-    val menu by vm.menu.collectAsState()
-    var showAdd by remember { mutableStateOf(false) }
-    Column {
-        Header("Combo") { vm.screen.value = "MANAGE" }
-        Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
-            Text("＋ TẠO COMBO")
-        }
-        if (combos.isEmpty()) {
-            Text("Chưa có combo.", Modifier.padding(20.dp))
-        } else {
-            LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-                items(combos) { combo ->
-                    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            if (!combo.imageUri.isNullOrBlank()) {
-                                AsyncImage(model = combo.imageUri, contentDescription = combo.name, modifier = Modifier.size(62.dp))
-                                Spacer(Modifier.width(10.dp))
-                            }
-                            Column(Modifier.weight(1f)) {
-                                Text(combo.name, fontWeight = FontWeight.Bold)
-                                Text(money(combo.price))
-                                ComboComponentNames(vm, combo.id, menu)
-                            }
-                            Switch(checked = combo.active, onCheckedChange = { vm.toggleCombo(combo) })
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if (showAdd) {
-        ComboAddDialog(menu.filter { it.active }, onDismiss = { showAdd = false }) { name, price, imageUri, selected ->
-            vm.saveCombo(name, price, imageUri, selected)
-            showAdd = false
-        }
-    }
-}
-
-@Composable
-fun ComboComponentNames(vm: PosViewModel, comboId: String, menu: List<MenuItemEntity>) {
-    val parts by vm.comboItems(comboId).collectAsState(initial = emptyList())
-    val text = parts.mapNotNull { ci -> menu.firstOrNull { it.id == ci.menuItemId }?.let { "${ci.qty}×${it.name}" } }.joinToString(" + ")
-    if (text.isNotBlank()) Text(text, fontSize = 11.sp)
-}
-
-@Composable
-fun ComboAddDialog(
-    menu: List<MenuItemEntity>,
-    onDismiss: () -> Unit,
-    onSave: (String, Long, String?, Map<String, Int>) -> Unit
-) {
-    val context = LocalContext.current
-    var name by remember { mutableStateOf("") }
-    var priceText by remember { mutableStateOf("") }
-    var imageUri by remember { mutableStateOf<String?>(null) }
-    val selected = remember { mutableStateMapOf<String, Int>() }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-            imageUri = uri.toString()
-        }
-    }
-    val normalTotal = selected.entries.sumOf { (id, q) -> (menu.firstOrNull { it.id == id }?.price ?: 0L) * q }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Tạo combo") },
-        confirmButton = {
-            Button(
-                onClick = { onSave(name, priceText.toLongOrNull() ?: 0L, imageUri, selected.toMap()) },
-                enabled = name.isNotBlank() && (priceText.toLongOrNull() ?: 0L) > 0 && selected.isNotEmpty()
-            ) { Text("LƯU COMBO") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("HỦY") } },
-        text = {
-            LazyColumn {
-                item {
-                    OutlinedTextField(name, { name = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Tên combo") })
-                    OutlinedTextField(priceText, { priceText = it.filter(Char::isDigit) }, modifier = Modifier.fillMaxWidth(), label = { Text("Giá combo") })
-                    OutlinedButton(onClick = { picker.launch(arrayOf("image/*")) }, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                        Text(if (imageUri == null) "＋ ẢNH COMBO" else "✓ ĐÃ CHỌN ẢNH")
-                    }
-                    Text("Giá lẻ các món đã chọn: ${money(normalTotal)}", fontWeight = FontWeight.Bold)
-                    val comboPrice = priceText.toLongOrNull() ?: 0L
-                    if (comboPrice > 0 && normalTotal > comboPrice) Text("Tiết kiệm: ${money(normalTotal - comboPrice)}", fontSize = 12.sp)
-                    Text("Chọn món trong combo", Modifier.padding(top = 10.dp), fontWeight = FontWeight.Bold)
-                }
-                items(menu) { item ->
-                    val q = selected[item.id] ?: 0
-                    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(item.name, fontWeight = FontWeight.Bold)
-                            Text(money(item.price), fontSize = 11.sp)
-                        }
-                        if (q > 0) {
-                            TextButton(onClick = { if (q <= 1) selected.remove(item.id) else selected[item.id] = q - 1 }) { Text("−") }
-                            Text(q.toString(), fontWeight = FontWeight.Bold)
-                        }
-                        TextButton(onClick = { selected[item.id] = q + 1 }) { Text("+") }
-                    }
-                }
-            }
-        }
-    )
-}
-
-@Composable
-fun PricingManager(vm: PosViewModel) {
-    val rules by vm.pricingRules.collectAsState()
-    var showAdd by remember { mutableStateOf(false) }
-    Column {
-        Header("Ưu đãi & điều chỉnh giá") { vm.screen.value = "MANAGE" }
-        Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
-            Text("＋ TẠO CHƯƠNG TRÌNH")
-        }
-        Text("Giảm giá không cộng dồn: hệ thống chỉ áp dụng 1 mức giảm có giá trị lớn nhất.", Modifier.padding(horizontal = 16.dp), fontSize = 12.sp)
-        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-            items(rules) { rule ->
-                Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(rule.name, fontWeight = FontWeight.Bold)
-                            Text("${if (rule.kind == "DISCOUNT") "Giảm" else "Phụ thu"} ${rule.percent}%${if (rule.code.isNotBlank()) " · Mã ${rule.code}" else ""}")
-                            val mode = if (rule.autoApply) "Tự động" else "Theo mã"
-                            Text(mode, fontSize = 11.sp)
-                        }
-                        Switch(checked = rule.active, onCheckedChange = { vm.togglePricingRule(rule) })
-                    }
-                }
-            }
-        }
-    }
-    if (showAdd) {
-        PricingRuleDialog(onDismiss = { showAdd = false }) { name, code, kind, percent, startAt, endAt, startMin, endMin, autoApply ->
-            vm.savePricingRule(name, code, kind, percent, startAt, endAt, startMin, endMin, autoApply)
-            showAdd = false
-        }
-    }
-}
-
-@Composable
-fun PricingRuleDialog(
-    onDismiss: () -> Unit,
-    onSave: (String, String, String, Int, Long?, Long?, Int?, Int?, Boolean) -> Unit
-) {
-    var name by remember { mutableStateOf("") }
-    var code by remember { mutableStateOf("") }
-    var kind by remember { mutableStateOf("DISCOUNT") }
-    var percentText by remember { mutableStateOf("") }
-    var startText by remember { mutableStateOf("") }
-    var endText by remember { mutableStateOf("") }
-    var startHour by remember { mutableStateOf("") }
-    var endHour by remember { mutableStateOf("") }
-    var autoApply by remember { mutableStateOf(true) }
-    fun parseDate(text: String): Long? = if (text.isBlank()) null else runCatching {
-        SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).apply { isLenient = false }.parse(text)?.time
-    }.getOrNull()
-    fun parseMinute(text: String): Int? {
-        if (text.isBlank()) return null
-        val parts = text.split(":")
-        if (parts.size != 2) return null
-        val h = parts[0].toIntOrNull() ?: return null
-        val m = parts[1].toIntOrNull() ?: return null
-        if (h !in 0..23 || m !in 0..59) return null
-        return h * 60 + m
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Chương trình giá") },
-        confirmButton = {
-            Button(
-                onClick = { onSave(name, code, kind, percentText.toIntOrNull() ?: 0, parseDate(startText), parseDate(endText), parseMinute(startHour), parseMinute(endHour), autoApply) },
-                enabled = name.isNotBlank() && (percentText.toIntOrNull() ?: 0) in 1..100 && (autoApply || code.isNotBlank())
-            ) { Text("LƯU") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("HỦY") } },
-        text = {
-            LazyColumn {
-                item {
-                    OutlinedTextField(name, { name = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Tên chương trình") })
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(kind == "DISCOUNT", { kind = "DISCOUNT" }, { Text("GIẢM") })
-                        FilterChip(kind == "SURCHARGE", { kind = "SURCHARGE" }, { Text("TĂNG / PHỤ THU") })
-                    }
-                    OutlinedTextField(percentText, { percentText = it.filter(Char::isDigit).take(3) }, modifier = Modifier.fillMaxWidth(), label = { Text("% điều chỉnh") })
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Tự động áp dụng", Modifier.weight(1f))
-                        Switch(checked = autoApply, onCheckedChange = { autoApply = it })
-                    }
-                    if (!autoApply) {
-                        OutlinedTextField(code, { code = it.uppercase().filter { ch -> ch.isLetterOrDigit() || ch == '_' || ch == '-' }.take(30) }, modifier = Modifier.fillMaxWidth(), label = { Text("Mã ưu đãi") })
-                    } else {
-                        OutlinedTextField(code, { code = it.uppercase().take(30) }, modifier = Modifier.fillMaxWidth(), label = { Text("Mã tham chiếu (không bắt buộc)") })
-                    }
-                    Text("Thời hạn chung (để trống nếu không giới hạn)", Modifier.padding(top = 8.dp), fontWeight = FontWeight.Bold)
-                    OutlinedTextField(startText, { startText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Từ dd/MM/yyyy HH:mm") })
-                    OutlinedTextField(endText, { endText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Đến dd/MM/yyyy HH:mm") })
-                    Text("Khung giờ lặp hàng ngày (để trống nếu cả ngày)", Modifier.padding(top = 8.dp), fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(startHour, { startHour = it.take(5) }, modifier = Modifier.weight(1f), label = { Text("Từ HH:mm") })
-                        OutlinedTextField(endHour, { endHour = it.take(5) }, modifier = Modifier.weight(1f), label = { Text("Đến HH:mm") })
-                    }
-                }
-            }
-        }
-    )
-}
-
-@Composable
-fun MenuManager(vm: PosViewModel) {
-    val menu by vm.menu.collectAsState()
-    val categories by vm.categories.collectAsState()
-    val context = LocalContext.current
-    var showAdd by remember { mutableStateOf(false) }
-    var showCategoryManager by remember { mutableStateOf(false) }
-    var editTarget by remember { mutableStateOf<MenuItemEntity?>(null) }
-    var deleteTarget by remember { mutableStateOf<MenuItemEntity?>(null) }
-    var imageTarget by remember { mutableStateOf<MenuItemEntity?>(null) }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            }
-            imageTarget?.let { vm.setMenuImage(it, uri.toString()) }
-        }
-        imageTarget = null
-    }
-    Column {
-        Header("Quản lý menu") { vm.screen.value = "MANAGE" }
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Button(onClick = { showAdd = true }, modifier = Modifier.weight(1f)) { Text("＋ THÊM MÓN") }
-            OutlinedButton(onClick = { showCategoryManager = true }, modifier = Modifier.weight(1f)) { Text("NHÓM MÓN") }
-        }
-        LazyColumn {
-            items(menu) { m ->
-                Card(Modifier.fillMaxWidth().padding(6.dp)) {
-                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        if (!m.imageUri.isNullOrBlank()) {
-                            AsyncImage(
-                                model = m.imageUri,
-                                contentDescription = m.name,
-                                modifier = Modifier.size(58.dp)
-                            )
-                            Spacer(Modifier.width(10.dp))
-                        } else {
-                            Surface(
-                                modifier = Modifier.size(58.dp),
-                                color = Tint,
-                                shape = MaterialTheme.shapes.medium
-                            ) {
-                                Box(contentAlignment = Alignment.Center) { Text("ẢNH", fontSize = 11.sp) }
-                            }
-                            Spacer(Modifier.width(10.dp))
-                        }
-                        Column(Modifier.weight(1f)) {
-                            Text(m.name, fontWeight = FontWeight.Bold)
-                            Text("${m.productCode} · ${categories.firstOrNull { it.id == m.categoryId }?.name ?: "Khác"}", fontSize = 12.sp)
-                            Text(money(m.price))
-                            if (m.description.isNotBlank()) Text(m.description, fontSize = 12.sp, maxLines = 2)
-                            if (!m.active) Text("TẠM NGƯNG BÁN", color = Color(0xFF9A3412), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                        TextButton(onClick = { editTarget = m }) { Text("SỬA") }
-                        TextButton(onClick = {
-                            imageTarget = m
-                            picker.launch(arrayOf("image/*"))
-                        }) { Text(if (m.imageUri.isNullOrBlank()) "＋ ẢNH" else "ĐỔI ẢNH") }
-                        TextButton(onClick = { if (m.active) deleteTarget = m else vm.toggleMenu(m) }) { Text(if(m.active) "TẠM NGƯNG" else "BẬT BÁN") }
-                    }
-                }
-            }
-        }
-    }
-    if (showAdd) {
-        MenuAddDialog(categories, null, onDismiss = { showAdd = false }) { name, price, cat, description, imageUri, active ->
-            vm.saveMenu(name, price, cat, description, imageUri, active)
-            showAdd = false
-        }
-    }
-    editTarget?.let { original ->
-        MenuAddDialog(categories, original, onDismiss = { editTarget = null }) { name, price, cat, description, imageUri, active ->
-            vm.updateMenu(original, name, price, cat, description, imageUri, active)
-            editTarget = null
-        }
-    }
-    if (showCategoryManager) {
-        CategoryManagerDialog(
-            categories = categories,
-            menu = menu,
-            onDismiss = { showCategoryManager = false },
-            onAdd = { vm.addCategory(it) },
-            onDelete = { vm.deleteCategory(it) }
-        )
-    }
-    deleteTarget?.let { m ->
-        AlertDialog(
-            onDismissRequest = { deleteTarget = null },
-            title = { Text("Xoá món") },
-            text = { Text("Xoá ${m.name} khỏi menu bán? Lịch sử bill cũ vẫn được giữ.") },
-            confirmButton = {
-                Button(onClick = { vm.deleteMenu(m); deleteTarget = null }) { Text("XOÁ MÓN") }
-            },
-            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("HỦY") } }
-        )
-    }
-}
-
-@Composable
-fun CategoryManagerDialog(
-    categories: List<MenuCategoryEntity>,
-    menu: List<MenuItemEntity>,
-    onDismiss: () -> Unit,
-    onAdd: (String) -> Unit,
-    onDelete: (MenuCategoryEntity) -> Unit
-) {
-    var name by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Nhóm món") },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("ĐÓNG") } },
-        text = {
-            LazyColumn {
-                item {
-                    OutlinedTextField(
-                        value = name,
-                        onValueChange = { name = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Tên nhóm mới") }
-                    )
-                    Button(
-                        onClick = { onAdd(name); name = "" },
-                        enabled = name.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-                    ) { Text("＋ THÊM NHÓM") }
-                }
-                items(categories) { c ->
-                    val hasActiveItems = menu.any { it.active && it.categoryId == c.id }
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(c.name, Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                        TextButton(
-                            onClick = { onDelete(c) },
-                            enabled = !hasActiveItems
-                        ) { Text("XOÁ") }
-                    }
-                    if (hasActiveItems) {
-                        Text("Còn món trong nhóm này", fontSize = 11.sp)
-                    }
-                }
-            }
-        }
-    )
-}
-
-@Composable
-fun MenuAddDialog(
-    categories: List<MenuCategoryEntity>,
-    initial: MenuItemEntity? = null,
-    onDismiss: () -> Unit,
-    onSave: (String, Long, String, String, String?, Boolean) -> Unit
-) {
-    val context = LocalContext.current
-    var name by remember(initial?.id) { mutableStateOf(initial?.name ?: "") }
-    var priceText by remember(initial?.id) { mutableStateOf(initial?.price?.toString() ?: "") }
-    var cat by remember(categories, initial?.id) { mutableStateOf(initial?.categoryId ?: categories.firstOrNull()?.id ?: "") }
-    var description by remember(initial?.id) { mutableStateOf(initial?.description ?: "") }
-    var imageUri by remember(initial?.id) { mutableStateOf(initial?.imageUri) }
-    var active by remember(initial?.id) { mutableStateOf(initial?.active ?: true) }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            }
-            imageUri = uri.toString()
-        }
-    }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "Thêm món" else "Sửa món · ${initial.productCode}") },
-        confirmButton = {
-            Button(
-                onClick = { onSave(name, priceText.toLongOrNull() ?: 0L, cat, description, imageUri, active) },
-                enabled = name.isNotBlank() && priceText.toLongOrNull() != null && cat.isNotBlank()
-            ) { Text("LƯU MÓN") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("HỦY") } },
-        text = {
-            LazyColumn {
-                item {
-                    OutlinedTextField(name, { name = it }, label = { Text("Tên món") })
-                    OutlinedTextField(
-                        priceText,
-                        { priceText = it.filter(Char::isDigit) },
-                        label = { Text("Giá bán") }
-                    )
-                    OutlinedTextField(
-                        description,
-                        { description = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Mô tả / ghi chú món") },
-                        minLines = 2,
-                        maxLines = 4
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(onClick = { picker.launch(arrayOf("image/*")) }) {
-                        Text(if (imageUri == null) "＋ THÊM ẢNH MINH HOẠ" else "✓ ĐÃ CHỌN ẢNH · ĐỔI ẢNH")
-                    }
-                    if (imageUri != null) {
-                        AsyncImage(
-                            model = imageUri,
-                            contentDescription = "Ảnh món mới",
-                            modifier = Modifier.fillMaxWidth().height(150.dp).padding(top = 8.dp)
-                        )
-                    }
-                    Text("Nhóm món", Modifier.padding(top = 10.dp))
-                    categories.forEach { c ->
-                        FilterChip(
-                            selected = cat == c.id,
-                            onClick = { cat = c.id },
-                            label = { Text(c.name) }
-                        )
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Đang bán", Modifier.weight(1f), fontWeight = FontWeight.Bold)
-                        Switch(checked = active, onCheckedChange = { active = it })
-                    }
-                }
-            }
-        }
-    )
-}
-
-@Composable
-fun Purchases(vm: PosViewModel) {
-    val currentGuard by vm.currentEmployee.collectAsState()
-    if (currentGuard?.role != "ADMIN" && currentGuard?.canPurchase != true) {
-        Column {
-            Header("Nhập đầu vào") { vm.screen.value = "MANAGE" }
-            Text("Bạn không có quyền nhập đầu vào.", Modifier.padding(20.dp), fontWeight = FontWeight.Bold)
-        }
-        return
-    }
-    val purchases by vm.purchases.collectAsState()
-    val purchaseCategories by vm.purchaseCategories.collectAsState()
-    val context = LocalContext.current
-    var itemName by remember { mutableStateOf("") }
-    var qtyText by remember { mutableStateOf("") }
-    var unit by remember { mutableStateOf("kg") }
-    var unitPriceText by remember { mutableStateOf("") }
-    var supplier by remember { mutableStateOf("") }
-    var note by remember { mutableStateOf("") }
-    var invoiceImage by remember { mutableStateOf<String?>(null) }
-    var selectedPurchase by remember { mutableStateOf<PurchaseEntity?>(null) }
-    var selectedCategoryId by remember(purchaseCategories) {
-        mutableStateOf(purchaseCategories.firstOrNull()?.id ?: "pc_production")
-    }
-    var showCategoryManager by remember { mutableStateOf(false) }
-    var dateText by remember {
-        mutableStateOf(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date()))
-    }
-    var message by remember { mutableStateOf("") }
-
-    val invoicePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            runCatching {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            }
-            invoiceImage = uri.toString()
-        }
-    }
-
-    val selectedCategory = purchaseCategories.firstOrNull { it.id == selectedCategoryId }
-    val qty = qtyText.replace(',', '.').toDoubleOrNull()
-    val unitPrice = unitPriceText.toLongOrNull()
-    val total = if (qty != null && unitPrice != null) (qty * unitPrice).toLong() else 0L
-
-    Column {
-        Header("Nhập đầu vào") { vm.screen.value = "MANAGE" }
-
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text("Phân mục", Modifier.weight(1f), fontWeight = FontWeight.Black, fontSize = 18.sp)
-            OutlinedButton(onClick = { showCategoryManager = true }) { Text("QUẢN LÝ PHÂN MỤC") }
-        }
-
-        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-            item {
-                if (purchaseCategories.isNotEmpty()) {
-                    Row(
-                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        purchaseCategories.forEach { c ->
-                            FilterChip(
-                                selected = selectedCategoryId == c.id,
-                                onClick = {
-                                    selectedCategoryId = c.id
-                                    unit = c.defaultUnit
-                                },
-                                label = { Text(c.name) }
-                            )
-                        }
-                    }
-                }
-
-                OutlinedTextField(
-                    dateText,
-                    { dateText = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Ngày giờ dd/MM/yyyy HH:mm") }
-                )
-                OutlinedTextField(
-                    supplier,
-                    { supplier = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Nhà cung cấp (không bắt buộc)") }
-                )
-                OutlinedTextField(
-                    itemName,
-                    { itemName = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(if (selectedCategory?.id == "pc_salary") "Nội dung / nhân sự" else "Mặt hàng / nội dung chi") }
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        qtyText,
-                        { qtyText = it.filter { ch -> ch.isDigit() || ch == ',' || ch == '.' } },
-                        modifier = Modifier.weight(1f),
-                        label = { Text(if (selectedCategory?.id == "pc_salary") "Số ngày công / SL" else "Khối lượng / SL") }
-                    )
-                    OutlinedTextField(
-                        unit,
-                        { unit = it },
-                        modifier = Modifier.weight(1f),
-                        label = { Text("Đơn vị") }
-                    )
-                }
-                OutlinedTextField(
-                    unitPriceText,
-                    { unitPriceText = it.filter(Char::isDigit) },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text(if (selectedCategory?.id == "pc_salary") "Đơn giá / ngày công" else "Đơn giá") }
-                )
-                OutlinedTextField(
-                    note,
-                    { note = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Ghi chú") }
-                )
-                Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(selectedCategory?.name ?: "Chưa chọn phân mục", fontWeight = FontWeight.Bold)
-                        Text("Thành tiền: ${money(total)}", fontWeight = FontWeight.Black, fontSize = 18.sp)
-                    }
-                }
-                OutlinedButton(
-                    onClick = { invoicePicker.launch(arrayOf("image/*")) },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(if (invoiceImage == null) "＋ ẢNH HÓA ĐƠN (TÙY CHỌN)" else "✓ ĐÃ CHỌN ẢNH HÓA ĐƠN")
-                }
-                Button(
-                    onClick = {
-                        val parser = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
-                        val parsedAt = runCatching { parser.parse(dateText)?.time }.getOrNull()
-                            ?: System.currentTimeMillis()
-                        vm.addPurchaseDetailed(
-                            name = itemName,
-                            qty = qty ?: 0.0,
-                            unit = unit.ifBlank { selectedCategory?.defaultUnit ?: "lần" },
-                            unitPrice = unitPrice ?: 0L,
-                            note = note,
-                            at = parsedAt,
-                            supplierName = supplier,
-                            imageUri = invoiceImage,
-                            categoryId = selectedCategoryId
-                        )
-                        message = "Đã tạo phiếu nhập · ${selectedCategory?.name ?: ""} · ${money(total)}"
-                        itemName = ""
-                        qtyText = ""
-                        unitPriceText = ""
-                        note = ""
-                        invoiceImage = null
-                    },
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                    enabled = selectedCategoryId.isNotBlank() && itemName.isNotBlank() && (qty ?: 0.0) > 0 && (unitPrice ?: 0L) > 0
-                ) { Text("TẠO PHIẾU NHẬP") }
-
-                if (message.isNotBlank()) {
-                    Text(message, Modifier.padding(vertical = 6.dp), fontWeight = FontWeight.Bold)
-                }
-                Text("Phiếu nhập gần đây", Modifier.padding(top = 14.dp, bottom = 6.dp), fontWeight = FontWeight.Bold)
-            }
-
-            items(purchases.take(20)) { p ->
-                Card(
-                    Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { selectedPurchase = p }
-                ) {
-                    Column(Modifier.padding(12.dp)) {
-                        Text(time(p.purchasedAt), fontWeight = FontWeight.Bold)
-                        Text("${money(p.total)} · ${p.note.ifBlank { "Không ghi chú" }}")
-                        Text(if (!p.invoiceImageUri.isNullOrBlank()) "📷 Có ảnh hóa đơn · Chạm để xem" else "Chạm để xem chi tiết", fontSize = 12.sp)
-                    }
-                }
-            }
-        }
-    }
-
-    if (showCategoryManager) {
-        PurchaseCategoryManagerDialog(
-            categories = purchaseCategories,
-            onDismiss = { showCategoryManager = false },
-            onAdd = { name, defaultUnit -> vm.addPurchaseCategory(name, defaultUnit) },
-            onDelete = { vm.deletePurchaseCategory(it) }
-        )
-    }
-
-    selectedPurchase?.let { p ->
-        PurchaseDetailDialog(vm, p) { selectedPurchase = null }
-    }
-}
-
-@Composable
-fun PurchaseCategoryManagerDialog(
-    categories: List<PurchaseCategoryEntity>,
-    onDismiss: () -> Unit,
-    onAdd: (String, String) -> Unit,
-    onDelete: (PurchaseCategoryEntity) -> Unit
-) {
-    var name by remember { mutableStateOf("") }
-    var defaultUnit by remember { mutableStateOf("lần") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Phân mục nhập đầu vào") },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("ĐÓNG") } },
-        text = {
-            LazyColumn {
-                item {
-                    OutlinedTextField(
-                        name,
-                        { name = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Tên phân mục mới") }
-                    )
-                    OutlinedTextField(
-                        defaultUnit,
-                        { defaultUnit = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Đơn vị mặc định") }
-                    )
-                    Button(
-                        onClick = {
-                            onAdd(name, defaultUnit)
-                            name = ""
-                            defaultUnit = "lần"
-                        },
-                        enabled = name.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
-                    ) { Text("＋ THÊM PHÂN MỤC") }
-                }
-                items(categories) { c ->
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(c.name, fontWeight = FontWeight.Bold)
-                            Text("ĐVT mặc định: ${c.defaultUnit}", fontSize = 11.sp)
-                        }
-                        TextButton(onClick = { onDelete(c) }) { Text("XOÁ") }
-                    }
-                }
-            }
-        }
-    )
-}
-
-@Composable
-fun PurchaseDetailDialog(vm: PosViewModel, p: PurchaseEntity, onDismiss: () -> Unit) {
-    val items by vm.purchaseItems(p.id).collectAsState(initial = emptyList())
-    val suppliers by vm.suppliers.collectAsState()
-    val employees by vm.employees.collectAsState()
-    val current by vm.currentEmployee.collectAsState()
-    var showDelete by remember { mutableStateOf(false) }
-    var deleteReason by remember { mutableStateOf("") }
-
-    val supplierName = suppliers.firstOrNull { it.id == p.supplierId }?.name ?: "Không ghi"
-    val enteredBy = employees.firstOrNull { it.id == p.enteredBy }?.name ?: p.enteredBy
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = { Button(onClick = onDismiss) { Text("ĐÓNG") } },
-        dismissButton = {
-            if (current?.role == "ADMIN") {
-                TextButton(onClick = { showDelete = true }) { Text("XOÁ PHIẾU · ADMIN") }
-            }
-        },
-        title = { Text("Phiếu nhập · ${time(p.purchasedAt)}") },
-        text = {
-            LazyColumn {
-                item {
-                    Text("Nhà cung cấp: $supplierName")
-                    Text("Người nhập: $enteredBy")
-                    if (p.note.isNotBlank()) Text("Ghi chú: ${p.note}")
-                    Spacer(Modifier.height(8.dp))
-                }
-                items(items) { line ->
-                    Card(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                        Column(Modifier.padding(10.dp)) {
-                            Text(line.name, fontWeight = FontWeight.Bold)
-                            Text("${line.qty} ${line.unit} × ${money(line.unitPrice)}")
-                            Text("= ${money(line.amount)}")
-                        }
-                    }
-                }
-                item {
-                    Text("TỔNG: ${money(p.total)}", Modifier.padding(vertical = 10.dp), fontWeight = FontWeight.Black)
-                    if (!p.invoiceImageUri.isNullOrBlank()) {
-                        Text("Ảnh hóa đơn", fontWeight = FontWeight.Bold)
-                        AsyncImage(
-                            model = p.invoiceImageUri,
-                            contentDescription = "Ảnh hóa đơn",
-                            modifier = Modifier.fillMaxWidth().height(320.dp).padding(top = 8.dp)
-                        )
-                    }
-                }
-            }
-        }
-    )
-
-    if (showDelete) {
-        AlertDialog(
-            onDismissRequest = { showDelete = false },
-            title = { Text("XOÁ PHIẾU NHẬP") },
-            text = {
-                Column {
-                    Text("Phiếu ${money(p.total)} sẽ bị loại khỏi chi phí đầu vào và báo cáo, nhưng vẫn giữ dấu vết audit.")
-                    OutlinedTextField(
-                        value = deleteReason,
-                        onValueChange = { deleteReason = it },
-                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-                        label = { Text("Lý do xoá bắt buộc") }
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        vm.deletePurchase(p, deleteReason)
-                        showDelete = false
-                        onDismiss()
-                    },
-                    enabled = deleteReason.isNotBlank()
-                ) { Text("XÁC NHẬN XOÁ") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDelete = false }) { Text("HỦY") }
-            }
-        )
-    }
-}
-
-@Composable
-fun VietQr(vm: PosViewModel) {
-    val current by vm.currentEmployee.collectAsState()
-    if (current?.role != "ADMIN" && current?.role != "MANAGER") {
-        Column {
-            Header("VietQR") { vm.screen.value = "MANAGE" }
-            Text("Tài khoản Staff chỉ được sử dụng QR đã cài đặt khi thanh toán.", Modifier.padding(20.dp))
-        }
-        return
-    }
-    val sets by vm.settings.collectAsState()
-    val valueFor: (String) -> String = { key -> sets.firstOrNull { it.key == key }?.value ?: "" }
-    var bank by remember(sets) { mutableStateOf(valueFor("bank_name")) }
-    var acc by remember(sets) { mutableStateOf(valueFor("bank_account")) }
-    var holder by remember(sets) { mutableStateOf(valueFor("bank_holder")) }
-    var saved by remember { mutableStateOf(false) }
-    Column {
-        Header("VietQR") { vm.screen.value = "MANAGE" }
-        Column(Modifier.padding(16.dp)) {
-            OutlinedTextField(bank, { bank = it }, label = { Text("Ngân hàng / BANK_ID") })
-            OutlinedTextField(acc, { acc = it.filter(Char::isDigit) }, label = { Text("Số tài khoản") })
-            OutlinedTextField(holder, { holder = it }, label = { Text("Chủ tài khoản") })
-            Button(onClick = {
-                vm.saveSetting("bank_name", bank)
+                Rowx("Nhập đầu vào", "Lương · vật tư cố định · v…17829 tokens truncated…("bank_name", bank)
                 vm.saveSetting("bank_account", acc)
                 vm.saveSetting("bank_holder", holder)
                 vm.saveSetting("qr_prefix", "0210")
@@ -2522,11 +1156,7 @@ fun VietQr(vm: PosViewModel) {
             if (saved) Text("Đã lưu cấu hình VietQR", Modifier.padding(top = 8.dp))
             if (bank.isNotBlank() && acc.isNotBlank()) {
                 Text("QR mẫu 1.000đ", Modifier.padding(top = 14.dp))
-                AsyncImage(
-                    model = vietQrUrl(bank, acc, holder, 1000, "0210 TEST"),
-                    contentDescription = "QR mẫu VietQR",
-                    modifier = Modifier.size(240.dp)
-                )
+                OfflineVietQrImage(bank, acc, holder, 1000, "0210 TEST", Modifier.size(240.dp))
             }
         }
     }
@@ -2542,6 +1172,7 @@ fun Printer(vm: PosViewModel) {
     val mode = settings.firstOrNull { it.key == "printer_mode" }?.value ?: "TEST"
     val selectedMac = settings.firstOrNull { it.key == "printer_mac" }?.value ?: ""
     val selectedName = settings.firstOrNull { it.key == "printer_name" }?.value ?: ""
+    val paperMm = settings.firstOrNull { it.key == "printer_paper_mm" }?.value ?: "58"
     val hasPermission = remember(permissionTick) { BluetoothPrinter.hasPermission(context) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -2556,9 +1187,14 @@ fun Printer(vm: PosViewModel) {
         Header("Máy in") { vm.screen.value = "MANAGE" }
         LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
             item {
-                Text("XPRINTER XP‑N58H", fontWeight = FontWeight.Black, fontSize = 20.sp)
-                Text("58mm · vùng in 48mm · 203dpi · 384 dots · Bluetooth ESC/POS", fontSize = 12.sp)
+                Text("MÁY IN BLUETOOTH ESC/POS", fontWeight = FontWeight.Black, fontSize = 20.sp)
+                Text(if(paperMm=="80") "80mm · 576 dots · Bluetooth ESC/POS" else "58mm · vùng in 48mm · 203dpi · 384 dots · Bluetooth ESC/POS", fontSize = 12.sp)
                 Spacer(Modifier.height(10.dp))
+                Text("KHỔ GIẤY",fontWeight=FontWeight.Bold,fontSize=12.sp)
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                    FilterChip(selected=paperMm=="58",onClick={vm.saveSetting("printer_paper_mm","58")},label={Text("58 mm")})
+                    FilterChip(selected=paperMm=="80",onClick={vm.saveSetting("printer_paper_mm","80")},label={Text("80 mm")})
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = mode == "TEST",
@@ -2634,7 +1270,7 @@ fun Printer(vm: PosViewModel) {
                                 onClick = { vm.testBluetoothPrint() },
                                 modifier = Modifier.fillMaxWidth(),
                                 enabled = hasPermission && selectedMac.isNotBlank()
-                            ) { Text("TEST IN XP‑N58H") }
+                            ) { Text("TEST IN") }
                         }
                     }
                 }
@@ -2673,7 +1309,7 @@ fun Printer(vm: PosViewModel) {
                     Card(Modifier.fillMaxWidth().padding(top = 12.dp)) {
                         Column(Modifier.padding(16.dp)) {
                             Text("Profile chuẩn 0210", fontWeight = FontWeight.Bold)
-                            Text("XP‑N58H · 58mm · bitmap 384px. In bitmap giúp giữ font tiếng Việt, chữ Bold và VietQR ổn định.")
+                            Text("58mm: 384 dots · 80mm: 576 dots. Bitmap Unicode và VietQR được mã hóa raster ESC/POS theo từng dải an toàn.")
                         }
                     }
                 }
@@ -2702,9 +1338,7 @@ fun BillPrintPreview(vm: PosViewModel) {
     val subtotal = 135000L
     val discount = 13500L
     val amount = subtotal - discount
-    val qrUrl = if (setting("bank_name").isNotBlank() && setting("bank_account").isNotBlank()) {
-        vietQrUrl(setting("bank_name"), setting("bank_account"), setting("bank_holder"), amount, "0210 BAN 02")
-    } else ""
+    val qrConfigured = setting("bank_name").isNotBlank() && setting("bank_account").isNotBlank()
 
     Column(
         Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp),
@@ -2734,12 +1368,8 @@ fun BillPrintPreview(vm: PosViewModel) {
 
         HorizontalDivider(Modifier.padding(vertical = 9.dp))
         Text("QUÉT MÃ THANH TOÁN", fontSize = 20.sp, fontWeight = FontWeight.Black)
-        if (qrUrl.isNotBlank()) {
-            AsyncImage(
-                model = qrUrl,
-                contentDescription = "VietQR trên bill",
-                modifier = Modifier.fillMaxWidth(0.78f).aspectRatio(1f).padding(top = 4.dp)
-            )
+        if (qrConfigured) {
+            OfflineVietQrImage(setting("bank_name"), setting("bank_account"), setting("bank_holder"), amount, "0210 BAN 02", Modifier.fillMaxWidth(0.78f).aspectRatio(1f).padding(top = 4.dp))
             Text("SỐ TIỀN: ${money(amount)}", fontSize = 17.sp, fontWeight = FontWeight.Black)
             Text("${setting("bank_name")} · ${setting("bank_account")}", fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Text("Nội dung: 0210 BAN 02", fontSize = 14.sp)
@@ -2871,15 +1501,17 @@ fun Report(vm: PosViewModel) {
     Column {
         Header("Báo cáo") { vm.screen.value = "TABLES" }
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp).horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             FilterChip(section == "OVERVIEW", { section = "OVERVIEW" }, { Text("TỔNG QUAN") })
             FilterChip(section == "BILLS", { section = "BILLS" }, { Text("LỊCH SỬ BILL") })
             FilterChip(section == "PURCHASES", { section = "PURCHASES" }, { Text("NHẬP HÀNG") })
+            FilterChip(section == "MONTHLY", { section = "MONTHLY" }, { Text("BÁO CÁO THÁNG") })
         }
 
         when (section) {
+            "MONTHLY" -> MonthlyProfitReport(vm)
             "OVERVIEW" -> {
                 Row(
                     Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
@@ -3118,6 +1750,61 @@ fun Report(vm: PosViewModel) {
             dismissButton = { TextButton(onClick = { showBulkDelete = false }) { Text("HỦY") } }
         )
     }
+}
+
+@Composable
+fun MonthlyProfitReport(vm:PosViewModel){
+    val bills by vm.bills.collectAsState();val payments by vm.payments.collectAsState();val adjustments by vm.billAdjustments.collectAsState()
+    val purchases by vm.purchases.collectAsState();val configs by vm.monthlyAccounting.collectAsState();val partners by vm.profitPartners.collectAsState()
+    var monthOffset by remember{mutableIntStateOf(0)};var expenseFilter by remember{mutableStateOf("ALL")}
+    val month=remember(monthOffset){Calendar.getInstance().apply{set(Calendar.DAY_OF_MONTH,1);set(Calendar.HOUR_OF_DAY,0);set(Calendar.MINUTE,0);set(Calendar.SECOND,0);set(Calendar.MILLISECOND,0);add(Calendar.MONTH,monthOffset)}}
+    val from=month.timeInMillis;val to=Calendar.getInstance().apply{timeInMillis=from;add(Calendar.MONTH,1)}.timeInMillis
+    val monthKey="%04d-%02d".format(month.get(Calendar.YEAR),month.get(Calendar.MONTH)+1)
+    val monthBills=bills.filter{(it.closedAt?:Long.MIN_VALUE) in from until to};val billIds=monthBills.map{it.id}.toSet()
+    val monthAdjustments=adjustments.filter{it.billId in billIds};val monthPurchases=purchases.filter{it.purchasedAt in from until to}
+    val config=configs.firstOrNull{it.monthKey==monthKey}
+    var cogsText by remember(monthKey,config){mutableStateOf(config?.cogs?.toString().orEmpty())};var source by remember(monthKey,config){mutableStateOf(config?.cogsSource?:"UNAVAILABLE")}
+    var reserveText by remember(monthKey,config){mutableStateOf(((config?.reserveBasisPoints?:1000)/100).toString())};var openingCashText by remember(monthKey,config){mutableStateOf((config?.openingCash?:0).toString())}
+    fun sum(category:String)=monthPurchases.filter{it.expenseCategory==category}.sumOf{it.total}
+    val grossRevenue=monthBills.sumOf{it.subtotal};val discounts=monthAdjustments.filter{it.kind=="DISCOUNT"}.sumOf{it.amount};val surcharges=monthAdjustments.filter{it.kind=="SURCHARGE"}.sumOf{it.amount}
+    val fixed=sum(ExpenseCategories.FIXED_EXPENSE);val variableExpense=sum(ExpenseCategories.VARIABLE_EXPENSE);val other=sum(ExpenseCategories.OTHER_EXPENSE)
+    val inventory=sum(ExpenseCategories.INVENTORY_PURCHASE);val capital=sum(ExpenseCategories.CAPITAL_ASSET);val setup=sum(ExpenseCategories.SETUP_COST)
+    val contribution=sum(ExpenseCategories.OWNER_CONTRIBUTION);val withdrawal=sum(ExpenseCategories.OWNER_WITHDRAWAL);val unclassified=sum(ExpenseCategories.UNCLASSIFIED)
+    val received=payments.filter{it.billId in billIds}.sumOf{it.amount};val reserveBp=(reserveText.toIntOrNull()?:10).coerceIn(0,100)*100
+    val result=calculateMonthlyAccounting(MonthlyAccountingInput(grossRevenue,discounts,0,surcharges,cogsText.toLongOrNull(),fixed,variableExpense,other,setup,inventory,capital,contribution,withdrawal,unclassified,openingCashText.toLongOrNull()?:0,received,reserveBp,partners.map{ProfitShareInput(it.id,it.name,it.shareBasisPoints)}))
+    var showPartners by remember{mutableStateOf(false)}
+    LazyColumn(Modifier.fillMaxSize().padding(12.dp)){
+        item{Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){OutlinedButton({monthOffset--}){Text("‹")};Text(SimpleDateFormat("MM / yyyy",Locale.getDefault()).format(Date(from)),Modifier.weight(1f),textAlign=TextAlign.Center,fontWeight=FontWeight.Black,fontSize=20.sp);OutlinedButton({monthOffset++}){Text("›")}}}
+        item{Card(Modifier.fillMaxWidth().padding(vertical=5.dp)){Column(Modifier.padding(14.dp)){
+            Text("NGUỒN GIÁ VỐN",fontWeight=FontWeight.Black);Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){FilterChip(source=="INVENTORY",{source="INVENTORY"},{Text("Theo kiểm kê")});FilterChip(source=="RECIPE",{source="RECIPE"},{Text("Theo recipe")});FilterChip(source=="UNAVAILABLE",{source="UNAVAILABLE";cogsText=""},{Text("Chưa có")})}
+            OutlinedTextField(cogsText,{cogsText=it.filter(Char::isDigit)},Modifier.fillMaxWidth(),label={Text("Giá vốn tháng (VND)")},enabled=source!="UNAVAILABLE")
+            if(source=="UNAVAILABLE")Text("Chưa đủ dữ liệu giá vốn; hệ thống không lấy tiền nhập hàng thay cho COGS.",color=Color(0xFF9A4B3D),fontWeight=FontWeight.Bold)
+            OutlinedTextField(reserveText,{reserveText=it.filter(Char::isDigit).take(3)},Modifier.fillMaxWidth(),label={Text("Trích quỹ dự phòng (%)")})
+            OutlinedTextField(openingCashText,{openingCashText=it.filter{c->c.isDigit()||c=='-'}},Modifier.fillMaxWidth(),label={Text("Tiền đầu kỳ")})
+            Button({vm.saveMonthlyAccounting(MonthlyAccountingEntity(monthKey,if(source=="UNAVAILABLE")null else cogsText.toLongOrNull(),source,openingCashText.toLongOrNull()?:0,reserveBp))},Modifier.fillMaxWidth(),enabled=source=="UNAVAILABLE"||cogsText.toLongOrNull()!=null){Text("LƯU THÔNG SỐ THÁNG")}
+        }}}
+        item{Text("KẾT QUẢ KINH DOANH",Modifier.padding(top=12.dp,bottom=4.dp),fontWeight=FontWeight.Black,fontSize=18.sp)}
+        item{AccountingCard(listOf("Doanh thu gộp" to grossRevenue,"Giảm giá" to -discounts,"Điều chỉnh doanh thu" to surcharges,"Doanh thu thuần" to result.netRevenue,"Giá vốn" to result.grossProfit?.let{-(result.netRevenue-it)},"Lãi gộp" to result.grossProfit,"Chi phí cố định" to -fixed,"Chi phí biến đổi" to -variableExpense,"Chi phí khác" to -other,"LỢI NHUẬN KINH DOANH" to result.operatingProfit))}
+        item{Text("Chi phí setup trong kỳ: ${money(setup)} · không tự trừ vào lợi nhuận hoạt động.",Modifier.padding(8.dp),fontWeight=FontWeight.Bold)}
+        if(unclassified>0)item{Text("Còn ${money(unclassified)} chưa phân loại; chưa đưa vào P&L.",Modifier.padding(8.dp),color=Color(0xFF9A4B3D),fontWeight=FontWeight.Bold)}
+        item{Text("PHÂN PHỐI LỢI NHUẬN",Modifier.padding(top=12.dp,bottom=4.dp),fontWeight=FontWeight.Black,fontSize=18.sp)}
+        item{AccountingCard(listOf("Lợi nhuận kinh doanh" to result.operatingProfit,"Trích quỹ dự phòng" to result.reserve?.let{-it},"LỢI NHUẬN ĐƯỢC CHIA" to result.distributableProfit))}
+        items(result.partnerProfits){p->MetricCard("${p.name} · ${p.shareBasisPoints/100}%",money(p.amount))}
+        item{Button({showPartners=true},Modifier.fillMaxWidth()){Text("CẤU HÌNH NGƯỜI CHIA LỢI")};if(!result.shareConfigurationValid)Text("Tổng tỷ lệ người nhận phải đúng 100%.",color=Color(0xFF9A4B3D),fontWeight=FontWeight.Bold)}
+        item{Text("DÒNG TIỀN",Modifier.padding(top=12.dp,bottom=4.dp),fontWeight=FontWeight.Black,fontSize=18.sp);AccountingCard(listOf("Tiền đầu kỳ" to (openingCashText.toLongOrNull()?:0),"Doanh thu đã thu" to received,"Góp vốn" to contribution,"Tiền nhập hàng" to -inventory,"Chi tiền hoạt động/setup/chưa PL" to -(fixed+variableExpense+other+setup+unclassified),"Mua tài sản" to -capital,"Rút vốn" to -withdrawal,"TIỀN CUỐI KỲ" to result.closingCash));Text("Lợi nhuận và tiền còn lại là hai chỉ tiêu độc lập.",Modifier.padding(8.dp),fontWeight=FontWeight.Bold)}
+        item{Text("VỐN & ĐẦU TƯ",Modifier.padding(top=12.dp,bottom=4.dp),fontWeight=FontWeight.Black,fontSize=18.sp);AccountingCard(listOf("Vốn góp tháng" to contribution,"Rút vốn tháng" to withdrawal,"Đầu tư tài sản tháng" to capital,"Chi phí setup tháng" to setup,"Vốn góp toàn kỳ" to purchases.filter{it.expenseCategory==ExpenseCategories.OWNER_CONTRIBUTION}.sumOf{it.total},"Đầu tư tài sản toàn kỳ" to purchases.filter{it.expenseCategory==ExpenseCategories.CAPITAL_ASSET}.sumOf{it.total}))}
+        item{Text("LỌC GIAO DỊCH CHI",Modifier.padding(top=12.dp),fontWeight=FontWeight.Black);Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(5.dp)){FilterChip(expenseFilter=="ALL",{expenseFilter="ALL"},{Text("Tất cả")});ExpenseCategories.all.forEach{v->FilterChip(expenseFilter==v,{expenseFilter=v},{Text(ExpenseCategories.label(v))})}}}
+        items(monthPurchases.filter{expenseFilter=="ALL"||it.expenseCategory==expenseFilter}){p->Card(Modifier.fillMaxWidth().padding(vertical=3.dp)){Column(Modifier.padding(10.dp)){Text(ExpenseCategories.label(p.expenseCategory),fontWeight=FontWeight.Bold);Text("${time(p.purchasedAt)} · ${money(p.total)}")}}}
+    }
+    if(showPartners)ProfitPartnerDialog(partners,{showPartners=false}){vm.saveProfitPartners(it);showPartners=false}
+}
+
+@Composable fun AccountingCard(rows:List<Pair<String,Long?>>){Card(Modifier.fillMaxWidth().padding(vertical=4.dp)){Column(Modifier.padding(14.dp)){rows.forEach{(label,value)->Row(Modifier.fillMaxWidth().padding(vertical=3.dp)){Text(label,Modifier.weight(1f),fontWeight=if(label.uppercase()==label)FontWeight.Black else FontWeight.Normal);Text(value?.let{money(it)}?:"CHƯA CÓ GIÁ VỐN",fontWeight=FontWeight.Bold)}}}}}
+
+@Composable fun ProfitPartnerDialog(current:List<ProfitPartnerEntity>,onDismiss:()->Unit,onSave:(List<ProfitPartnerEntity>)->Unit){
+    val rows=remember(current){mutableStateListOf<Pair<String,String>>().apply{addAll(current.map{it.name to (it.shareBasisPoints/100.0).toString().removeSuffix(".0")});if(isEmpty())add("" to "")}}
+    val total=rows.sumOf{((it.second.replace(',','.').toDoubleOrNull()?:0.0)*100).toInt()}
+    AlertDialog(onDismissRequest=onDismiss,title={Text("Tỷ lệ chia lợi nhuận")},text={LazyColumn{itemsIndexed(rows){index,row->Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){OutlinedTextField(row.first,{rows[index]=it to row.second},Modifier.weight(1f),label={Text("Người nhận")});OutlinedTextField(row.second,{rows[index]=row.first to it.filter{c->c.isDigit()||c=='.'||c==','}},Modifier.width(100.dp),label={Text("%")})}};item{OutlinedButton({rows.add("" to "")},Modifier.fillMaxWidth()){Text("＋ THÊM NGƯỜI")};Text("Tổng: ${total/100.0}%",color=if(total==10000)Coffee else Color(0xFF9A4B3D),fontWeight=FontWeight.Bold)}}},confirmButton={Button({onSave(rows.mapIndexed{i,r->ProfitPartnerEntity(UUID.randomUUID().toString(),r.first.trim(),((r.second.replace(',','.').toDoubleOrNull()?:0.0)*100).toInt(),i,true)})},enabled=total==10000&&rows.all{it.first.isNotBlank()}){Text("LƯU 100%")}},dismissButton={TextButton(onClick=onDismiss){Text("HỦY")}})
 }
 
 @Composable
@@ -3381,6 +2068,71 @@ fun Settings(vm: PosViewModel) {
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun BankPaymentSettings(vm:PosViewModel){
+    val context=LocalContext.current
+    val owner=LocalLifecycleOwner.current
+    val settings by vm.settings.collectAsState()
+    fun enabled(key:String,default:Boolean)=settings.firstOrNull{it.key==key}?.value?.toBooleanStrictOrNull()?:default
+    var permissionGranted by remember{mutableStateOf(NotificationAccess.isGranted(context))}
+    DisposableEffect(owner){
+        val observer=LifecycleEventObserver{_,event->if(event==Lifecycle.Event.ON_RESUME)permissionGranted=NotificationAccess.isGranted(context)}
+        owner.lifecycle.addObserver(observer);onDispose{owner.lifecycle.removeObserver(observer)}
+    }
+    Column{
+        Header("Thanh toán chuyển khoản"){vm.screen.value="MANAGE"}
+        Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())){
+            Text("THEO DÕI THÔNG BÁO NGÂN HÀNG",fontWeight=FontWeight.Black)
+            SettingSwitch("Theo dõi thông báo ngân hàng",enabled("bank_notification_enabled",false)){vm.saveSetting("bank_notification_enabled",it.toString())}
+            Card(Modifier.fillMaxWidth().padding(vertical=8.dp)){
+                Column(Modifier.padding(14.dp)){
+                    Text("Quyền đọc thông báo: ${if(permissionGranted)"Đã cấp" else "Chưa cấp"}",fontWeight=FontWeight.Bold)
+                    if(!permissionGranted)Text("Chưa cấp quyền đọc thông báo ngân hàng. POS vẫn thanh toán thủ công bình thường.",fontSize=12.sp)
+                    Button(onClick={context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))},modifier=Modifier.fillMaxWidth().padding(top=8.dp)){Text(if(permissionGranted)"MỞ CÀI ĐẶT QUYỀN" else "CẤP QUYỀN ĐỌC THÔNG BÁO")}
+                }
+            }
+            Text("Ngân hàng hỗ trợ: Vietcombank · VietinBank",fontSize=12.sp)
+            Text("Chỉ đọc notification từ package ngân hàng trong whitelist; không đọc SMS, Zalo hoặc ứng dụng khác.",fontSize=11.sp)
+            SettingSwitch("Rung khi nhận tiền",enabled("bank_notification_vibrate",true)){vm.saveSetting("bank_notification_vibrate",it.toString())}
+            SettingSwitch("Đọc số tiền bằng loa",enabled("bank_notification_tts",true)){vm.saveSetting("bank_notification_tts",it.toString())}
+            HorizontalDivider(Modifier.padding(vertical=12.dp))
+            Text("Chế độ xác nhận",fontWeight=FontWeight.Bold)
+            Text("Phát hiện + nhân viên xác nhận (mặc định)\nKhông tự động đóng bill.",fontSize=12.sp)
+            OutlinedButton(onClick={vm.screen.value="BANK_NOTIFICATION_TEST"},modifier=Modifier.fillMaxWidth().padding(top=14.dp)){Text("TEST THÔNG BÁO NGÂN HÀNG")}
+        }
+    }
+}
+
+@Composable private fun SettingSwitch(label:String,checked:Boolean,onChange:(Boolean)->Unit){
+    Row(Modifier.fillMaxWidth().padding(vertical=8.dp),verticalAlignment=Alignment.CenterVertically){Text(label,Modifier.weight(1f));Switch(checked=checked,onCheckedChange=onChange)}
+}
+
+@Composable
+fun BankNotificationTest(vm:PosViewModel){
+    val events by vm.recentBankNotifications.collectAsState()
+    val event=events.firstOrNull()
+    Column{
+        Header("Test thông báo ngân hàng"){vm.screen.value="BANK_PAYMENT_SETTINGS"}
+        Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState())){
+            if(event==null)Text("Chưa có notification ngân hàng trong log test.") else Card(Modifier.fillMaxWidth()){
+                Column(Modifier.padding(14.dp)){
+                    Text("${event.bank?:"UNKNOWN"} · ${event.parserResult}",fontWeight=FontWeight.Black)
+                    Text("Title: ${event.title}",fontSize=12.sp)
+                    Text("Body: ${event.body}",fontSize=11.sp)
+                    Text("Amount: ${event.amount?.let(::money)?:"—"}")
+                    Text("Account: ${event.account?:"—"}",fontSize=12.sp)
+                    Text("Transaction time: ${event.transactionTime?.let(::time)?:"—"}",fontSize=12.sp)
+                    Text("Direction: ${event.direction?:"—"} · Match: ${event.matchStatus}",fontSize=12.sp)
+                    Text("Content: ${event.content?:"—"}",fontSize=11.sp)
+                }
+            }
+            Button(onClick={BankPaymentAnnouncer.announce(LocalContext.current,127000,"Bàn 05",false,true)},modifier=Modifier.fillMaxWidth().padding(top=12.dp)){Text("TEST TTS")}
+            OutlinedButton(onClick={vm.clearBankNotificationLog()},modifier=Modifier.fillMaxWidth().padding(top=8.dp)){Text("XÓA LOG TEST")}
+            Text("Log chỉ lưu cục bộ tối đa 20 notification ngân hàng gần nhất và có thể xóa tại đây.",Modifier.padding(top=10.dp),fontSize=11.sp)
         }
     }
 }
