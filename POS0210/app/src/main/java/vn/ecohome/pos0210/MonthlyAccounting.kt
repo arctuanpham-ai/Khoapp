@@ -25,12 +25,22 @@ object FinancialTransactionTypes {
     const val OPERATING_EXPENSE="OPERATING_EXPENSE"
     const val ASSET_PURCHASE="ASSET_PURCHASE"
     const val CAPITAL_INJECTION="CAPITAL_INJECTION"
+    const val WORKING_CAPITAL="WORKING_CAPITAL"
     const val PROFIT_WITHDRAWAL="PROFIT_WITHDRAWAL"
+    const val OWNER_WITHDRAWAL="OWNER_WITHDRAWAL"
+    const val CAPITAL_RECOVERY="CAPITAL_RECOVERY"
     const val OTHER_ADJUSTMENT="OTHER_ADJUSTMENT"
-    val all=listOf(OPERATING_EXPENSE,ASSET_PURCHASE,CAPITAL_INJECTION,PROFIT_WITHDRAWAL,OTHER_ADJUSTMENT)
-    fun label(v:String)=when(v){OPERATING_EXPENSE->"Chi phí vận hành";ASSET_PURCHASE->"Mua tài sản";CAPITAL_INJECTION->"Góp vốn";PROFIT_WITHDRAWAL->"Rút lợi nhuận";else->"Điều chỉnh khác"}
-    fun legacyExpenseCode(v:String,operatingCode:String)=when(v){ASSET_PURCHASE->ExpenseCategories.CAPITAL_ASSET;CAPITAL_INJECTION->ExpenseCategories.OWNER_CONTRIBUTION;PROFIT_WITHDRAWAL->ExpenseCategories.PROFIT_WITHDRAWAL;OTHER_ADJUSTMENT->ExpenseCategories.UNCLASSIFIED;else->operatingCode}
-    fun fromLegacy(code:String)=when(code){ExpenseCategories.CAPITAL_ASSET->ASSET_PURCHASE;ExpenseCategories.OWNER_CONTRIBUTION,ExpenseCategories.WORKING_CAPITAL->CAPITAL_INJECTION;ExpenseCategories.PROFIT_WITHDRAWAL->PROFIT_WITHDRAWAL;ExpenseCategories.UNCLASSIFIED->OTHER_ADJUSTMENT;else->OPERATING_EXPENSE}
+    val all=listOf(OPERATING_EXPENSE,ASSET_PURCHASE,CAPITAL_INJECTION,WORKING_CAPITAL,PROFIT_WITHDRAWAL,OWNER_WITHDRAWAL,CAPITAL_RECOVERY,OTHER_ADJUSTMENT)
+    fun label(v:String)=when(v){OPERATING_EXPENSE->"Chi phí vận hành";ASSET_PURCHASE->"Mua tài sản";CAPITAL_INJECTION->"Góp vốn đầu tư";WORKING_CAPITAL->"Bổ sung vốn lưu động";PROFIT_WITHDRAWAL->"Rút lợi nhuận";OWNER_WITHDRAWAL->"Rút vốn";CAPITAL_RECOVERY->"Ghi nhận hoàn vốn";else->"Thu/điều chỉnh khác"}
+    fun legacyExpenseCode(v:String,operatingCode:String)=when(v){ASSET_PURCHASE->ExpenseCategories.CAPITAL_ASSET;CAPITAL_INJECTION->ExpenseCategories.OWNER_CONTRIBUTION;WORKING_CAPITAL->ExpenseCategories.WORKING_CAPITAL;PROFIT_WITHDRAWAL->ExpenseCategories.PROFIT_WITHDRAWAL;OWNER_WITHDRAWAL->ExpenseCategories.OWNER_WITHDRAWAL;OTHER_ADJUSTMENT->ExpenseCategories.UNCLASSIFIED;else->operatingCode}
+    fun movementCode(v:String)=when(v){CAPITAL_INJECTION->"CAPITAL_CONTRIBUTION";WORKING_CAPITAL->"WORKING_CAPITAL";PROFIT_WITHDRAWAL->"PROFIT_WITHDRAWAL";OWNER_WITHDRAWAL->"OWNER_WITHDRAWAL";CAPITAL_RECOVERY->"RECOVERED_CAPITAL";OTHER_ADJUSTMENT->"OTHER_CASH_ADJUSTMENT";else->null}
+    fun fromLegacy(code:String)=when(code){ExpenseCategories.CAPITAL_ASSET->ASSET_PURCHASE;ExpenseCategories.OWNER_CONTRIBUTION->CAPITAL_INJECTION;ExpenseCategories.WORKING_CAPITAL->WORKING_CAPITAL;ExpenseCategories.PROFIT_WITHDRAWAL->PROFIT_WITHDRAWAL;ExpenseCategories.OWNER_WITHDRAWAL->OWNER_WITHDRAWAL;ExpenseCategories.UNCLASSIFIED->OTHER_ADJUSTMENT;else->OPERATING_EXPENSE}
+}
+
+data class PartnerWithdrawalPosition(val partner:PartnerProfit,val withdrawn:Long,val unwithdrawn:Long,val overdrawn:Boolean)
+fun calculatePartnerWithdrawalPositions(entitlements:List<PartnerProfit>,withdrawals:Map<String,Long>)=entitlements.map{p->
+    val withdrawn=withdrawals[p.id]?:0L
+    PartnerWithdrawalPosition(p,withdrawn,(p.amount-withdrawn).coerceAtLeast(0),withdrawn>p.amount)
 }
 
 data class ProfitShareInput(val id:String,val name:String,val shareBasisPoints:Int)

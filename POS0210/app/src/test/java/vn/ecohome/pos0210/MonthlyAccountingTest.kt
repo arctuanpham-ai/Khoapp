@@ -60,4 +60,17 @@ class MonthlyAccountingTest {
   assertEquals(FinancialTransactionTypes.CAPITAL_INJECTION,FinancialTransactionTypes.fromLegacy(ExpenseCategories.OWNER_CONTRIBUTION))
   assertEquals(FinancialTransactionTypes.PROFIT_WITHDRAWAL,FinancialTransactionTypes.fromLegacy(ExpenseCategories.PROFIT_WITHDRAWAL))
  }
+ @Test fun transactionTypesRouteToOneCanonicalMovementCode(){
+  assertEquals("CAPITAL_CONTRIBUTION",FinancialTransactionTypes.movementCode(FinancialTransactionTypes.CAPITAL_INJECTION))
+  assertEquals("WORKING_CAPITAL",FinancialTransactionTypes.movementCode(FinancialTransactionTypes.WORKING_CAPITAL))
+  assertEquals("PROFIT_WITHDRAWAL",FinancialTransactionTypes.movementCode(FinancialTransactionTypes.PROFIT_WITHDRAWAL))
+  assertEquals("RECOVERED_CAPITAL",FinancialTransactionTypes.movementCode(FinancialTransactionTypes.CAPITAL_RECOVERY))
+  assertNull(FinancialTransactionTypes.movementCode(FinancialTransactionTypes.OPERATING_EXPENSE))
+ }
+ @Test fun partnerEntitlementIsSeparateFromActualWithdrawal(){
+  val entitlement=PartnerProfit("a","A",5000,9_000_000)
+  val position=calculatePartnerWithdrawalPositions(listOf(entitlement),mapOf("a" to 4_000_000)).single()
+  assertEquals(4_000_000,position.withdrawn);assertEquals(5_000_000,position.unwithdrawn);assertFalse(position.overdrawn)
+  assertTrue(calculatePartnerWithdrawalPositions(listOf(entitlement),mapOf("a" to 10_000_000)).single().overdrawn)
+ }
 }

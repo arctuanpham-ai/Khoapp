@@ -384,11 +384,21 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
   viewModelScope.launch(Dispatchers.IO){dao.saveAsset(v);audit("ASSET",v.id,"SAVE","cost=${v.totalCost},life=${v.usefulLifeMonths}");autoBackup()}
  }
  fun updateAssetLiquidationValue(asset:AssetEntity,newValue:Long,note:String){
-  val e=currentEmployee.value?:return;if(e.role!="ADMIN"||newValue<0)return
+  val e=currentEmployee.value?:return;if(e.role!="ADMIN"||newValue<0||note.isBlank())return
   viewModelScope.launch(Dispatchers.IO){db.withTransaction{dao.saveAsset(asset.copy(estimatedLiquidationValue=newValue));dao.insertAssetValuation(AssetValuationEntity(UUID.randomUUID().toString(),asset.id,asset.estimatedLiquidationValue,newValue,System.currentTimeMillis(),note.trim()))};audit("ASSET",asset.id,"VALUATION","${asset.estimatedLiquidationValue}->$newValue");autoBackup()}
  }
+ fun updateAssetStatus(asset:AssetEntity,status:String,disposalPrice:Long?,note:String){
+  val e=currentEmployee.value?:return
+  val allowed=setOf("ACTIVE","DAMAGED","SOLD","DISPOSED","TRANSFERRED")
+  if(e.role!="ADMIN"||status !in allowed||note.isBlank()||(status=="SOLD"&&(disposalPrice?:0)<=0))return
+  viewModelScope.launch(Dispatchers.IO){
+   val at=System.currentTimeMillis();dao.saveAsset(asset.copy(status=status,disposalDate=if(status in setOf("SOLD","DISPOSED","TRANSFERRED"))at else null,disposalPrice=if(status=="SOLD")disposalPrice else null,note=listOf(asset.note,note.trim()).filter{it.isNotBlank()}.joinToString(" · ")))
+   if(status=="SOLD"&&disposalPrice!=null)dao.insertFinancialMovement(FinancialMovementEntity(UUID.randomUUID().toString(),"ASSET_DISPOSAL_IN",disposalPrice,at,note=note.trim()))
+   audit("ASSET",asset.id,"STATUS","${asset.status}->$status,price=${disposalPrice?:0}");autoBackup()
+  }
+ }
  fun addFinancialMovement(type:String,amount:Long,partnerId:String?=null,method:String="CASH",note:String="",at:Long=System.currentTimeMillis()){
-  val e=currentEmployee.value?:return;if(e.role!="ADMIN"||amount<=0||type !in setOf("CAPITAL_CONTRIBUTION","WORKING_CAPITAL","OTHER_CASH_IN","PROFIT_WITHDRAWAL","OWNER_WITHDRAWAL","RECOVERED_CAPITAL"))return
+  val e=currentEmployee.value?:return;if(e.role!="ADMIN"||amount<=0||type !in setOf("CAPITAL_CONTRIBUTION","WORKING_CAPITAL","OTHER_CASH_IN","OTHER_CASH_ADJUSTMENT","PROFIT_WITHDRAWAL","OWNER_WITHDRAWAL","RECOVERED_CAPITAL","ASSET_DISPOSAL_IN"))return
   viewModelScope.launch(Dispatchers.IO){val id=UUID.randomUUID().toString();dao.insertFinancialMovement(FinancialMovementEntity(id,type,amount,at,partnerId,method,note.trim()));audit("FINANCE",id,"CREATE","type=$type,amount=$amount");autoBackup()}
  }
  fun saveProfitPartners(rows:List<ProfitPartnerEntity>){
