@@ -1,3 +1,13 @@
+[detached HEAD e7b701a] feat(pos0210): detect bank transfer notifications
+ Date: Tue Sep 15 17:01:46 2026 +0900
+ 15 files changed, 352 insertions(+), 12 deletions(-)
+ create mode 100644 POS0210/app/src/main/java/vn/ecohome/pos0210/banknotification/BankNotificationListenerService.kt
+ create mode 100644 POS0210/app/src/main/java/vn/ecohome/pos0210/banknotification/BankNotificationParser.kt
+ create mode 100644 POS0210/app/src/main/java/vn/ecohome/pos0210/banknotification/BankPaymentAnnouncer.kt
+ create mode 100644 POS0210/app/src/main/java/vn/ecohome/pos0210/banknotification/NotificationAccess.kt
+ create mode 100644 POS0210/app/src/main/java/vn/ecohome/pos0210/banknotification/PaymentMatcher.kt
+ create mode 100644 POS0210/app/src/test/java/vn/ecohome/pos0210/banknotification/BankNotificationParserTest.kt
+ create mode 100644 POS0210/app/src/test/java/vn/ecohome/pos0210/banknotification/PaymentMatcherTest.kt
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -5,6 +15,7 @@ plugins {
     id("org.jetbrains.kotlin.kapt")
 }
 android {
+    // Candidate10: additive bank-notification module; existing POS and print pipelines stay intact.
     namespace = "vn.ecohome.pos0210"
     compileSdk = 35
     defaultConfig {
