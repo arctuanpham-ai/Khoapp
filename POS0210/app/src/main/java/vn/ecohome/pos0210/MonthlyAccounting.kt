@@ -51,8 +51,8 @@ fun calculateMonthlyAccounting(i:MonthlyAccountingInput):MonthlyAccountingResult
         val amount=if(index==i.partners.lastIndex) distributable-allocated else distributable*p.shareBasisPoints/10_000L
         allocated+=amount;PartnerProfit(p.id,p.name,p.shareBasisPoints,amount)
     } else emptyList()
-    val cashExpenses=i.fixedExpense+i.variableExpense+i.otherExpense+i.setupCost+i.unclassified
-    val investmentOut=if(i.investmentCashOut>0)i.investmentCashOut else i.capitalAssets
+    val cashExpenses=i.fixedExpense+i.variableExpense+i.otherExpense+i.unclassified
+    val investmentOut=if(i.investmentCashOut>0)i.investmentCashOut else i.capitalAssets+i.setupCost
     val closing=i.openingCash+i.revenueReceived+i.otherCashIn+i.ownerContribution+i.workingCapitalContribution-cashExpenses-i.inventoryPurchases-investmentOut-i.ownerWithdrawal-i.profitWithdrawal
     return MonthlyAccountingResult(net,gross,operating,reserve,distributable,closing,shares,validShares,reserve,i.profitWithdrawal)
 }
