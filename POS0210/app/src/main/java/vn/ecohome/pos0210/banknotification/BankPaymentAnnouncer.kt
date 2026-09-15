@@ -6,6 +6,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import java.util.Locale
 
 object BankPaymentAnnouncer {
@@ -19,7 +20,13 @@ object BankPaymentAnnouncer {
   tts=TextToSpeech(context.applicationContext){status->
    if(status==TextToSpeech.SUCCESS){
     val engine=tts?:return@TextToSpeech
-    engine.language=Locale("vi","VN")
+    val localeResult=engine.setLanguage(Locale("vi","VN"))
+    if(localeResult==TextToSpeech.LANG_MISSING_DATA||localeResult==TextToSpeech.LANG_NOT_SUPPORTED){engine.shutdown();return@TextToSpeech}
+    engine.setOnUtteranceProgressListener(object:UtteranceProgressListener(){
+     override fun onStart(utteranceId:String?)=Unit
+     override fun onDone(utteranceId:String?){engine.shutdown()}
+     @Deprecated("Deprecated in Java") override fun onError(utteranceId:String?){engine.shutdown()}
+    })
     val subject=tableName?.takeIf{it.isNotBlank()}?.let{"$it đã thanh toán"}?:"Đã nhận"
     engine.speak("$subject ${"%,d".format(amount).replace(',','.')} đồng",TextToSpeech.QUEUE_FLUSH,null,"bank-payment")
    } else tts?.shutdown()
