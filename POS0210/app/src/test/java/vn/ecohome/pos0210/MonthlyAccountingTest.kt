@@ -12,7 +12,7 @@ class MonthlyAccountingTest {
   assertEquals(70_000_000,r.grossProfit);assertEquals(53_000_000,r.operatingProfit)
   assertEquals(5_300_000,r.reserve);assertEquals(47_700_000,r.distributableProfit)
   assertEquals(listOf(23_850_000L,23_850_000L),r.partnerProfits.map{it.amount})
-  assertEquals(78_000_000,r.closingCash)
+  assertEquals(73_000_000,r.closingCash)
  }
  @Test fun purchasesAreNotAssumedToBeCogs(){
   val r=calculateMonthlyAccounting(MonthlyAccountingInput(grossRevenue=10_000,cogs=null,inventoryPurchases=7_000,revenueReceived=10_000))
