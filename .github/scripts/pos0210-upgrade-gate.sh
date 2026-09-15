@@ -67,7 +67,7 @@ sleep 2
 echo '=== Install candidate IN PLACE (no uninstall) ==='
 adb install -r /tmp/alpha51.apk | tee /tmp/install51.txt
 grep -q Success /tmp/install51.txt
-adb shell dumpsys package "$PKG" | grep -E 'versionName=1.0.0-alpha52-candidate9|versionCode=70'
+adb shell dumpsys package "$PKG" | grep -E 'versionName=1.0.0-alpha52-candidate10|versionCode=71'
 
 echo '=== Launch candidate to execute Room migration to 13 ==='
 adb logcat -c
@@ -109,7 +109,10 @@ for k,v in checks.items():
     exp=tuple(before['markers'][k]) if isinstance(before['markers'][k],list) else before['markers'][k]
     if v != exp: errors.append(f'marker changed {k}: expected {exp}, got {v}')
 uv=one('pragma user_version')[0]
-if uv != 13: errors.append(f'user_version expected 13 got {uv}')
+if uv != 14: errors.append(f'user_version expected 14 got {uv}')
+tables={r[0] for r in db.execute("select name from sqlite_master where type='table'")}
+for required in ('PaymentSessionEntity','BankNotificationEventEntity'):
+    if required not in tables: errors.append(f'missing additive table {required}')
 cols={r[1] for r in db.execute('pragma table_info(MenuItemEntity)')}
 for col in ('productCode','description'):
     if col not in cols: errors.append(f'missing MenuItemEntity.{col}')

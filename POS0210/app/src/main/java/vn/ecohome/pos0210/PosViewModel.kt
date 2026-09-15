@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import vn.ecohome.pos0210.data.*
@@ -13,10 +14,12 @@ import vn.ecohome.pos0210.printing.BluetoothPrinter
 import vn.ecohome.pos0210.printing.ReceiptRenderer
 import vn.ecohome.pos0210.payment.VietQrOffline
 import java.util.UUID
+import java.security.SecureRandom
 class PosViewModel(app:Application):AndroidViewModel(app){
  private val db=PosDatabase.get(app);private val repo=PosRepository(db);private val dao=db.dao();private val masterMutex=Mutex()
  val monthlyAccounting=dao.monthlyAccounting().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val profitPartners=dao.profitPartners().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val tableServiceTimings=dao.tableServiceTimings().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val areas=repo.areas().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val tables=repo.tables().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val waitingBatches=dao.waitingBatches().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val categories=repo.categories().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val menu=repo.menuItems().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val combos=dao.combos().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val employees=repo.employees().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val sessions=repo.openSessions().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val bills=repo.paidBills().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val suppliers=dao.suppliers().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val purchases=dao.purchases().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val purchaseCosts=dao.purchaseCosts().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val purchaseCategories=dao.purchaseCategories().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val payments=dao.payments().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val customers=dao.customers().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val customerItemStats=dao.customerItemStats().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val pricingRules=dao.pricingRules().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val billAdjustments=dao.billAdjustments().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val settings=dao.settings().stateIn(viewModelScope,SharingStarted.Eagerly,emptyList());val printJobs=dao.printJobs().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val audits=dao.audits().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val itemSales=dao.paidItemSales().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList())
  val healthIssues=MutableStateFlow<List<String>>(emptyList());val healthMessage=MutableStateFlow("Chưa kiểm tra");val customerUpdateMessage=MutableStateFlow("");val cartNotes=MutableStateFlow<Map<String,String>>(emptyMap());val cart=MutableStateFlow<Map<String,Int>>(emptyMap());val currentTable=MutableStateFlow<DiningTableEntity?>(null);val currentSession=MutableStateFlow<TableSessionEntity?>(null);val currentEmployee=MutableStateFlow<EmployeeEntity?>(null);val authError=MutableStateFlow("");val screen=MutableStateFlow("LOGIN");val printerPreview=MutableStateFlow("");val printerMessage=MutableStateFlow("")
+ val recentBankNotifications=dao.recentBankNotifications().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList())
  init{viewModelScope.launch{bootstrap()}}
  private suspend fun bootstrap(){
   val recovered=dao.recoverClaimedPrints()
@@ -289,7 +292,7 @@ fun saveSetting(key:String,value:String){
  val e=currentEmployee.value?:return
  val allowed=when(key){
   "storage_root_uri","master_config_uri","autoback_tree_uri" -> e.role=="ADMIN"||e.canManageSystem
-  "bank_name","bank_account","bank_holder","qr_prefix","printer_mode","printer_mac","printer_name","printer_paper_mm" -> e.role=="ADMIN"||e.role=="MANAGER"
+  "bank_name","bank_account","bank_holder","qr_prefix","printer_mode","printer_mac","printer_name","printer_paper_mm","bank_notification_enabled","bank_notification_vibrate","bank_notification_tts" -> e.role=="ADMIN"||e.role=="MANAGER"
   else -> e.role=="ADMIN"
  }
  if(!allowed){viewModelScope.launch{audit("SECURITY",key,"SETTING_DENIED","role=${e.role}")};return}
@@ -311,13 +314,30 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
   audit("STORAGE","POS0210","ATTACH","writes=$allowWrites")
  }
 }
-fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
+ fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
+ fun paymentSession(sessionId:String)=dao.activePaymentSession(sessionId)
+ fun openPaymentSession(session:TableSessionEntity,table:DiningTableEntity,amount:Long){
+  if(amount<=0)return
+  viewModelScope.launch(Dispatchers.IO){
+   val current=dao.activePaymentSessionSnapshot(session.id)
+   if(current!=null&&current.expectedAmount==amount&&current.expiresAt>System.currentTimeMillis())return@launch
+   dao.cancelPaymentSessions(session.id)
+   val alphabet="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";val random=SecureRandom()
+   repeat(12){
+    val code=(1..4).map{alphabet[random.nextInt(alphabet.length)]}.joinToString("")
+    val inserted=runCatching{dao.insertPaymentSession(PaymentSessionEntity(UUID.randomUUID().toString(),session.id,null,table.id,amount,code,System.currentTimeMillis(),System.currentTimeMillis()+600_000L))}
+    if(inserted.isSuccess)return@launch
+   }
+  }
+ }
+ fun clearBankNotificationLog(){viewModelScope.launch(Dispatchers.IO){dao.clearBankNotifications()}}
  fun addPurchase(name:String,amount:Long,note:String,at:Long=System.currentTimeMillis(),imageUri:String?=null){addPurchaseDetailed(name,1.0,"lần",amount,note,at,"",imageUri)}
  fun addPurchaseDetailed(name:String,qty:Double,unit:String,unitPrice:Long,note:String,at:Long=System.currentTimeMillis(),supplierName:String="",imageUri:String?=null,categoryId:String="pc_production",expenseCategory:String="UNCLASSIFIED"){
   val e=currentEmployee.value?:return
   if(!e.canPurchase&&e.role!="ADMIN")return
   if(name.isBlank()||qty<=0||unitPrice<=0)return
   viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
+   val pendingPaymentSession=dao.activePaymentSessionSnapshot(session.id)
    val id=UUID.randomUUID().toString()
    val managed=runCatching{ManagedMedia.importImage(getApplication(),imageUri,"invoice_"+id)}.getOrNull()
    val supplierId=if(supplierName.isBlank())null else UUID.randomUUID().toString().also{repo.saveSupplier(SupplierEntity(it,supplierName.trim()))}
@@ -609,6 +629,8 @@ fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
     return@launch
    }
    val bill=commit.bill
+   if(method=="TRANSFER"&&pendingPaymentSession!=null)dao.confirmPaymentSession(pendingPaymentSession.id,bill.id)
+   else dao.cancelPaymentSessions(session.id)
    val customer=commit.customer
    val pointsBefore=commit.pointsBefore
    val pointsEarned=commit.pointsEarned

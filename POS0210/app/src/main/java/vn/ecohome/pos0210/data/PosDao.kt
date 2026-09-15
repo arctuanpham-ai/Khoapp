@@ -61,6 +61,11 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Query("SELECT * FROM PrintJobEntity WHERE batchId=:batchId AND type=\'KITCHEN\' LIMIT 1") suspend fun kitchenPrintJob(batchId:String):PrintJobEntity?
 @Query("SELECT * FROM AuditEventEntity ORDER BY occurredAt DESC LIMIT 500") fun audits():Flow<List<AuditEventEntity>>
 @Query("SELECT * FROM AppSettingEntity") fun settings():Flow<List<AppSettingEntity>>
+@Query("SELECT * FROM PaymentSessionEntity WHERE tableSessionId=:tableSessionId AND status IN ('WAITING','PAYMENT_DETECTED') ORDER BY openedAt DESC LIMIT 1") fun activePaymentSession(tableSessionId:String):Flow<PaymentSessionEntity?>
+@Query("SELECT * FROM PaymentSessionEntity WHERE tableSessionId=:tableSessionId AND status IN ('WAITING','PAYMENT_DETECTED') ORDER BY openedAt DESC LIMIT 1") suspend fun activePaymentSessionSnapshot(tableSessionId:String):PaymentSessionEntity?
+@Query("SELECT ps.* FROM PaymentSessionEntity ps INNER JOIN TableSessionEntity ts ON ts.id=ps.tableSessionId WHERE ps.status='WAITING' AND ps.expectedAmount=:amount AND ps.expiresAt>=:now AND ts.status='OPEN'") suspend fun waitingPaymentSessions(amount:Long,now:Long):List<PaymentSessionEntity>
+@Query("SELECT * FROM BankNotificationEventEntity ORDER BY receivedAt DESC LIMIT 20") fun recentBankNotifications():Flow<List<BankNotificationEventEntity>>
+@Query("SELECT value FROM AppSettingEntity WHERE key=:key LIMIT 1") suspend fun settingValue(key:String):String?
 @Query("SELECT * FROM AreaEntity ORDER BY sortOrder,name") suspend fun allAreasSnapshot():List<AreaEntity>
 @Query("SELECT * FROM DiningTableEntity ORDER BY sortOrder,name") suspend fun allTablesSnapshot():List<DiningTableEntity>
 @Query("SELECT * FROM MenuCategoryEntity ORDER BY sortOrder,name") suspend fun allCategoriesSnapshot():List<MenuCategoryEntity>
@@ -90,6 +95,14 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveSupplier(v:SupplierEntity)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun savePurchaseCategory(v:PurchaseCategoryEntity)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveSetting(v:AppSettingEntity)
+@Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertPaymentSession(v:PaymentSessionEntity)
+@Insert(onConflict=OnConflictStrategy.IGNORE) suspend fun insertBankNotification(v:BankNotificationEventEntity):Long
+@Query("UPDATE PaymentSessionEntity SET status='CANCELLED' WHERE tableSessionId=:tableSessionId AND status IN ('WAITING','PAYMENT_DETECTED')") suspend fun cancelPaymentSessions(tableSessionId:String):Int
+@Query("UPDATE PaymentSessionEntity SET status='PAYMENT_DETECTED',detectedFingerprint=:fingerprint,detectedBank=:bank,detectedAmount=:amount,detectedAt=:detectedAt,confidence=:confidence WHERE id=:id AND status='WAITING'") suspend fun markPaymentDetected(id:String,fingerprint:String,bank:String,amount:Long,detectedAt:Long,confidence:String):Int
+@Query("UPDATE PaymentSessionEntity SET status='CONFIRMED',billId=:billId WHERE id=:id AND status IN ('WAITING','PAYMENT_DETECTED')") suspend fun confirmPaymentSession(id:String,billId:String):Int
+@Query("UPDATE BankNotificationEventEntity SET matchStatus=:status,paymentSessionId=:paymentSessionId WHERE fingerprint=:fingerprint") suspend fun updateBankNotificationMatch(fingerprint:String,status:String,paymentSessionId:String?):Int
+@Query("DELETE FROM BankNotificationEventEntity WHERE fingerprint NOT IN (SELECT fingerprint FROM BankNotificationEventEntity ORDER BY receivedAt DESC LIMIT 20)") suspend fun trimBankNotifications()
+@Query("DELETE FROM BankNotificationEventEntity") suspend fun clearBankNotifications()
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun savePricingRule(v:PricingRuleEntity)
 @Query("UPDATE PricingRuleEntity SET active=:active WHERE id=:id") suspend fun setPricingRuleActive(id:String,active:Boolean)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertBillAdjustments(v:List<BillAdjustmentEntity>)

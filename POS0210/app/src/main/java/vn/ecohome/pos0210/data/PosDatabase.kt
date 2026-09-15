@@ -5,7 +5,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-@Database(entities=[EmployeeEntity::class,AreaEntity::class,DiningTableEntity::class,MenuCategoryEntity::class,ComboEntity::class,ComboItemEntity::class,MenuItemEntity::class,TableSessionEntity::class,OrderBatchEntity::class,OrderItemEntity::class,BillEntity::class,PaymentEntity::class,CustomerEntity::class,CustomerPointTransactionEntity::class,PricingRuleEntity::class,BillAdjustmentEntity::class,SupplierEntity::class,PurchaseEntity::class,PurchaseCategoryEntity::class,PurchaseItemEntity::class,MonthlyAccountingEntity::class,ProfitPartnerEntity::class,PrintJobEntity::class,AuditEventEntity::class,AppSettingEntity::class],version=13,exportSchema=false)
+@Database(entities=[EmployeeEntity::class,AreaEntity::class,DiningTableEntity::class,MenuCategoryEntity::class,ComboEntity::class,ComboItemEntity::class,MenuItemEntity::class,TableSessionEntity::class,OrderBatchEntity::class,OrderItemEntity::class,BillEntity::class,PaymentEntity::class,CustomerEntity::class,CustomerPointTransactionEntity::class,PricingRuleEntity::class,BillAdjustmentEntity::class,SupplierEntity::class,PurchaseEntity::class,PurchaseCategoryEntity::class,PurchaseItemEntity::class,MonthlyAccountingEntity::class,ProfitPartnerEntity::class,PrintJobEntity::class,AuditEventEntity::class,AppSettingEntity::class,PaymentSessionEntity::class,BankNotificationEventEntity::class],version=14,exportSchema=false)
 abstract class PosDatabase:RoomDatabase(){
  abstract fun dao():PosDao
  companion object{
@@ -113,9 +113,22 @@ abstract class PosDatabase:RoomDatabase(){
     db.execSQL("CREATE INDEX IF NOT EXISTS index_ProfitPartnerEntity_sortOrder ON ProfitPartnerEntity(sortOrder)")
    }
   }
+  private val MIGRATION_13_14=object:Migration(13,14){
+   override fun migrate(db:SupportSQLiteDatabase){
+    db.execSQL("CREATE TABLE IF NOT EXISTS PaymentSessionEntity (id TEXT NOT NULL, tableSessionId TEXT NOT NULL, billId TEXT, tableId TEXT NOT NULL, expectedAmount INTEGER NOT NULL, paymentCode TEXT NOT NULL, openedAt INTEGER NOT NULL, expiresAt INTEGER NOT NULL, status TEXT NOT NULL, detectedFingerprint TEXT, detectedBank TEXT, detectedAmount INTEGER, detectedAt INTEGER, confidence TEXT, PRIMARY KEY(id))")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_PaymentSessionEntity_tableSessionId ON PaymentSessionEntity(tableSessionId)")
+    db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_PaymentSessionEntity_paymentCode ON PaymentSessionEntity(paymentCode)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_PaymentSessionEntity_status ON PaymentSessionEntity(status)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_PaymentSessionEntity_expiresAt ON PaymentSessionEntity(expiresAt)")
+    db.execSQL("CREATE TABLE IF NOT EXISTS BankNotificationEventEntity (fingerprint TEXT NOT NULL, packageName TEXT NOT NULL, bank TEXT, title TEXT NOT NULL, body TEXT NOT NULL, receivedAt INTEGER NOT NULL, parserResult TEXT NOT NULL, amount INTEGER, account TEXT, transactionTime INTEGER, content TEXT, reference TEXT, direction TEXT, matchStatus TEXT NOT NULL, paymentSessionId TEXT, PRIMARY KEY(fingerprint))")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_BankNotificationEventEntity_receivedAt ON BankNotificationEventEntity(receivedAt)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_BankNotificationEventEntity_matchStatus ON BankNotificationEventEntity(matchStatus)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_BankNotificationEventEntity_paymentSessionId ON BankNotificationEventEntity(paymentSessionId)")
+   }
+  }
   fun get(context:Context):PosDatabase=instance?:synchronized(this){
    instance?:Room.databaseBuilder(context.applicationContext,PosDatabase::class.java,"pos0210.db")
-    .addMigrations(MIGRATION_3_4,MIGRATION_4_5,MIGRATION_5_6,MIGRATION_6_7,MIGRATION_7_8,MIGRATION_8_9,MIGRATION_9_10,MIGRATION_10_11,MIGRATION_11_12,MIGRATION_12_13)
+    .addMigrations(MIGRATION_3_4,MIGRATION_4_5,MIGRATION_5_6,MIGRATION_6_7,MIGRATION_7_8,MIGRATION_8_9,MIGRATION_9_10,MIGRATION_10_11,MIGRATION_11_12,MIGRATION_12_13,MIGRATION_13_14)
     .build().also{instance=it}
   }
   fun closeForRestore(){synchronized(this){instance?.close();instance=null}}

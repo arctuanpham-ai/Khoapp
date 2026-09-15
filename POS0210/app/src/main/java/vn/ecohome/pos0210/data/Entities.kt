@@ -27,6 +27,10 @@ import androidx.room.PrimaryKey
 @Entity(indices=[Index("batchId"),Index(value=["batchId","type"],unique=true)]) data class PrintJobEntity(@PrimaryKey val id:String,val batchId:String?,val billId:String?,val type:String,val status:String="PENDING",val claimedByDeviceId:String?=null,val attempts:Int=0,val createdAt:Long,val printedAt:Long?=null,val error:String?=null)
 @Entity(indices=[Index("entityId")]) data class AuditEventEntity(@PrimaryKey val id:String,val entityType:String,val entityId:String,val action:String,val actorId:String?,val deviceId:String?,val occurredAt:Long,val payload:String="")
 @Entity data class AppSettingEntity(@PrimaryKey val key:String,val value:String)
+@Entity(indices=[Index("tableSessionId"),Index(value=["paymentCode"],unique=true),Index("status"),Index("expiresAt")])
+data class PaymentSessionEntity(@PrimaryKey val id:String,val tableSessionId:String,val billId:String?=null,val tableId:String,val expectedAmount:Long,val paymentCode:String,val openedAt:Long,val expiresAt:Long,val status:String="WAITING",val detectedFingerprint:String?=null,val detectedBank:String?=null,val detectedAmount:Long?=null,val detectedAt:Long?=null,val confidence:String?=null)
+@Entity(indices=[Index("receivedAt"),Index("matchStatus"),Index("paymentSessionId")])
+data class BankNotificationEventEntity(@PrimaryKey val fingerprint:String,val packageName:String,val bank:String?=null,val title:String,val body:String,val receivedAt:Long,val parserResult:String,val amount:Long?=null,val account:String?=null,val transactionTime:Long?=null,val content:String?=null,val reference:String?=null,val direction:String?=null,val matchStatus:String="UNMATCHED",val paymentSessionId:String?=null)
 
 data class ItemSaleRow(val name:String,val qty:Int,val sessionId:String)
 
