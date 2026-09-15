@@ -45,6 +45,9 @@ fun calculatePartnerWithdrawalPositions(entitlements:List<PartnerProfit>,withdra
     PartnerWithdrawalPosition(p,withdrawn,(p.amount-withdrawn).coerceAtLeast(0),withdrawn>p.amount)
 }
 
+fun resolveOpeningCash(savedOpening:Long?,overridden:Boolean,previousClosing:Long?):Long =
+    if(overridden) savedOpening?:0 else previousClosing?:savedOpening?:0
+
 data class ProfitShareInput(val id:String,val name:String,val shareBasisPoints:Int)
 data class PartnerProfit(val id:String,val name:String,val shareBasisPoints:Int,val amount:Long)
 data class MonthlyAccountingInput(

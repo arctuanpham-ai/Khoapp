@@ -269,5 +269,7 @@ class PosRepository(private val db:PosDatabase){
         }
     }
 
-    suspend fun savePurchase(p:PurchaseEntity,items:List<PurchaseItemEntity>){ db.withTransaction{dao.insertPurchase(p);dao.insertPurchaseItems(items)} }
+    suspend fun savePurchase(p:PurchaseEntity,items:List<PurchaseItemEntity>,asset:AssetEntity?=null){
+        db.withTransaction{dao.insertPurchase(p);dao.insertPurchaseItems(items);asset?.let{dao.saveAsset(it)}}
+    }
 }

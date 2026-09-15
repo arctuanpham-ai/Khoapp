@@ -74,4 +74,8 @@ class MonthlyAccountingTest {
   assertEquals(4_000_000,position.withdrawn);assertEquals(5_000_000,position.unwithdrawn);assertFalse(position.overdrawn)
   assertTrue(calculatePartnerWithdrawalPositions(listOf(entitlement),mapOf("a" to 10_000_000)).single().overdrawn)
  }
+ @Test fun closingCashRollsForwardUntilOwnerOverridesIt(){
+  assertEquals(5_000_000,resolveOpeningCash(4_000_000,false,5_000_000))
+  assertEquals(4_000_000,resolveOpeningCash(4_000_000,true,5_000_000))
+ }
 }

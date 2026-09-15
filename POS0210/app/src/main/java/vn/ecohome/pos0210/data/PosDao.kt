@@ -61,6 +61,8 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Query("SELECT * FROM AssetEntity ORDER BY purchaseDate DESC,name") fun assets():Flow<List<AssetEntity>>
 @Query("SELECT * FROM AssetValuationEntity ORDER BY changedAt DESC") fun assetValuations():Flow<List<AssetValuationEntity>>
 @Query("SELECT * FROM FinancialMovementEntity ORDER BY occurredAt DESC") fun financialMovements():Flow<List<FinancialMovementEntity>>
+@Query("SELECT COALESCE(SUM(amount),0) FROM FinancialMovementEntity WHERE type=:type") suspend fun financialMovementTotal(type:String):Long
+@Query("SELECT COALESCE(SUM(distributableProfitSnapshot),0) FROM MonthlyAccountingEntity WHERE distributableProfitSnapshot>0") suspend fun cumulativeDistributableProfit():Long
 @Query("SELECT * FROM OpeningCashAdjustmentEntity ORDER BY changedAt DESC") fun openingCashAdjustments():Flow<List<OpeningCashAdjustmentEntity>>
 @Query("SELECT * FROM PrintJobEntity ORDER BY createdAt DESC") fun printJobs():Flow<List<PrintJobEntity>>
 @Query("SELECT * FROM PrintJobEntity WHERE batchId=:batchId AND type=\'KITCHEN\' LIMIT 1") suspend fun kitchenPrintJob(batchId:String):PrintJobEntity?

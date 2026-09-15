@@ -2372,6 +2372,7 @@ fun Purchases(vm: PosViewModel) {
                         val parser = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
                         val parsedAt = runCatching { parser.parse(dateText)?.time }.getOrNull()
                             ?: System.currentTimeMillis()
+                        val asset=if(transactionType==FinancialTransactionTypes.ASSET_PURCHASE)selectedAssetCategory?.let{c->AssetEntity(UUID.randomUUID().toString(),itemName.trim(),c.id,parsedAt,unitPrice?:0,qty?.toInt()?.coerceAtLeast(1)?:1,total,usefulLifeMonths=usefulLifeText.toIntOrNull()?:c.defaultUsefulLifeMonths,residualValue=(residualText.toLongOrNull()?:0).coerceAtMost(total),estimatedLiquidationValue=liquidationText.toLongOrNull()?:0,note=note)} else null
                         if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) vm.addPurchaseDetailed(
                             name = itemName,
                             qty = qty ?: 0.0,
@@ -2382,9 +2383,9 @@ fun Purchases(vm: PosViewModel) {
                             supplierName = supplier,
                             imageUri = invoiceImage,
                             categoryId = selectedCategoryId,
-                            expenseCategory = FinancialTransactionTypes.legacyExpenseCode(transactionType,expenseCategory)
+                            expenseCategory = FinancialTransactionTypes.legacyExpenseCode(transactionType,expenseCategory),
+                            asset = asset
                         )
-                        if(transactionType==FinancialTransactionTypes.ASSET_PURCHASE){selectedAssetCategory?.let{c->vm.saveAsset(AssetEntity(UUID.randomUUID().toString(),itemName.trim(),c.id,parsedAt,unitPrice?:0,qty?.toInt()?.coerceAtLeast(1)?:1,total,usefulLifeMonths=usefulLifeText.toIntOrNull()?:c.defaultUsefulLifeMonths,residualValue=(residualText.toLongOrNull()?:0).coerceAtMost(total),estimatedLiquidationValue=liquidationText.toLongOrNull()?:0,note=note))}}
                         FinancialTransactionTypes.movementCode(transactionType)?.let{vm.addFinancialMovement(it,unitPrice?:0,movementPartnerId,movementMethod,listOf(itemName.trim(),note.trim()).filter(String::isNotBlank).joinToString(" · "),parsedAt)}
                         message = "Đã ghi giao dịch · ${FinancialTransactionTypes.label(transactionType)} · ${money(if(FinancialTransactionTypes.usesPurchaseDocument(transactionType))total else unitPrice?:0)}"
                         itemName = ""
@@ -3214,7 +3215,7 @@ fun Report(vm: PosViewModel) {
 fun MonthlyProfitReport(vm:PosViewModel){
     val bills by vm.bills.collectAsState();val payments by vm.payments.collectAsState();val adjustments by vm.billAdjustments.collectAsState()
     val purchases by vm.purchases.collectAsState();val configs by vm.monthlyAccounting.collectAsState();val partners by vm.profitPartners.collectAsState()
-    val assets by vm.assets.collectAsState();val movements by vm.financialMovements.collectAsState();val assetCategories by vm.assetCategories.collectAsState()
+    val assets by vm.assets.collectAsState();val assetValuations by vm.assetValuations.collectAsState();val movements by vm.financialMovements.collectAsState();val assetCategories by vm.assetCategories.collectAsState()
     var monthOffset by remember{mutableIntStateOf(0)};var expenseFilter by remember{mutableStateOf("ALL")}
     val month=remember(monthOffset){Calendar.getInstance().apply{set(Calendar.DAY_OF_MONTH,1);set(Calendar.HOUR_OF_DAY,0);set(Calendar.MINUTE,0);set(Calendar.SECOND,0);set(Calendar.MILLISECOND,0);add(Calendar.MONTH,monthOffset)}}
     val from=month.timeInMillis;val to=Calendar.getInstance().apply{timeInMillis=from;add(Calendar.MONTH,1)}.timeInMillis
@@ -3225,12 +3226,13 @@ fun MonthlyProfitReport(vm:PosViewModel){
     val monthAdjustments=adjustments.filter{it.billId in billIds};val monthPurchases=purchases.filter{it.purchasedAt in from until to}
     val config=configs.firstOrNull{it.monthKey==monthKey}
     var cogsText by remember(monthKey,config){mutableStateOf(config?.cogs?.toString().orEmpty())};var source by remember(monthKey,config){mutableStateOf(config?.cogsSource?:"UNAVAILABLE")}
-    val rolledOpening=config?.openingCash?:configs.firstOrNull{it.monthKey==previousMonthKey}?.closingCashSnapshot?:0
+    val previousClosing=configs.firstOrNull{it.monthKey==previousMonthKey}?.closingCashSnapshot
+    val rolledOpening=resolveOpeningCash(config?.openingCash,config?.openingCashOverridden==true,previousClosing)
     var reserveText by remember(monthKey,config){mutableStateOf(((config?.reserveBasisPoints?:1000)/100).toString())};var openingCashText by remember(monthKey,config,rolledOpening){mutableStateOf(rolledOpening.toString())}
     fun sum(category:String)=monthPurchases.filter{it.expenseCategory==category}.sumOf{it.total}
     val grossRevenue=monthBills.sumOf{it.subtotal};val discounts=monthAdjustments.filter{it.kind=="DISCOUNT"}.sumOf{it.amount};val surcharges=monthAdjustments.filter{it.kind=="SURCHARGE"}.sumOf{it.amount}
     val fixed=sum(ExpenseCategories.FIXED_EXPENSE);val variableExpense=sum(ExpenseCategories.VARIABLE_EXPENSE);val other=sum(ExpenseCategories.OTHER_EXPENSE)
-    val inventory=sum(ExpenseCategories.INVENTORY_PURCHASE);val capital=sum(ExpenseCategories.CAPITAL_ASSET);val setup=sum(ExpenseCategories.SETUP_COST)
+    val inventory=sum(ExpenseCategories.INVENTORY_PURCHASE);val capital=sum(ExpenseCategories.CAPITAL_ASSET);val setup=sum(ExpenseCategories.SETUP_COST)+sum(ExpenseCategories.INITIAL_INVESTMENT_SUNK)
     val monthMovements=movements.filter{it.occurredAt in from until to}
     val contribution=sum(ExpenseCategories.OWNER_CONTRIBUTION)+monthMovements.filter{it.type=="CAPITAL_CONTRIBUTION"}.sumOf{it.amount}
     val workingCapital=monthMovements.filter{it.type=="WORKING_CAPITAL"}.sumOf{it.amount};val otherCashIn=monthMovements.filter{it.type in setOf("OTHER_CASH_IN","OTHER_CASH_ADJUSTMENT","ASSET_DISPOSAL_IN")}.sumOf{it.amount}
@@ -3263,6 +3265,7 @@ fun MonthlyProfitReport(vm:PosViewModel){
         item{AccountingCard(listOf("Doanh thu gộp" to grossRevenue,"Giảm giá" to -discounts,"Điều chỉnh doanh thu" to surcharges,"Doanh thu thuần" to result.netRevenue,"Giá vốn" to result.grossProfit?.let{-(result.netRevenue-it)},"Lãi gộp" to result.grossProfit,"Chi phí cố định" to -fixed,"Chi phí biến đổi" to -variableExpense,"Chi phí khác" to -other,"Khấu hao (không chi tiền)" to -depreciation,"LỢI NHUẬN KINH DOANH" to result.operatingProfit))}
         item{Text("Chi phí setup trong kỳ: ${money(setup)} · không tự trừ vào lợi nhuận hoạt động.",Modifier.padding(8.dp),fontWeight=FontWeight.Bold)}
         if(unclassified>0)item{Text("Còn ${money(unclassified)} chưa phân loại; chưa đưa vào P&L.",Modifier.padding(8.dp),color=Color(0xFF9A4B3D),fontWeight=FontWeight.Bold)}
+        if(result.closingCash<0)item{Text("Cảnh báo: tiền cuối kỳ đang âm. Hãy kiểm tra tiền đầu kỳ và các giao dịch tiền mặt.",Modifier.padding(8.dp),color=Color(0xFF9A4B3D),fontWeight=FontWeight.Bold)}
         item{Text("PHÂN PHỐI LỢI NHUẬN",Modifier.padding(top=12.dp,bottom=4.dp),fontWeight=FontWeight.Black,fontSize=18.sp)}
         item{AccountingCard(listOf("Lợi nhuận kinh doanh" to result.operatingProfit,"Giữ lại cho quán" to result.retainedProfit?.let{-it},"LỢI NHUẬN ĐƯỢC CHIA" to result.distributableProfit,"Đã rút thực tế" to -profitWithdrawal,"Chưa rút" to result.distributableProfit?.let{it-profitWithdrawal}))}
         items(partnerPositions){p->MetricCard("${p.partner.name} · hưởng ${money(p.partner.amount)}","Đã rút ${money(p.withdrawn)} · Chưa rút ${money(p.unwithdrawn)}")}
@@ -3279,7 +3282,7 @@ fun MonthlyProfitReport(vm:PosViewModel){
     }
     if(showPartners)ProfitPartnerDialog(partners,{showPartners=false}){vm.saveProfitPartners(it);showPartners=false}
     if(showAsset)AssetDialog(assetCategories,{showAsset=false}){vm.saveAsset(it);showAsset=false}
-    selectedAsset?.let{asset->AssetManageDialog(asset,{selectedAsset=null},{value,note->vm.updateAssetLiquidationValue(asset,value,note);selectedAsset=null},{status,price,note->vm.updateAssetStatus(asset,status,price,note);selectedAsset=null})}
+    selectedAsset?.let{asset->AssetManageDialog(asset,assetValuations.filter{it.assetId==asset.id},{selectedAsset=null},{value,note->vm.updateAssetLiquidationValue(asset,value,note);selectedAsset=null},{status,price,note->vm.updateAssetStatus(asset,status,price,note);selectedAsset=null})}
     if(showOpeningOverride)AlertDialog(onDismissRequest={showOpeningOverride=false},title={Text("Điều chỉnh tiền đầu kỳ")},text={Column{OutlinedTextField(openingCashText,{openingCashText=it.filter{c->c.isDigit()||c=='-'}},Modifier.fillMaxWidth(),label={Text("Giá trị mới")});OutlinedTextField(openingOverrideNote,{openingOverrideNote=it},Modifier.fillMaxWidth(),label={Text("Lý do bắt buộc")})}},confirmButton={Button({val previous=config?.openingCash?:rolledOpening;vm.saveOpeningCash(MonthlyAccountingEntity(monthKey,if(source=="UNAVAILABLE")null else cogsText.toLongOrNull(),source,openingCashText.toLongOrNull()?:0,reserveBp,true,result.closingCash,result.operatingProfit,result.distributableProfit),previous,openingOverrideNote);openingOverrideNote="";showOpeningOverride=false},enabled=openingOverrideNote.isNotBlank()){Text("LƯU ĐIỀU CHỈNH")}},dismissButton={TextButton({showOpeningOverride=false}){Text("HỦY")}})
 }
 
@@ -3293,7 +3296,7 @@ fun MonthlyProfitReport(vm:PosViewModel){
     }},confirmButton={Button({val q=quantity.toIntOrNull()?:0;val p=price.toLongOrNull()?:0;val total=p*q;val c=selected?:return@Button;onSave(AssetEntity(UUID.randomUUID().toString(),name.trim(),c.id,System.currentTimeMillis(),p,q,total,usefulLifeMonths=life.toIntOrNull()?:c.defaultUsefulLifeMonths,residualValue=(residual.toLongOrNull()?:0).coerceAtMost(total),estimatedLiquidationValue=liquidation.toLongOrNull()?:0))},enabled=name.isNotBlank()&&selected!=null&&(price.toLongOrNull()?:0)>0&&(quantity.toIntOrNull()?:0)>0){Text("LƯU")}},dismissButton={TextButton(onClick=onDismiss){Text("HỦY")}})
 }
 
-@Composable fun AssetManageDialog(asset:AssetEntity,onDismiss:()->Unit,onValuation:(Long,String)->Unit,onStatus:(String,Long?,String)->Unit){
+@Composable fun AssetManageDialog(asset:AssetEntity,valuations:List<AssetValuationEntity>,onDismiss:()->Unit,onValuation:(Long,String)->Unit,onStatus:(String,Long?,String)->Unit){
     var value by remember{mutableStateOf(asset.estimatedLiquidationValue.toString())};var status by remember{mutableStateOf(asset.status)};var price by remember{mutableStateOf(asset.disposalPrice?.toString().orEmpty())};var note by remember{mutableStateOf("")}
     val statuses=listOf("ACTIVE" to "Đang dùng","DAMAGED" to "Hỏng","SOLD" to "Đã bán","DISPOSED" to "Đã bỏ","TRANSFERRED" to "Đã chuyển")
     AlertDialog(onDismissRequest=onDismiss,title={Text(asset.name)},text={Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(6.dp)){
@@ -3302,6 +3305,7 @@ fun MonthlyProfitReport(vm:PosViewModel){
         Text("Trạng thái",fontWeight=FontWeight.Bold);statuses.forEach{row->FilterChip(status==row.first,{status=row.first},{Text(row.second)})}
         if(status=="SOLD")OutlinedTextField(price,{price=it.filter(Char::isDigit)},Modifier.fillMaxWidth(),label={Text("Giá bán thực tế")})
         OutlinedTextField(note,{note=it},Modifier.fillMaxWidth(),label={Text("Ghi chú / lý do bắt buộc")})
+        if(valuations.isNotEmpty()){Text("Lịch sử giá thanh lý",fontWeight=FontWeight.Bold);valuations.take(5).forEach{v->Text("${time(v.changedAt)} · ${money(v.previousValue)} → ${money(v.newValue)} · ${v.note}",fontSize=11.sp)}}
     }},confirmButton={Column{Button({onValuation(value.toLongOrNull()?:0,note)},Modifier.fillMaxWidth(),enabled=note.isNotBlank()&&(value.toLongOrNull()?:-1)>=0){Text("CẬP NHẬT GIÁ ƯỚC TÍNH")};Button({onStatus(status,price.toLongOrNull(),note)},Modifier.fillMaxWidth(),enabled=note.isNotBlank()&&status!=asset.status&&(status!="SOLD"||(price.toLongOrNull()?:0)>0)){Text("CẬP NHẬT TRẠNG THÁI")}}},dismissButton={TextButton(onClick=onDismiss){Text("ĐÓNG")}})
 }
 
