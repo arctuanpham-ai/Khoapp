@@ -3539,6 +3539,7 @@ fun BankPaymentSettings(vm:PosViewModel){
 
 @Composable
 fun BankNotificationTest(vm:PosViewModel){
+    val context=LocalContext.current
     val events by vm.recentBankNotifications.collectAsState()
     val event=events.firstOrNull()
     Column{
@@ -3556,7 +3557,7 @@ fun BankNotificationTest(vm:PosViewModel){
                     Text("Content: ${event.content?:"—"}",fontSize=11.sp)
                 }
             }
-            Button(onClick={BankPaymentAnnouncer.announce(LocalContext.current,127000,"Bàn 05",false,true)},modifier=Modifier.fillMaxWidth().padding(top=12.dp)){Text("TEST TTS")}
+            Button(onClick={BankPaymentAnnouncer.announce(context,127000,"Bàn 05",false,true)},modifier=Modifier.fillMaxWidth().padding(top=12.dp)){Text("TEST TTS")}
             OutlinedButton(onClick={vm.clearBankNotificationLog()},modifier=Modifier.fillMaxWidth().padding(top=8.dp)){Text("XÓA LOG TEST")}
             Text("Log chỉ lưu cục bộ tối đa 20 notification ngân hàng gần nhất và có thể xóa tại đây.",Modifier.padding(top=10.dp),fontSize=11.sp)
         }
