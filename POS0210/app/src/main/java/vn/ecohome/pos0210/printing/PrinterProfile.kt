@@ -26,19 +26,23 @@ data class PrinterTransportProfile(
     val burstBytes:Int,
     val delayPerBurstMs:Long,
     val trailingFeedLines:Int,
-    val hasAutoCutter:Boolean
+    val hasAutoCutter:Boolean,
+    val trailingBlankDots:Int=0,
+    val postJobDrainMs:Long=0
 ){
     init{
         require(stripeHeight in 1..256)
         require(delayPerStripeMs>=0&&delayPerBurstMs>=0)
         require(burstBytes>=1024)
         require(trailingFeedLines in 0..12)
+        require(trailingBlankDots in 0..400)
+        require(postJobDrainMs>=0)
     }
     companion object{
         // Conservative pacing for the small Bluetooth receive buffer used by XP-NB8H.
-        val XP_NB8H_58=PrinterTransportProfile(32,20,6144,60,6,false)
+        val XP_NB8H_58=PrinterTransportProfile(8,60,2048,150,6,false,200,1200)
         // Preserve candidate7 throughput/feed behavior for generic 80mm printers.
-        val STANDARD_80=PrinterTransportProfile(96,0,32768,0,3,false)
+        val STANDARD_80=PrinterTransportProfile(96,0,32768,0,3,false,0,0)
     }
 }
 

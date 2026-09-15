@@ -19,6 +19,7 @@ object BluetoothPrinter {
     const val DPI=203
     private const val TAG="POS0210_PRINT"
     private const val MAX_JOB_BYTES=768*1024
+    private val PRINT_LOCK=Any()
     private val SPP_UUID:UUID=UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 
     fun hasPermission(context:Context):Boolean =
@@ -35,20 +36,23 @@ object BluetoothPrinter {
         } catch(_:SecurityException){ emptyList() }
     }
 
-    fun printBitmap(context:Context,address:String,bitmap:Bitmap,profile:PrinterProfile=PrinterProfile.MM58,jobType:PrintJobType=PrintJobType.TEST):Result<Unit> = runCatching {
+    fun printBitmap(context:Context,address:String,bitmap:Bitmap,profile:PrinterProfile=PrinterProfile.MM58,jobType:PrintJobType=PrintJobType.TEST):Result<Unit> =
+        synchronized(PRINT_LOCK){printBitmapLocked(context,address,bitmap,profile,jobType)}
+
+    private fun printBitmapLocked(context:Context,address:String,bitmap:Bitmap,profile:PrinterProfile,jobType:PrintJobType):Result<Unit> = runCatching {
         require(address.isNotBlank()){"Chưa chọn máy in Bluetooth"}
         require(hasPermission(context)){"Chưa cấp quyền Bluetooth"}
         val adapter=(context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
             ?: error("Thiết bị không hỗ trợ Bluetooth")
         val device=adapter.getRemoteDevice(address)
         require(profile.supportsRaster){"Profile không hỗ trợ raster"}
-        val raster=EscPosRaster.encode(bitmap,profile)
+        val raster=EscPosRaster.encode(bitmap,profile).toMutableList().apply{addAll(EscPosRaster.blank(profile,profile.transport.trailingBlankDots))}
         val textBytes=0
         val rasterBytes=raster.sumOf{it.size}
         val totalBytes=EscPosTransport.estimatedBytes(raster,profile.transport)
         require(totalBytes in 1..MAX_JOB_BYTES){"PRINT_JOB_SIZE_INVALID:$totalBytes"}
         val policy=profile.transport
-        Log.i(TAG,"PRINT START printer=${device.name ?: "unknown"} mac=$address profile=${profile.label} dots=${profile.printableWidthDots} type=$jobType bitmap=${bitmap.width}x${bitmap.height} stripes=${raster.size} textBytes=$textBytes rasterBytes=$rasterBytes totalBytes=$totalBytes qrMode=raster pacing=${policy.delayPerStripeMs}ms/${policy.burstBytes}B/${policy.delayPerBurstMs}ms feed=${policy.trailingFeedLines} cutter=${policy.hasAutoCutter}")
+        Log.i(TAG,"PRINT START printer=${device.name ?: "unknown"} mac=$address profile=${profile.label} dots=${profile.printableWidthDots} type=$jobType bitmap=${bitmap.width}x${bitmap.height} stripes=${raster.size} textBytes=$textBytes rasterBytes=$rasterBytes totalBytes=$totalBytes qrMode=raster pacing=${policy.delayPerStripeMs}ms/${policy.burstBytes}B/${policy.delayPerBurstMs}ms blankDots=${policy.trailingBlankDots} feed=${policy.trailingFeedLines} drain=${policy.postJobDrainMs}ms cutter=${policy.hasAutoCutter}")
         adapter.cancelDiscovery()
         try{
             device.createRfcommSocketToServiceRecord(SPP_UUID).use { socket ->
@@ -94,6 +98,7 @@ object EscPosTransport{
             }
             val trailing=trailingCommand(policy)
             out.write(trailing);out.flush();sent+=trailing.size
+            if(policy.postJobDrainMs>0)sleep(policy.postJobDrainMs)
             return PrintTransportStats(commands.size,bursts,sent)
         }catch(t:Throwable){throw PrintTransportException(stripeIndex,sent,t)}
     }
@@ -132,6 +137,17 @@ object EscPosRaster{
             command[i]=(command[i].toInt() or (0x80 shr (x%8))).toByte()
         }
         return command
+    }
+
+    fun blank(profile:PrinterProfile,height:Int):List<ByteArray>{
+        if(height<=0)return emptyList()
+        val result=mutableListOf<ByteArray>();var remaining=height
+        while(remaining>0){
+            val stripe=minOf(profile.rasterStripeHeight,remaining)
+            result+=encodeStripe(profile.printableWidthDots,stripe){_,_->false}
+            remaining-=stripe
+        }
+        return result
     }
 }
 

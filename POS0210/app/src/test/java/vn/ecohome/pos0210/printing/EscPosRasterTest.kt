@@ -41,10 +41,18 @@ class EscPosRasterTest{
         val stats=EscPosTransport.write(out,commands,policy){sleeps+=it}
         assertEquals(listOf(14,600,600,600,600,600,3),writes)
         assertEquals(7,flushes)
-        assertEquals(5,sleeps.count{it==20L})
-        assertEquals(2,sleeps.count{it==60L})
+        assertEquals(5,sleeps.count{it==60L})
+        assertEquals(2,sleeps.count{it==150L})
+        assertEquals(1,sleeps.count{it==1200L})
         assertEquals(2,stats.burstCount)
         assertEquals(writes.sum(),stats.totalBytesSent)
+    }
+
+    @Test fun xpNb8hAddsRasterWhitespaceBeforeFeed(){
+        val blank=EscPosRaster.blank(PrinterProfile.MM58,PrinterTransportProfile.XP_NB8H_58.trailingBlankDots)
+        assertEquals(25,blank.size)
+        assertTrue(blank.all{it.size==392})
+        assertTrue(blank.all{command->command.drop(8).all{it==0.toByte()}})
     }
 
     @Test fun noCutterGetsSixLineManualFeedAndCutterProfileStaysShort(){

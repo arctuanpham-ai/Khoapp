@@ -67,7 +67,7 @@ sleep 2
 echo '=== Install candidate IN PLACE (no uninstall) ==='
 adb install -r /tmp/alpha51.apk | tee /tmp/install51.txt
 grep -q Success /tmp/install51.txt
-adb shell dumpsys package "$PKG" | grep -E 'versionName=1.0.0-alpha52-candidate8|versionCode=69'
+adb shell dumpsys package "$PKG" | grep -E 'versionName=1.0.0-alpha52-candidate9|versionCode=70'
 
 echo '=== Launch candidate to execute Room migration to 13 ==='
 adb logcat -c
