@@ -1,5 +1,5 @@
-Warning: truncated output (original token count: 47716)
-Total output lines: 3554
+Warning: truncated output (original token count: 47829)
+Total output lines: 3558
 
 package vn.ecohome.pos0210
 
@@ -619,11 +619,13 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
     val loyaltyRule = tierDiscountRule(effectiveTier, settings)
     val preview = calculatePricing(subtotal, rules + listOfNotNull(loyaltyRule), appliedCode)
     val paymentSession by vm.paymentSession(s.id).collectAsState(initial = null)
+    val bankEvents by vm.recentBankNotifications.collectAsState()
     LaunchedEffect(method, preview.total, s.id) { if(method=="TRANSFER")vm.openPaymentSession(s,t,preview.total) }
     val validPaymentSession=paymentSession?.takeIf{it.expectedAmount==preview.total}
     val shortTable=t.name.filter(Char::isLetterOrDigit).takeLast(3).uppercase()
     val qrInfo = "${setting("qr_prefix").ifBlank { "0210" }} $shortTable ${validPaymentSession?.paymentCode.orEmpty()}".trim()
     val qrConfigured = setting("bank_name").isNotBlank() && setting("bank_account").isNotBlank()
+    val ambiguousEvent=bankEvents.firstOrNull{it.matchStatus=="AMBIGUOUS"&&it.amount==preview.total&&it.receivedAt>=s.openedAt}
 
     Column {
         Header("Thanh toán") { vm.screen.value = "SENT" }
@@ -741,6 +743,8 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
                             Text("Nhân viên vẫn phải xác nhận để đóng bill.",fontSize=11.sp)
                         }
                     }
+                }else if(ambiguousEvent!=null){
+                    Text("Đã phát hiện giao dịch cùng số tiền nhưng chưa xác định được bill.",Modifier.padding(top=8.dp),color=Color(0xFF9A5B28),fontSize=12.sp,fontWeight=FontWeight.Bold)
                 }else Text("Đang chờ thông báo ngân hàng · vẫn có thể xác nhận thủ công",Modifier.padding(top=8.dp),fontSize=11.sp)
             }
         }
@@ -1136,13 +1140,7 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Bàn & khu vực", "Thêm · sửa · Trong nhà / Ngoài trời") { vm.screen.value = "TABLE_ADMIN" }
             }
             if (employee?.role == "ADMIN" || employee?.canPurchase == true) {
-                Rowx("Nhập đầu vào", "Lương · vật tư cố định · vật tư sản xuất") { vm.screen.value = "PURCHASE" }
-            }
-            if (employee?.role == "ADMIN" || employee?.role == "MANAGER") {
-                Rowx("VietQR", "Lưu tài khoản · tạo QR") { vm.screen.value = "VIETQR" }
-                Rowx("Thanh toán chuyển khoản", "Đọc thông báo VCB/VietinBank · rung · đọc số tiền") { vm.screen.value = "BANK_PAYMENT_SETTINGS" }
-            }
-            Rowx("Máy in", "58/…17716 tokens truncated…("bank_name", bank)
+                Rowx("Nhập đầu vào", "Lương · vật tư cố định · v…17829 tokens truncated…("bank_name", bank)
                 vm.saveSetting("bank_account", acc)
                 vm.saveSetting("bank_holder", holder)
                 vm.saveSetting("qr_prefix", "0210")
