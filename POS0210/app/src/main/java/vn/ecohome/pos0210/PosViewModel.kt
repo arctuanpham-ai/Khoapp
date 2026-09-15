@@ -605,10 +605,7 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
   val printKey="${session.id}:${preview.total}:$qrInfo"
   printedCheckoutKey.value=null
   viewModelScope.launch(Dispatchers.IO){
-   if(printerMode()!="BLUETOOTH"||printerMac().isBlank()){
-    printerMessage.value="CHƯA CẤU HÌNH MÁY IN · Không thể xác nhận trước khi in bill"
-    return@launch
-   }
+   if(printerMode()!="BLUETOOTH"||printerMac().isBlank()){printerMessage.value="CHƯA CẤU HÌNH MÁY IN · Không thể xác nhận trước khi in bill";return@launch}
    val batches=dao.batches(session.id).first().filter{it.status!="CANCELLED"}
    val lines=mutableListOf<Triple<String,Int,Long>>()
    batches.forEach{batch->dao.batchItems(batch.id).first().forEach{item->lines.add(Triple(item.itemNameSnapshot,item.qty,item.unitPriceSnapshot))}}
@@ -621,7 +618,7 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
     preview.discountRule?.let{rule->add("ƯU ĐÃI ${rule.name}${if(rule.code.isNotBlank()) " · ${rule.code}" else ""}  -${rule.percent}%")}
    }
    val profile=printerProfile()
-   val bitmap=ReceiptRenderer.bill(table.name,period,lines,preview.subtotal,preview.surcharge,preview.discount,preview.total,adjustments,customerName.ifBlank{"KHÁCH LẠ"},"",0,0,0,"CHƯA XÁC NHẬN",qr,profile)
+   val bitmap=ReceiptRenderer.bill(table.name,period,lines,preview.subtotal,preview.surcharge,preview.discount,preview.total,adjustments,customerName.ifBlank{"KHÁCH LẠ"},null,0,0,0,"CHƯA XÁC NHẬN",qr,profile)
    val job=PrintJobEntity(UUID.randomUUID().toString(),null,null,"BILL_PREPAY",createdAt=now)
    dao.insertPrintJob(job)
    if(repo.claimPrint(job.id,"ANDROID")){
@@ -630,10 +627,7 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
      dao.markPrintSuccess(job.id,System.currentTimeMillis());printedCheckoutKey.value=printKey
      audit("PRINT",session.id,"PREPAY_BILL_PRINTED","printer=${printerName()},job=${job.id},amount=${preview.total}")
      printerMessage.value="ĐÃ IN BILL · Chờ khách kiểm tra và thanh toán"
-    }else{
-     dao.markPrintFailed(job.id,result.exceptionOrNull()?.message?:"UNKNOWN")
-     printerMessage.value="IN BILL LỖI · ${result.exceptionOrNull()?.message?:"Thử in lại"}"
-    }
+    }else{dao.markPrintFailed(job.id,result.exceptionOrNull()?.message?:"UNKNOWN");printerMessage.value="IN BILL LỖI · ${result.exceptionOrNull()?.message?:"Thử in lại"}"}
    }
   }
  }
@@ -642,10 +636,7 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
   val employee=currentEmployee.value?:return
   val table=currentTable.value
   if(!employee.canCheckout&&employee.role!="ADMIN")return
-  if(printedCheckoutKey.value?.startsWith("${session.id}:${preview.total}:")!=true){
-   printerMessage.value="PHẢI IN BILL TRƯỚC KHI XÁC NHẬN THANH TOÁN"
-   return
-  }
+  if(printedCheckoutKey.value?.startsWith("${session.id}:${preview.total}:")!=true){printerMessage.value="PHẢI IN BILL TRƯỚC KHI XÁC NHẬN THANH TOÁN";return}
   viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
    val pendingPaymentSession=dao.activePaymentSessionSnapshot(session.id)
    val commit=runCatching {
@@ -679,6 +670,53 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
    val pointsAfter=commit.pointsAfter
    val receiptTier=commit.tier
    autoBackup()
+   if(false&&printerMode()=="BLUETOOTH"&&printerMac().isNotBlank()){
+    val bs=dao.batches(session.id).first().filter{it.status!="CANCELLED"}
+    val lines=mutableListOf<Triple<String,Int,Long>>()
+    bs.forEach{b->dao.batchItems(b.id).first().forEach{it2->lines.add(Triple(it2.itemNameSnapshot,it2.qty,it2.unitPriceSnapshot))}}
+    val info="0210 ${table?.name ?: bill.billNo}"
+    val qr=qrBitmap(preview.total,info)
+    val period="${java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date(session.openedAt))}–${java.text.SimpleDateFormat("HH:mm",java.util.Locale.getDefault()).format(java.util.Date(bill.closedAt ?: System.currentTimeMillis()))}"
+    val receiptAdjustments=buildList {
+     preview.surchargeRules.forEach{rule->add("PHỤ THU ${rule.name}  +${rule.percent}%")}
+     preview.discountRule?.let{rule->
+      add("ƯU ĐÃI ${rule.name}${if(rule.code.isNotBlank()) " · ${rule.code}" else ""}  -${rule.percent}%")
+     }
+    }
+    val profile=printerProfile()
+    val bmp=ReceiptRenderer.bill(
+     table=table?.name ?: "Bàn",
+     period=period,
+     items=lines,
+     subtotal=preview.subtotal,
+     surcharge=preview.surcharge,
+     discount=preview.discount,
+     total=preview.total,
+     adjustmentLines=receiptAdjustments,
+     customerName=customer?.name?.ifBlank{"KHÁCH THÀNH VIÊN"} ?: "KHÁCH LẠ",
+     customerTier=receiptTier,
+     pointsBefore=pointsBefore,
+     pointsEarned=pointsEarned,
+     pointsAfter=pointsAfter,
+     method=if(method=="CASH")"TIỀN MẶT" else "CHUYỂN KHOẢN",
+     qr=qr,
+     profile=profile
+    )
+    val job=PrintJobEntity(java.util.UUID.randomUUID().toString(),null,bill.id,"BILL",createdAt=System.currentTimeMillis())
+    dao.insertPrintJob(job)
+    if(repo.claimPrint(job.id,"ANDROID")){
+     val pr=BluetoothPrinter.printBitmap(getApplication(),printerMac(),bmp,profile,vn.ecohome.pos0210.printing.PrintJobType.PAYMENT)
+     if(pr.isSuccess){
+      dao.markPrintSuccess(job.id,System.currentTimeMillis())
+      audit("PRINT",bill.id,"BILL_PRINTED","printer=${printerName()},job=${job.id}")
+      printerMessage.value="ĐÃ IN BILL · ${bill.billNo}"
+     }else{
+      dao.markPrintFailed(job.id,pr.exceptionOrNull()?.message ?: "UNKNOWN")
+      audit("PRINT",bill.id,"BILL_PRINT_FAILED","printer=${printerName()},job=${job.id}")
+      printerMessage.value="ĐÃ THANH TOÁN · IN BILL LỖI: ${pr.exceptionOrNull()?.message ?: "Thử in lại"}"
+     }
+    }
+   }
    printedCheckoutKey.value=null
    currentSession.value=null
    currentTable.value=null
