@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 30054)
+Total output lines: 2132
+
 Warning: truncated output (original token count: 47829)
 Total output lines: 3558
 
@@ -622,7 +625,8 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
     val bankEvents by vm.recentBankNotifications.collectAsState()
     LaunchedEffect(method, preview.total, s.id) { if(method=="TRANSFER")vm.openPaymentSession(s,t,preview.total) }
     val validPaymentSession=paymentSession?.takeIf{it.expectedAmount==preview.total}
-    val shortTable=t.name.filter(Char::isLetterOrDigit).takeLast(3).uppercase()
+    val tableDigits=t.name.filter(Char::isDigit).takeLast(2)
+    val shortTable=if(tableDigits.isNotBlank())"B$tableDigits" else t.id.filter(Char::isLetterOrDigit).takeLast(3).uppercase()
     val qrInfo = "${setting("qr_prefix").ifBlank { "0210" }} $shortTable ${validPaymentSession?.paymentCode.orEmpty()}".trim()
     val qrConfigured = setting("bank_name").isNotBlank() && setting("bank_account").isNotBlank()
     val ambiguousEvent=bankEvents.firstOrNull{it.matchStatus=="AMBIGUOUS"&&it.amount==preview.total&&it.receivedAt>=s.openedAt}
@@ -1137,10 +1141,7 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Nhân viên", "Thêm · khóa · phân quyền") { vm.screen.value = "EMP" }
             }
             if (employee?.role == "ADMIN" || employee?.canManageSystem == true) {
-                Rowx("Bàn & khu vực", "Thêm · sửa · Trong nhà / Ngoài trời") { vm.screen.value = "TABLE_ADMIN" }
-            }
-            if (employee?.role == "ADMIN" || employee?.canPurchase == true) {
-                Rowx("Nhập đầu vào", "Lương · vật tư cố định · v…17829 tokens truncated…("bank_name", bank)
+                Rowx("Bàn & khu vực", "Thêm · sửa · Trong nhà / Ngoài trời") { vm.screen.value = "T…54 tokens truncated…("bank_name", bank)
                 vm.saveSetting("bank_account", acc)
                 vm.saveSetting("bank_holder", holder)
                 vm.saveSetting("qr_prefix", "0210")
