@@ -118,12 +118,14 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Build exact APKs
+      - name: Build exact APKs and UI test APK
         run: |
           gradle -p alpha50/POS0210 --no-daemon :app:assembleDebug --stacktrace
-          gradle -p candidate/POS0210 --no-daemon :app:assembleDebug --stacktrace
+          gradle -p candidate/POS0210 --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
           cp alpha50/POS0210/app/build/outputs/apk/debug/app-debug.apk /tmp/alpha50.apk
           cp candidate/POS0210/app/build/outputs/apk/debug/app-debug.apk /tmp/alpha51.apk
+          cp candidate/POS0210/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk /tmp/alpha51-androidTest.apk
+          test -s /tmp/alpha51-androidTest.apk
           $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose --print-certs /tmp/alpha50.apk
           $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose --print-certs /tmp/alpha51.apk
       - name: Patch expected candidate version only
