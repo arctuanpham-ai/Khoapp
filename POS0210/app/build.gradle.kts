@@ -5,7 +5,7 @@ plugins {
     id("org.jetbrains.kotlin.kapt")
 }
 android {
-    // Candidate10: additive bank-notification module; existing POS and print pipelines stay intact.
+    // Candidate11: additive bank notification and financial modules; existing POS and print pipelines stay intact.
     namespace = "vn.ecohome.pos0210"
     compileSdk = 35
     defaultConfig {
