@@ -57,6 +57,7 @@ class MonthlyAccountingTest {
  @Test fun legacyTransactionClassificationRemainsReadable(){
   assertEquals(FinancialTransactionTypes.OPERATING_EXPENSE,FinancialTransactionTypes.fromLegacy(ExpenseCategories.FIXED_EXPENSE))
   assertEquals(FinancialTransactionTypes.ASSET_PURCHASE,FinancialTransactionTypes.fromLegacy(ExpenseCategories.CAPITAL_ASSET))
+  assertEquals(FinancialTransactionTypes.INITIAL_INVESTMENT,FinancialTransactionTypes.fromLegacy(ExpenseCategories.INITIAL_INVESTMENT_SUNK))
   assertEquals(FinancialTransactionTypes.CAPITAL_INJECTION,FinancialTransactionTypes.fromLegacy(ExpenseCategories.OWNER_CONTRIBUTION))
   assertEquals(FinancialTransactionTypes.PROFIT_WITHDRAWAL,FinancialTransactionTypes.fromLegacy(ExpenseCategories.PROFIT_WITHDRAWAL))
  }

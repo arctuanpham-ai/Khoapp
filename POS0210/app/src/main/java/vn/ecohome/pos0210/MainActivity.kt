@@ -2310,7 +2310,7 @@ fun Purchases(vm: PosViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Ngày giờ dd/MM/yyyy HH:mm") }
                 )
-                if(transactionType in setOf(FinancialTransactionTypes.OPERATING_EXPENSE,FinancialTransactionTypes.ASSET_PURCHASE)) OutlinedTextField(
+                if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) OutlinedTextField(
                     supplier,
                     { supplier = it },
                     modifier = Modifier.fillMaxWidth(),
@@ -2320,9 +2320,9 @@ fun Purchases(vm: PosViewModel) {
                     itemName,
                     { itemName = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text(if(transactionType in setOf(FinancialTransactionTypes.OPERATING_EXPENSE,FinancialTransactionTypes.ASSET_PURCHASE)) if (selectedCategory?.id == "pc_salary") "Nội dung / nhân sự" else "Mặt hàng / nội dung chi" else "Nội dung giao dịch") }
+                    label = { Text(if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) if (selectedCategory?.id == "pc_salary") "Nội dung / nhân sự" else "Mặt hàng / nội dung chi" else "Nội dung giao dịch") }
                 )
-                if(transactionType in setOf(FinancialTransactionTypes.OPERATING_EXPENSE,FinancialTransactionTypes.ASSET_PURCHASE)) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         qtyText,
                         { qtyText = it.filter { ch -> ch.isDigit() || ch == ',' || ch == '.' } },
@@ -2340,9 +2340,9 @@ fun Purchases(vm: PosViewModel) {
                     unitPriceText,
                     { unitPriceText = it.filter(Char::isDigit) },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text(if(transactionType in setOf(FinancialTransactionTypes.OPERATING_EXPENSE,FinancialTransactionTypes.ASSET_PURCHASE)) if (selectedCategory?.id == "pc_salary") "Đơn giá / ngày công" else "Đơn giá" else "Số tiền") }
+                    label = { Text(if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) if (selectedCategory?.id == "pc_salary") "Đơn giá / ngày công" else "Đơn giá" else "Số tiền") }
                 )
-                if(transactionType !in setOf(FinancialTransactionTypes.OPERATING_EXPENSE,FinancialTransactionTypes.ASSET_PURCHASE)){
+                if(!FinancialTransactionTypes.usesPurchaseDocument(transactionType)){
                     Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){FilterChip(movementMethod=="CASH",{movementMethod="CASH"},{Text("Tiền mặt")});FilterChip(movementMethod=="TRANSFER",{movementMethod="TRANSFER"},{Text("Chuyển khoản")})}
                     if(transactionType in setOf(FinancialTransactionTypes.PROFIT_WITHDRAWAL,FinancialTransactionTypes.OWNER_WITHDRAWAL)){
                         Text("Người rút",fontWeight=FontWeight.Bold)
@@ -2355,13 +2355,13 @@ fun Purchases(vm: PosViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Ghi chú") }
                 )
-                if(transactionType in setOf(FinancialTransactionTypes.OPERATING_EXPENSE,FinancialTransactionTypes.ASSET_PURCHASE)) Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                     Column(Modifier.padding(16.dp)) {
                         Text(selectedCategory?.name ?: "Chưa chọn phân mục", fontWeight = FontWeight.Bold)
                         Text("Thành tiền: ${money(total)}", fontWeight = FontWeight.Black, fontSize = 18.sp)
                     }
                 }
-                if(transactionType in setOf(FinancialTransactionTypes.OPERATING_EXPENSE,FinancialTransactionTypes.ASSET_PURCHASE)) OutlinedButton(
+                if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) OutlinedButton(
                     onClick = { invoicePicker.launch(arrayOf("image/*")) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -2372,7 +2372,7 @@ fun Purchases(vm: PosViewModel) {
                         val parser = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
                         val parsedAt = runCatching { parser.parse(dateText)?.time }.getOrNull()
                             ?: System.currentTimeMillis()
-                        if(transactionType in setOf(FinancialTransactionTypes.OPERATING_EXPENSE,FinancialTransactionTypes.ASSET_PURCHASE)) vm.addPurchaseDetailed(
+                        if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) vm.addPurchaseDetailed(
                             name = itemName,
                             qty = qty ?: 0.0,
                             unit = unit.ifBlank { selectedCategory?.defaultUnit ?: "lần" },
@@ -2386,7 +2386,7 @@ fun Purchases(vm: PosViewModel) {
                         )
                         if(transactionType==FinancialTransactionTypes.ASSET_PURCHASE){selectedAssetCategory?.let{c->vm.saveAsset(AssetEntity(UUID.randomUUID().toString(),itemName.trim(),c.id,parsedAt,unitPrice?:0,qty?.toInt()?.coerceAtLeast(1)?:1,total,usefulLifeMonths=usefulLifeText.toIntOrNull()?:c.defaultUsefulLifeMonths,residualValue=(residualText.toLongOrNull()?:0).coerceAtMost(total),estimatedLiquidationValue=liquidationText.toLongOrNull()?:0,note=note))}}
                         FinancialTransactionTypes.movementCode(transactionType)?.let{vm.addFinancialMovement(it,unitPrice?:0,movementPartnerId,movementMethod,listOf(itemName.trim(),note.trim()).filter(String::isNotBlank).joinToString(" · "),parsedAt)}
-                        message = "Đã ghi giao dịch · ${FinancialTransactionTypes.label(transactionType)} · ${money(if(transactionType in setOf(FinancialTransactionTypes.OPERATING_EXPENSE,FinancialTransactionTypes.ASSET_PURCHASE))total else unitPrice?:0)}"
+                        message = "Đã ghi giao dịch · ${FinancialTransactionTypes.label(transactionType)} · ${money(if(FinancialTransactionTypes.usesPurchaseDocument(transactionType))total else unitPrice?:0)}"
                         itemName = ""
                         qtyText = ""
                         unitPriceText = ""
@@ -2395,7 +2395,7 @@ fun Purchases(vm: PosViewModel) {
                     },
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                     enabled = itemName.isNotBlank() && (unitPrice ?: 0L) > 0 &&
-                        (transactionType !in setOf(FinancialTransactionTypes.OPERATING_EXPENSE,FinancialTransactionTypes.ASSET_PURCHASE)||(selectedCategoryId.isNotBlank()&&(qty?:0.0)>0)) &&
+                        (!FinancialTransactionTypes.usesPurchaseDocument(transactionType)||(selectedCategoryId.isNotBlank()&&(qty?:0.0)>0)) &&
                         (transactionType!=FinancialTransactionTypes.ASSET_PURCHASE||selectedAssetCategory!=null) &&
                         (transactionType !in setOf(FinancialTransactionTypes.PROFIT_WITHDRAWAL,FinancialTransactionTypes.OWNER_WITHDRAWAL)||movementPartnerId!=null)
                 ) { Text("LƯU GIAO DỊCH") }
