@@ -80,6 +80,7 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  private fun printerMode()=setting("printer_mode").ifBlank{"TEST"}
  private fun printerMac()=setting("printer_mac")
  private fun printerName()=setting("printer_name").ifBlank{BluetoothPrinter.PROFILE_NAME}
+ private fun printerProfile()=vn.ecohome.pos0210.printing.PrinterProfile.fromSetting(setting("printer_paper_mm"))
  private fun qrBitmap(amount:Long,info:String)=
   VietQrOffline.bitmap(setting("bank_name"),setting("bank_account"),setting("bank_holder"),amount,info).getOrNull()
  fun testBluetoothPrint(){
@@ -88,7 +89,8 @@ class PosViewModel(app:Application):AndroidViewModel(app){
    if(printerMac().isBlank()){printerMessage.value="Chưa chọn máy in Bluetooth";return@launch}
    printerMessage.value="Đang in thử..."
    val qr=qrBitmap(135000,"0210 TEST")
-   val result=BluetoothPrinter.printBitmap(getApplication(),printerMac(),ReceiptRenderer.sampleBill(qr))
+   val profile=printerProfile()
+   val result=BluetoothPrinter.printBitmap(getApplication(),printerMac(),ReceiptRenderer.sampleBill(qr,profile),profile,vn.ecohome.pos0210.printing.PrintJobType.TEST)
    printerMessage.value=if(result.isSuccess)"IN THỬ THÀNH CÔNG · ${printerName()}" else "IN THỬ LỖI: ${result.exceptionOrNull()?.message}"
   }
  }
@@ -287,7 +289,7 @@ fun saveSetting(key:String,value:String){
  val e=currentEmployee.value?:return
  val allowed=when(key){
   "storage_root_uri","master_config_uri","autoback_tree_uri" -> e.role=="ADMIN"||e.canManageSystem
-  "bank_name","bank_account","bank_holder","qr_prefix","printer_mode","printer_mac","printer_name" -> e.role=="ADMIN"||e.role=="MANAGER"
+  "bank_name","bank_account","bank_holder","qr_prefix","printer_mode","printer_mac","printer_name","printer_paper_mm" -> e.role=="ADMIN"||e.role=="MANAGER"
   else -> e.role=="ADMIN"
  }
  if(!allowed){viewModelScope.launch{audit("SECURITY",key,"SETTING_DENIED","role=${e.role}")};return}
@@ -415,13 +417,14 @@ fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
    val mac=printerMac()
    if(mac.isBlank()){
     repo.failKitchenPrint(job.id,"NO_PRINTER_SELECTED")
-    printerMessage.value="Chưa chọn máy in XP-N58H"
+    printerMessage.value="Chưa chọn máy in Bluetooth"
     return@launch
    }
    val table=currentTable.value?.name ?: "Bàn"
    val items=dao.batchItems(b.id).first().map{Triple(it.itemNameSnapshot,it.qty,it.note)}
    printerMessage.value="Đang in #${b.serviceNo.toString().padStart(3,'0')} · Đơn #${b.sequence}..."
-   val result=BluetoothPrinter.printBitmap(getApplication(),mac,ReceiptRenderer.kitchen(table,b.sequence,b.serviceNo,e.name,items))
+   val profile=printerProfile()
+   val result=BluetoothPrinter.printBitmap(getApplication(),mac,ReceiptRenderer.kitchen(table,b.sequence,b.serviceNo,e.name,items,profile),profile,vn.ecohome.pos0210.printing.PrintJobType.KITCHEN)
    if(result.isSuccess){
     val now=System.currentTimeMillis()
     if(repo.finalizeKitchenPrint(job.id,b.id,now)){
@@ -472,7 +475,8 @@ fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
     autoBackup()
     if(printerMode()=="BLUETOOTH"&&printerMac().isNotBlank()){
      val table=currentTable.value?.name ?: "Bàn"
-     val pr=BluetoothPrinter.printBitmap(getApplication(),printerMac(),ReceiptRenderer.cancel(table,b.sequence,e.name,reason.trim()))
+     val profile=printerProfile()
+     val pr=BluetoothPrinter.printBitmap(getApplication(),printerMac(),ReceiptRenderer.cancel(table,b.sequence,e.name,reason.trim(),profile),profile,vn.ecohome.pos0210.printing.PrintJobType.CANCEL)
      printerMessage.value=if(pr.isSuccess)"ĐÃ IN PHIẾU HỦY · Đơn #${b.sequence}" else "ĐÃ HỦY ĐƠN · In phiếu hủy lỗi: ${pr.exceptionOrNull()?.message}"
     }
    }
@@ -624,6 +628,7 @@ fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
       add("ƯU ĐÃI ${rule.name}${if(rule.code.isNotBlank()) " · ${rule.code}" else ""}  -${rule.percent}%")
      }
     }
+    val profile=printerProfile()
     val bmp=ReceiptRenderer.bill(
      table=table?.name ?: "Bàn",
      period=period,
@@ -639,12 +644,13 @@ fun setting(key:String)=settings.value.firstOrNull{it.key==key}?.value?:""
      pointsEarned=pointsEarned,
      pointsAfter=pointsAfter,
      method=if(method=="CASH")"TIỀN MẶT" else "CHUYỂN KHOẢN",
-     qr=qr
+     qr=qr,
+     profile=profile
     )
     val job=PrintJobEntity(java.util.UUID.randomUUID().toString(),null,bill.id,"BILL",createdAt=System.currentTimeMillis())
     dao.insertPrintJob(job)
     if(repo.claimPrint(job.id,"ANDROID")){
-     val pr=BluetoothPrinter.printBitmap(getApplication(),printerMac(),bmp)
+     val pr=BluetoothPrinter.printBitmap(getApplication(),printerMac(),bmp,profile,vn.ecohome.pos0210.printing.PrintJobType.PAYMENT)
      if(pr.isSuccess){
       dao.markPrintSuccess(job.id,System.currentTimeMillis())
       audit("PRINT",bill.id,"BILL_PRINTED","printer=${printerName()},job=${job.id}")

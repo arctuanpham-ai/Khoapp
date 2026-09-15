@@ -1117,7 +1117,7 @@ fun Manage(vm: PosViewModel) {
             if (employee?.role == "ADMIN" || employee?.role == "MANAGER") {
                 Rowx("VietQR", "Lưu tài khoản · tạo QR") { vm.screen.value = "VIETQR" }
             }
-            Rowx("Máy in", "XP-N58H · Bluetooth · ESC/POS") { vm.screen.value = "PRINTER" }
+            Rowx("Máy in", "58/80mm · Bluetooth · ESC/POS") { vm.screen.value = "PRINTER" }
             if (employee?.role == "ADMIN" || employee?.canManageSystem == true) {
                 Rowx("Dữ liệu & Backup", "MASTER · Autobackup · Backup/Restore") { vm.screen.value = "BACKUP" }
             }
@@ -1126,7 +1126,7 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Nhật ký hệ thống", "Audit thao tác · người thực hiện · thời điểm · dữ liệu thay đổi") { vm.screen.value = "SETTINGS" }
             }
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
-            Text("POS0210 v1.0.0-alpha52-candidate6 · versionCode 67", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("POS0210 v1.0.0-alpha52-candidate7 · versionCode 68", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Text("Tương thích Android 8.0 (API 26) trở lên · Thiết bị hiện tại: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})", fontSize = 11.sp)
             if (Build.VERSION.SDK_INT < 26) Text("Thiết bị không được hỗ trợ. Cần Android 8.0 trở lên.", color = Color.Red, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(30.dp))
@@ -2566,6 +2566,7 @@ fun Printer(vm: PosViewModel) {
     val mode = settings.firstOrNull { it.key == "printer_mode" }?.value ?: "TEST"
     val selectedMac = settings.firstOrNull { it.key == "printer_mac" }?.value ?: ""
     val selectedName = settings.firstOrNull { it.key == "printer_name" }?.value ?: ""
+    val paperMm = settings.firstOrNull { it.key == "printer_paper_mm" }?.value ?: "58"
     val hasPermission = remember(permissionTick) { BluetoothPrinter.hasPermission(context) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -2580,9 +2581,14 @@ fun Printer(vm: PosViewModel) {
         Header("Máy in") { vm.screen.value = "MANAGE" }
         LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
             item {
-                Text("XPRINTER XP‑N58H", fontWeight = FontWeight.Black, fontSize = 20.sp)
-                Text("58mm · vùng in 48mm · 203dpi · 384 dots · Bluetooth ESC/POS", fontSize = 12.sp)
+                Text("MÁY IN BLUETOOTH ESC/POS", fontWeight = FontWeight.Black, fontSize = 20.sp)
+                Text(if(paperMm=="80") "80mm · 576 dots · Bluetooth ESC/POS" else "58mm · vùng in 48mm · 203dpi · 384 dots · Bluetooth ESC/POS", fontSize = 12.sp)
                 Spacer(Modifier.height(10.dp))
+                Text("KHỔ GIẤY",fontWeight=FontWeight.Bold,fontSize=12.sp)
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                    FilterChip(selected=paperMm=="58",onClick={vm.saveSetting("printer_paper_mm","58")},label={Text("58 mm")})
+                    FilterChip(selected=paperMm=="80",onClick={vm.saveSetting("printer_paper_mm","80")},label={Text("80 mm")})
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = mode == "TEST",
@@ -2658,7 +2664,7 @@ fun Printer(vm: PosViewModel) {
                                 onClick = { vm.testBluetoothPrint() },
                                 modifier = Modifier.fillMaxWidth(),
                                 enabled = hasPermission && selectedMac.isNotBlank()
-                            ) { Text("TEST IN XP‑N58H") }
+                            ) { Text("TEST IN") }
                         }
                     }
                 }
@@ -2697,7 +2703,7 @@ fun Printer(vm: PosViewModel) {
                     Card(Modifier.fillMaxWidth().padding(top = 12.dp)) {
                         Column(Modifier.padding(16.dp)) {
                             Text("Profile chuẩn 0210", fontWeight = FontWeight.Bold)
-                            Text("XP‑N58H · 58mm · bitmap 384px. In bitmap giúp giữ font tiếng Việt, chữ Bold và VietQR ổn định.")
+                            Text("58mm: 384 dots · 80mm: 576 dots. Bitmap Unicode và VietQR được mã hóa raster ESC/POS theo từng dải an toàn.")
                         }
                     }
                 }
