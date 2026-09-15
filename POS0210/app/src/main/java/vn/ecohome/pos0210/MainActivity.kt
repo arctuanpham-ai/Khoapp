@@ -2320,7 +2320,7 @@ fun Purchases(vm: PosViewModel) {
                     itemName,
                     { itemName = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text(if (selectedCategory?.id == "pc_salary") "Nội dung / nhân sự" else "Mặt hàng / nội dung chi") }
+                    label = { Text(if(transactionType in setOf(FinancialTransactionTypes.OPERATING_EXPENSE,FinancialTransactionTypes.ASSET_PURCHASE)) if (selectedCategory?.id == "pc_salary") "Nội dung / nhân sự" else "Mặt hàng / nội dung chi" else "Nội dung giao dịch") }
                 )
                 if(transactionType in setOf(FinancialTransactionTypes.OPERATING_EXPENSE,FinancialTransactionTypes.ASSET_PURCHASE)) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
@@ -2355,13 +2355,13 @@ fun Purchases(vm: PosViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Ghi chú") }
                 )
-                Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                if(transactionType in setOf(FinancialTransactionTypes.OPERATING_EXPENSE,FinancialTransactionTypes.ASSET_PURCHASE)) Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                     Column(Modifier.padding(16.dp)) {
                         Text(selectedCategory?.name ?: "Chưa chọn phân mục", fontWeight = FontWeight.Bold)
                         Text("Thành tiền: ${money(total)}", fontWeight = FontWeight.Black, fontSize = 18.sp)
                     }
                 }
-                OutlinedButton(
+                if(transactionType in setOf(FinancialTransactionTypes.OPERATING_EXPENSE,FinancialTransactionTypes.ASSET_PURCHASE)) OutlinedButton(
                     onClick = { invoicePicker.launch(arrayOf("image/*")) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -3244,7 +3244,7 @@ fun MonthlyProfitReport(vm:PosViewModel){
     val recoveredCapital=movements.filter{it.type=="RECOVERED_CAPITAL"}.sumOf{it.amount}
     val recentProfits=(configs.filter{it.monthKey<monthKey}.sortedBy{it.monthKey}.mapNotNull{it.distributableProfitSnapshot}.takeLast(2)+listOfNotNull(result.distributableProfit))
     val payback=calculatePayback(initialInvestment,recoveredCapital,recentProfits)
-    val partnerPositions=calculatePartnerWithdrawalPositions(result.partnerProfits,monthMovements.filter{it.type=="PROFIT_WITHDRAWAL"&&it.partnerId!=null}.groupBy{it.partnerId!!}.mapValues{it.value.sumOf(FinancialMovementEntity::amount)})
+    val partnerPositions=calculatePartnerWithdrawalPositions(result.partnerProfits,monthMovements.filter{it.type=="PROFIT_WITHDRAWAL"&&it.partnerId!=null}.groupBy{it.partnerId!!}.mapValues{(_,rows)->rows.sumOf{it.amount}})
     var showPartners by remember{mutableStateOf(false)};var showAsset by remember{mutableStateOf(false)};var selectedAsset by remember{mutableStateOf<AssetEntity?>(null)}
     var showOpeningOverride by remember{mutableStateOf(false)};var openingOverrideNote by remember{mutableStateOf("")}
     LazyColumn(Modifier.fillMaxSize().padding(12.dp)){
