@@ -5,7 +5,7 @@ plugins {
     id("org.jetbrains.kotlin.kapt")
 }
 android {
-    // Candidate11: additive bank notification and financial modules; existing POS and print pipelines stay intact.
+    // Candidate12: targeted financial cleanup; existing POS, payment, and print pipelines stay intact.
     namespace = "vn.ecohome.pos0210"
     compileSdk = 35
     defaultConfig {
@@ -43,8 +43,3 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.google.zxing:core:3.5.3")
     testImplementation("junit:junit:4.13.2")
-    androidTestImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
-    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
-    androidTestImplementation("androidx.test.ext:junit:1.2.1")
-    debugImplementation("androidx.compose.ui:ui-test-manifest")
-}
