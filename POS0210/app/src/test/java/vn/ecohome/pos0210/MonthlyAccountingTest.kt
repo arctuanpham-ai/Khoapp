@@ -9,14 +9,14 @@ class MonthlyAccountingTest {
    grossRevenue=100_000_000,cogs=30_000_000,fixedExpense=10_000_000,variableExpense=5_000_000,otherExpense=2_000_000,
    capitalAssets=20_000_000,ownerContribution=15_000_000,ownerWithdrawal=5_000_000,revenueReceived=100_000_000,
    reserveBasisPoints=1000,partners=listOf(ProfitShareInput("a","Partner A",5000),ProfitShareInput("b","Partner B",5000))))
-  assertEquals(70_000_000,r.grossProfit);assertEquals(53_000_000,r.operatingProfit)
-  assertEquals(5_300_000,r.reserve);assertEquals(47_700_000,r.distributableProfit)
+  assertEquals(70_000_000L,r.grossProfit);assertEquals(53_000_000L,r.operatingProfit)
+  assertEquals(5_300_000L,r.reserve);assertEquals(47_700_000L,r.distributableProfit)
   assertEquals(listOf(23_850_000L,23_850_000L),r.partnerProfits.map{it.amount})
-  assertEquals(73_000_000,r.closingCash)
+  assertEquals(73_000_000L,r.closingCash)
  }
  @Test fun purchasesAreNotAssumedToBeCogs(){
   val r=calculateMonthlyAccounting(MonthlyAccountingInput(grossRevenue=10_000,cogs=null,inventoryPurchases=7_000,revenueReceived=10_000))
-  assertNull(r.grossProfit);assertNull(r.operatingProfit);assertEquals(3_000,r.closingCash)
+  assertNull(r.grossProfit);assertNull(r.operatingProfit);assertEquals(3_000L,r.closingCash)
  }
  @Test fun sharesMustTotalExactlyOneHundredPercent(){
   val r=calculateMonthlyAccounting(MonthlyAccountingInput(grossRevenue=100,cogs=0,partners=listOf(ProfitShareInput("a","A",4000))))
