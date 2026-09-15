@@ -5,7 +5,7 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-@Database(entities=[EmployeeEntity::class,AreaEntity::class,DiningTableEntity::class,MenuCategoryEntity::class,ComboEntity::class,ComboItemEntity::class,MenuItemEntity::class,TableSessionEntity::class,OrderBatchEntity::class,OrderItemEntity::class,BillEntity::class,PaymentEntity::class,CustomerEntity::class,CustomerPointTransactionEntity::class,PricingRuleEntity::class,BillAdjustmentEntity::class,SupplierEntity::class,PurchaseEntity::class,PurchaseCategoryEntity::class,PurchaseItemEntity::class,MonthlyAccountingEntity::class,ProfitPartnerEntity::class,PrintJobEntity::class,AuditEventEntity::class,AppSettingEntity::class,PaymentSessionEntity::class,BankNotificationEventEntity::class],version=14,exportSchema=false)
+@Database(entities=[EmployeeEntity::class,AreaEntity::class,DiningTableEntity::class,MenuCategoryEntity::class,ComboEntity::class,ComboItemEntity::class,MenuItemEntity::class,TableSessionEntity::class,OrderBatchEntity::class,OrderItemEntity::class,BillEntity::class,PaymentEntity::class,CustomerEntity::class,CustomerPointTransactionEntity::class,PricingRuleEntity::class,BillAdjustmentEntity::class,SupplierEntity::class,PurchaseEntity::class,PurchaseCategoryEntity::class,PurchaseItemEntity::class,MonthlyAccountingEntity::class,ProfitPartnerEntity::class,PrintJobEntity::class,AuditEventEntity::class,AppSettingEntity::class,PaymentSessionEntity::class,BankNotificationEventEntity::class,AssetCategoryEntity::class,AssetEntity::class,AssetValuationEntity::class,FinancialMovementEntity::class,OpeningCashAdjustmentEntity::class],version=15,exportSchema=false)
 abstract class PosDatabase:RoomDatabase(){
  abstract fun dao():PosDao
  companion object{
@@ -126,9 +126,34 @@ abstract class PosDatabase:RoomDatabase(){
     db.execSQL("CREATE INDEX IF NOT EXISTS index_BankNotificationEventEntity_paymentSessionId ON BankNotificationEventEntity(paymentSessionId)")
    }
   }
+  private val MIGRATION_14_15=object:Migration(14,15){
+   override fun migrate(db:SupportSQLiteDatabase){
+    db.execSQL("ALTER TABLE MonthlyAccountingEntity ADD COLUMN openingCashOverridden INTEGER NOT NULL DEFAULT 0")
+    db.execSQL("ALTER TABLE MonthlyAccountingEntity ADD COLUMN closingCashSnapshot INTEGER")
+    db.execSQL("CREATE TABLE IF NOT EXISTS AssetCategoryEntity (id TEXT NOT NULL, name TEXT NOT NULL, defaultUsefulLifeMonths INTEGER NOT NULL, minUsefulLifeMonths INTEGER NOT NULL, maxUsefulLifeMonths INTEGER NOT NULL, sortOrder INTEGER NOT NULL, active INTEGER NOT NULL, PRIMARY KEY(id))")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_AssetCategoryEntity_active ON AssetCategoryEntity(active)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_AssetCategoryEntity_sortOrder ON AssetCategoryEntity(sortOrder)")
+    db.execSQL("CREATE TABLE IF NOT EXISTS AssetEntity (id TEXT NOT NULL, name TEXT NOT NULL, categoryId TEXT NOT NULL, purchaseDate INTEGER NOT NULL, purchasePrice INTEGER NOT NULL, quantity INTEGER NOT NULL, totalCost INTEGER NOT NULL, supplier TEXT NOT NULL, usefulLifeMonths INTEGER NOT NULL, depreciationMethod TEXT NOT NULL, residualValue INTEGER NOT NULL, estimatedLiquidationValue INTEGER NOT NULL, status TEXT NOT NULL, disposalDate INTEGER, disposalPrice INTEGER, note TEXT NOT NULL, PRIMARY KEY(id))")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_AssetEntity_categoryId ON AssetEntity(categoryId)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_AssetEntity_purchaseDate ON AssetEntity(purchaseDate)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_AssetEntity_status ON AssetEntity(status)")
+    db.execSQL("CREATE TABLE IF NOT EXISTS AssetValuationEntity (id TEXT NOT NULL, assetId TEXT NOT NULL, previousValue INTEGER NOT NULL, newValue INTEGER NOT NULL, changedAt INTEGER NOT NULL, note TEXT NOT NULL, PRIMARY KEY(id))")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_AssetValuationEntity_assetId ON AssetValuationEntity(assetId)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_AssetValuationEntity_changedAt ON AssetValuationEntity(changedAt)")
+    db.execSQL("CREATE TABLE IF NOT EXISTS FinancialMovementEntity (id TEXT NOT NULL, type TEXT NOT NULL, amount INTEGER NOT NULL, occurredAt INTEGER NOT NULL, partnerId TEXT, method TEXT NOT NULL, note TEXT NOT NULL, PRIMARY KEY(id))")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_FinancialMovementEntity_occurredAt ON FinancialMovementEntity(occurredAt)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_FinancialMovementEntity_type ON FinancialMovementEntity(type)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_FinancialMovementEntity_partnerId ON FinancialMovementEntity(partnerId)")
+    db.execSQL("CREATE TABLE IF NOT EXISTS OpeningCashAdjustmentEntity (id TEXT NOT NULL, monthKey TEXT NOT NULL, previousValue INTEGER NOT NULL, newValue INTEGER NOT NULL, note TEXT NOT NULL, changedAt INTEGER NOT NULL, PRIMARY KEY(id))")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_OpeningCashAdjustmentEntity_monthKey ON OpeningCashAdjustmentEntity(monthKey)")
+    db.execSQL("CREATE INDEX IF NOT EXISTS index_OpeningCashAdjustmentEntity_changedAt ON OpeningCashAdjustmentEntity(changedAt)")
+    val categories=listOf(arrayOf("coffee_machine","Máy pha cà phê",60,36,96,0),arrayOf("grinder","Máy xay",60,36,96,1),arrayOf("cold_equipment","Thiết bị lạnh",72,36,120,2),arrayOf("electrical","Thiết bị điện / POS",48,24,72,3),arrayOf("kitchen","Thiết bị bếp",60,24,96,4),arrayOf("furniture","Bàn ghế / nội thất",60,24,120,5),arrayOf("other","Dụng cụ khác",36,12,84,6))
+    categories.forEach{v->db.execSQL("INSERT OR IGNORE INTO AssetCategoryEntity(id,name,defaultUsefulLifeMonths,minUsefulLifeMonths,maxUsefulLifeMonths,sortOrder,active) VALUES(?,?,?,?,?,?,1)",v)}
+   }
+  }
   fun get(context:Context):PosDatabase=instance?:synchronized(this){
    instance?:Room.databaseBuilder(context.applicationContext,PosDatabase::class.java,"pos0210.db")
-    .addMigrations(MIGRATION_3_4,MIGRATION_4_5,MIGRATION_5_6,MIGRATION_6_7,MIGRATION_7_8,MIGRATION_8_9,MIGRATION_9_10,MIGRATION_10_11,MIGRATION_11_12,MIGRATION_12_13,MIGRATION_13_14)
+    .addMigrations(MIGRATION_3_4,MIGRATION_4_5,MIGRATION_5_6,MIGRATION_6_7,MIGRATION_7_8,MIGRATION_8_9,MIGRATION_9_10,MIGRATION_10_11,MIGRATION_11_12,MIGRATION_12_13,MIGRATION_13_14,MIGRATION_14_15)
     .build().also{instance=it}
   }
   fun closeForRestore(){synchronized(this){instance?.close();instance=null}}

@@ -20,14 +20,29 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  val monthlyAccounting=dao.monthlyAccounting().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val profitPartners=dao.profitPartners().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val tableServiceTimings=dao.tableServiceTimings().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val areas=repo.areas().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val tables=repo.tables().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val waitingBatches=dao.waitingBatches().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val categories=repo.categories().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val menu=repo.menuItems().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val combos=dao.combos().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val employees=repo.employees().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val sessions=repo.openSessions().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val bills=repo.paidBills().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val suppliers=dao.suppliers().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val purchases=dao.purchases().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val purchaseCosts=dao.purchaseCosts().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val purchaseCategories=dao.purchaseCategories().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val payments=dao.payments().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val customers=dao.customers().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val customerItemStats=dao.customerItemStats().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val pricingRules=dao.pricingRules().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val billAdjustments=dao.billAdjustments().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val settings=dao.settings().stateIn(viewModelScope,SharingStarted.Eagerly,emptyList());val printJobs=dao.printJobs().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val audits=dao.audits().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList());val itemSales=dao.paidItemSales().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList())
  val healthIssues=MutableStateFlow<List<String>>(emptyList());val healthMessage=MutableStateFlow("Chưa kiểm tra");val customerUpdateMessage=MutableStateFlow("");val cartNotes=MutableStateFlow<Map<String,String>>(emptyMap());val cart=MutableStateFlow<Map<String,Int>>(emptyMap());val currentTable=MutableStateFlow<DiningTableEntity?>(null);val currentSession=MutableStateFlow<TableSessionEntity?>(null);val currentEmployee=MutableStateFlow<EmployeeEntity?>(null);val authError=MutableStateFlow("");val screen=MutableStateFlow("LOGIN");val printerPreview=MutableStateFlow("");val printerMessage=MutableStateFlow("")
  val recentBankNotifications=dao.recentBankNotifications().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList())
+ val assetCategories=dao.assetCategories().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList())
+ val assets=dao.assets().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList())
+ val assetValuations=dao.assetValuations().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList())
+ val financialMovements=dao.financialMovements().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList())
+ val openingCashAdjustments=dao.openingCashAdjustments().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList())
  init{viewModelScope.launch{bootstrap()}}
  private suspend fun bootstrap(){
   val recovered=dao.recoverClaimedPrints()
   if(recovered>0){
    dao.audit(AuditEventEntity(UUID.randomUUID().toString(),"PRINT","RECOVERY","CLAIMED_TO_REVIEW",null,"ANDROID",System.currentTimeMillis(),"count=$recovered"))
   }
+  seedAssetCategories()
   if(dao.areas().first().isNotEmpty())return
   seed()
+ }
+ private suspend fun seedAssetCategories(){
+  if(dao.assetCategories().first().isNotEmpty())return
+  listOf(
+   AssetCategoryEntity("coffee_machine","Máy pha cà phê",60,36,96,0),AssetCategoryEntity("grinder","Máy xay",60,36,96,1),
+   AssetCategoryEntity("cold_equipment","Thiết bị lạnh",72,36,120,2),AssetCategoryEntity("electrical","Thiết bị điện / POS",48,24,72,3),
+   AssetCategoryEntity("kitchen","Thiết bị bếp",60,24,96,4),AssetCategoryEntity("furniture","Bàn ghế / nội thất",60,24,120,5),
+   AssetCategoryEntity("other","Dụng cụ khác",36,12,84,6)
+  ).forEach{dao.saveAssetCategory(it)}
  }
  private suspend fun seed(){if(dao.areas().first().isNotEmpty())return;
  repo.savePurchaseCategory(PurchaseCategoryEntity("pc_salary","Lương","ngày công",0,true))
@@ -337,7 +352,6 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
   if(!e.canPurchase&&e.role!="ADMIN")return
   if(name.isBlank()||qty<=0||unitPrice<=0)return
   viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
-   val pendingPaymentSession=dao.activePaymentSessionSnapshot(session.id)
    val id=UUID.randomUUID().toString()
    val managed=runCatching{ManagedMedia.importImage(getApplication(),imageUri,"invoice_"+id)}.getOrNull()
    val supplierId=if(supplierName.isBlank())null else UUID.randomUUID().toString().also{repo.saveSupplier(SupplierEntity(it,supplierName.trim()))}
@@ -360,6 +374,22 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
   val e=currentEmployee.value?:return;if(e.role!="ADMIN"&&!e.canViewReport)return
   if(v.reserveBasisPoints !in 0..10000)return
   viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){dao.saveMonthlyAccounting(v);audit("ACCOUNTING",v.monthKey,"SAVE","cogs=${v.cogs},source=${v.cogsSource},reserveBp=${v.reserveBasisPoints}");autoBackup()}
+ }
+ fun saveOpeningCash(v:MonthlyAccountingEntity,previous:Long,note:String){
+  val e=currentEmployee.value?:return;if(e.role!="ADMIN"||note.isBlank())return
+  viewModelScope.launch(Dispatchers.IO){db.withTransaction{dao.saveMonthlyAccounting(v.copy(openingCashOverridden=true));dao.insertOpeningCashAdjustment(OpeningCashAdjustmentEntity(UUID.randomUUID().toString(),v.monthKey,previous,v.openingCash,note.trim(),System.currentTimeMillis()))};audit("ACCOUNTING",v.monthKey,"OPENING_CASH_OVERRIDE","$previous->${v.openingCash}");autoBackup()}
+ }
+ fun saveAsset(v:AssetEntity){
+  val e=currentEmployee.value?:return;if(e.role!="ADMIN"||v.name.isBlank()||v.totalCost<=0||v.quantity<=0||v.usefulLifeMonths<=0)return
+  viewModelScope.launch(Dispatchers.IO){dao.saveAsset(v);audit("ASSET",v.id,"SAVE","cost=${v.totalCost},life=${v.usefulLifeMonths}");autoBackup()}
+ }
+ fun updateAssetLiquidationValue(asset:AssetEntity,newValue:Long,note:String){
+  val e=currentEmployee.value?:return;if(e.role!="ADMIN"||newValue<0)return
+  viewModelScope.launch(Dispatchers.IO){db.withTransaction{dao.saveAsset(asset.copy(estimatedLiquidationValue=newValue));dao.insertAssetValuation(AssetValuationEntity(UUID.randomUUID().toString(),asset.id,asset.estimatedLiquidationValue,newValue,System.currentTimeMillis(),note.trim()))};audit("ASSET",asset.id,"VALUATION","${asset.estimatedLiquidationValue}->$newValue");autoBackup()}
+ }
+ fun addFinancialMovement(type:String,amount:Long,partnerId:String?=null,method:String="CASH",note:String="",at:Long=System.currentTimeMillis()){
+  val e=currentEmployee.value?:return;if(e.role!="ADMIN"||amount<=0||type !in setOf("CAPITAL_CONTRIBUTION","WORKING_CAPITAL","OTHER_CASH_IN","PROFIT_WITHDRAWAL","OWNER_WITHDRAWAL","RECOVERED_CAPITAL"))return
+  viewModelScope.launch(Dispatchers.IO){val id=UUID.randomUUID().toString();dao.insertFinancialMovement(FinancialMovementEntity(id,type,amount,at,partnerId,method,note.trim()));audit("FINANCE",id,"CREATE","type=$type,amount=$amount");autoBackup()}
  }
  fun saveProfitPartners(rows:List<ProfitPartnerEntity>){
   val e=currentEmployee.value?:return;if(e.role!="ADMIN")return
