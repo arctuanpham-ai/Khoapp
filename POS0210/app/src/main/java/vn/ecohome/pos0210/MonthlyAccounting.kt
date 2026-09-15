@@ -74,7 +74,7 @@ fun calculateMonthlyAccounting(i:MonthlyAccountingInput):MonthlyAccountingResult
     val reserve=operating?.takeIf{it>0}?.let{it*i.reserveBasisPoints/10_000L}?:operating?.let{0L}
     val distributable=operating?.let{it-(reserve?:0L)}
     var allocated=0L
-    val shares=if(validShares&&distributable!=null) i.partners.mapIndexed{index,p->
+    val shares=if(validShares&&distributable!=null&&distributable>0) i.partners.mapIndexed{index,p->
         val amount=if(index==i.partners.lastIndex) distributable-allocated else distributable*p.shareBasisPoints/10_000L
         allocated+=amount;PartnerProfit(p.id,p.name,p.shareBasisPoints,amount)
     } else emptyList()

@@ -78,4 +78,8 @@ class MonthlyAccountingTest {
   assertEquals(5_000_000,resolveOpeningCash(4_000_000,false,5_000_000))
   assertEquals(4_000_000,resolveOpeningCash(4_000_000,true,5_000_000))
  }
+ @Test fun operatingLossNeverCreatesNegativePartnerEntitlement(){
+  val r=calculateMonthlyAccounting(MonthlyAccountingInput(grossRevenue=1_000,cogs=2_000,partners=listOf(ProfitShareInput("a","A",5000),ProfitShareInput("b","B",5000))))
+  assertEquals(-1_000L,r.operatingProfit);assertTrue(r.partnerProfits.isEmpty())
+ }
 }
