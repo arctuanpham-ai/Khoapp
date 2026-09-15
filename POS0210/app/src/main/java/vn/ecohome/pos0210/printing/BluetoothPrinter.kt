@@ -8,6 +8,7 @@ import android.graphics.*
 import android.os.Build
 import android.util.Log
 import androidx.core.content.ContextCompat
+import java.io.OutputStream
 import java.util.UUID
 
 data class PrinterDevice(val name:String,val address:String)
@@ -44,27 +45,57 @@ object BluetoothPrinter {
         val raster=EscPosRaster.encode(bitmap,profile)
         val textBytes=0
         val rasterBytes=raster.sumOf{it.size}
-        val totalBytes=2+rasterBytes+3
+        val totalBytes=EscPosTransport.estimatedBytes(raster,profile.transport)
         require(totalBytes in 1..MAX_JOB_BYTES){"PRINT_JOB_SIZE_INVALID:$totalBytes"}
-        Log.i(TAG,"start printer=${device.name ?: "unknown"} mac=$address profile=${profile.label} dots=${profile.printableWidthDots} type=$jobType textBytes=$textBytes rasterBytes=$rasterBytes totalBytes=$totalBytes qrMode=raster")
+        val policy=profile.transport
+        Log.i(TAG,"PRINT START printer=${device.name ?: "unknown"} mac=$address profile=${profile.label} dots=${profile.printableWidthDots} type=$jobType bitmap=${bitmap.width}x${bitmap.height} stripes=${raster.size} textBytes=$textBytes rasterBytes=$rasterBytes totalBytes=$totalBytes qrMode=raster pacing=${policy.delayPerStripeMs}ms/${policy.burstBytes}B/${policy.delayPerBurstMs}ms feed=${policy.trailingFeedLines} cutter=${policy.hasAutoCutter}")
         adapter.cancelDiscovery()
         try{
             device.createRfcommSocketToServiceRecord(SPP_UUID).use { socket ->
                 socket.connect()
                 socket.outputStream.use { out ->
-                    out.write(byteArrayOf(0x1B,0x40))
-                    // Each stripe is a complete ESC/POS command. Small printer
-                    // buffers never receive a single receipt-height binary frame.
-                    raster.forEach{command->out.write(command)}
-                    out.write(byteArrayOf(0x0A,0x0A,0x0A))
-                    out.flush()
+                    val stats=EscPosTransport.write(out,raster,policy)
+                    Log.i(TAG,"transport stripes=${stats.stripeCount} bursts=${stats.burstCount} sent=${stats.totalBytesSent}")
                 }
             }
-            Log.i(TAG,"success printer=${device.name ?: "unknown"} mac=$address profile=${profile.label} type=$jobType totalBytes=$totalBytes")
+            Log.i(TAG,"PRINT SUCCESS printer=${device.name ?: "unknown"} mac=$address profile=${profile.label} type=$jobType totalBytes=$totalBytes")
         }catch(t:Throwable){
-            Log.e(TAG,"failure printer=${device.name ?: "unknown"} mac=$address profile=${profile.label} type=$jobType totalBytes=$totalBytes",t)
+            val transport=t as? PrintTransportException
+            Log.e(TAG,"PRINT FAILURE printer=${device.name ?: "unknown"} mac=$address profile=${profile.label} type=$jobType stripe=${transport?.stripeIndex ?: -1} sent=${transport?.bytesSent ?: 0} totalBytes=$totalBytes",t)
             throw t
         }
+    }
+}
+
+data class PrintTransportStats(val stripeCount:Int,val burstCount:Int,val totalBytesSent:Int)
+class PrintTransportException(val stripeIndex:Int,val bytesSent:Int,cause:Throwable):Exception("TRANSPORT_FAILED stripe=$stripeIndex sent=$bytesSent",cause)
+
+object EscPosTransport{
+    private val RESET=byteArrayOf(0x1B,0x40,0x1B,0x61,0x00,0x1B,0x32,0x1D,0x4C,0x00,0x00,0x1B,0x21,0x00)
+    internal fun trailingCommand(policy:PrinterTransportProfile):ByteArray = if(policy.hasAutoCutter){
+        byteArrayOf(0x1B,0x64,policy.trailingFeedLines.toByte(),0x1D,0x56,0x00)
+    }else byteArrayOf(0x1B,0x64,policy.trailingFeedLines.toByte())
+    fun estimatedBytes(commands:List<ByteArray>,policy:PrinterTransportProfile)=RESET.size+commands.sumOf{it.size}+trailingCommand(policy).size
+
+    fun write(out:OutputStream,commands:List<ByteArray>,policy:PrinterTransportProfile,sleep:(Long)->Unit={Thread.sleep(it)}):PrintTransportStats{
+        require(commands.isNotEmpty()){ "RASTER_EMPTY" }
+        var sent=0;var burstBytes=0;var bursts=0;var stripeIndex=-1
+        try{
+            out.write(RESET);out.flush();sent+=RESET.size
+            commands.forEachIndexed{index,command->
+                stripeIndex=index
+                require(command.size<=policy.burstBytes){"STRIPE_EXCEEDS_BURST:${command.size}"}
+                out.write(command);out.flush();sent+=command.size;burstBytes+=command.size
+                if(policy.delayPerStripeMs>0)sleep(policy.delayPerStripeMs)
+                if(burstBytes>=policy.burstBytes&&index<commands.lastIndex){
+                    bursts++;burstBytes=0
+                    if(policy.delayPerBurstMs>0)sleep(policy.delayPerBurstMs)
+                }
+            }
+            val trailing=trailingCommand(policy)
+            out.write(trailing);out.flush();sent+=trailing.size
+            return PrintTransportStats(commands.size,bursts,sent)
+        }catch(t:Throwable){throw PrintTransportException(stripeIndex,sent,t)}
     }
 }
 

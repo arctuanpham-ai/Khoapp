@@ -4,6 +4,8 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.ByteArrayOutputStream
+import java.io.OutputStream
 
 class EscPosRasterTest{
     @Test fun profilesExposeIndependentPrintableWidths(){
@@ -25,5 +27,38 @@ class EscPosRasterTest{
             assertTrue(command.size<8*1024)
             assertEquals(8+(profile.printableWidthDots/8)*profile.rasterStripeHeight,command.size)
         }
+    }
+
+    @Test fun xpNb8hTransportPacesEveryStripeAndBurst(){
+        val policy=PrinterTransportProfile.XP_NB8H_58.copy(burstBytes=1024)
+        val commands=List(5){ByteArray(600){it.toByte()}}
+        val writes=mutableListOf<Int>();var flushes=0;val sleeps=mutableListOf<Long>()
+        val out=object:OutputStream(){
+            override fun write(b:Int){writes+=1}
+            override fun write(b:ByteArray){writes+=b.size}
+            override fun flush(){flushes++}
+        }
+        val stats=EscPosTransport.write(out,commands,policy){sleeps+=it}
+        assertEquals(listOf(14,600,600,600,600,600,3),writes)
+        assertEquals(7,flushes)
+        assertEquals(5,sleeps.count{it==20L})
+        assertEquals(2,sleeps.count{it==60L})
+        assertEquals(2,stats.burstCount)
+        assertEquals(writes.sum(),stats.totalBytesSent)
+    }
+
+    @Test fun noCutterGetsSixLineManualFeedAndCutterProfileStaysShort(){
+        assertArrayEquals(byteArrayOf(0x1B,0x64,0x06),EscPosTransport.trailingCommand(PrinterTransportProfile.XP_NB8H_58))
+        val cutter=PrinterTransportProfile.STANDARD_80.copy(trailingFeedLines=1,hasAutoCutter=true)
+        assertArrayEquals(byteArrayOf(0x1B,0x64,0x01,0x1D,0x56,0x00),EscPosTransport.trailingCommand(cutter))
+    }
+
+    @Test fun transportFailureReportsStripeAndBytesAlreadySent(){
+        val out=object:ByteArrayOutputStream(){var calls=0;override fun write(b:ByteArray){if(calls++==2)throw java.io.IOException("buffer closed") else super.write(b)}}
+        val error=runCatching{EscPosTransport.write(out,List(4){ByteArray(100)},PrinterTransportProfile.XP_NB8H_58){}}.exceptionOrNull()
+        assertTrue(error is PrintTransportException)
+        error as PrintTransportException
+        assertEquals(1,error.stripeIndex)
+        assertEquals(114,error.bytesSent)
     }
 }

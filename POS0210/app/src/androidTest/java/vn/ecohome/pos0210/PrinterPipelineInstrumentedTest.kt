@@ -8,6 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import vn.ecohome.pos0210.printing.EscPosRaster
+import vn.ecohome.pos0210.printing.EscPosTransport
 import vn.ecohome.pos0210.printing.PrinterProfile
 import vn.ecohome.pos0210.printing.ReceiptRenderer
 
@@ -41,10 +42,21 @@ class PrinterPipelineInstrumentedTest{
             for(y in 0 until height step 8)for(x in 0 until width step 8)if((x/8+y/8)%2==0)setPixel(x,y,Color.BLACK)
         }
         repeat(20){index->
-            val bitmap=ReceiptRenderer.bill("Bàn 02","08:32–09:25",listOf(Triple("Bạc xỉu",12,30000L)),360000,0,0,360000,method="CHUYỂN KHOẢN",qr=qr,profile=PrinterProfile.MM58)
+            val items=List(12){Triple("Bạc xỉu cà phê sữa món số ${it+1}",if(it==0)12 else 1,30000L)}
+            val bitmap=ReceiptRenderer.bill("Bàn 02","08:32–09:25",items,690000,0,0,690000,method="CHUYỂN KHOẢN",qr=qr,profile=PrinterProfile.MM58)
             val commands=EscPosRaster.encode(bitmap,PrinterProfile.MM58)
             verify(commands,PrinterProfile.MM58)
             assertTrue("job $index vượt guard",commands.sumOf{it.size}+5<768*1024)
+        }
+    }
+
+    @Test fun twentyKitchenJobsStayBounded(){
+        repeat(20){index->
+            val items=List(10){Triple("Món tiếng Việt dài số ${it+1}",12,"Ghi chú dài không hành, ít bánh, để riêng")}
+            val bitmap=ReceiptRenderer.kitchen("Bàn 24",index+1,index+1,"Nhân viên",items,PrinterProfile.MM58)
+            val commands=EscPosRaster.encode(bitmap,PrinterProfile.MM58)
+            verify(commands,PrinterProfile.MM58)
+            assertTrue("kitchen job $index vượt guard",EscPosTransport.estimatedBytes(commands,PrinterProfile.MM58.transport)<768*1024)
         }
     }
 }
