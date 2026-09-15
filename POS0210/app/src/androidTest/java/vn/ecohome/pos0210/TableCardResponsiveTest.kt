@@ -22,17 +22,18 @@ class TableCardResponsiveTest {
  }}
  private fun verify(count:Int){
   compose.setContent{MaterialTheme{ResponsiveTableGrid(cards(count),Modifier.width(360.dp).height(600.dp).testTag("fixture"))}}
+  fun node(tag:String)=compose.onNodeWithTag(tag,useUnmergedTree=true)
   val required=listOf("table-name-t1","table-priority-t1","table-priority-t2","table-timer-t1","table-addon-t1")
-  required.forEach{compose.onNodeWithTag(it).assertExists()}
+  required.forEach{node(it).assertExists()}
   val card:Rect=compose.onNodeWithTag("table-card-t1").fetchSemanticsNode().boundsInRoot
   required.filterNot{it=="table-priority-t2"}.forEach{tag->
-   val child:Rect=compose.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+   val child:Rect=node(tag).fetchSemanticsNode().boundsInRoot
    assertTrue("$tag bị clip ngang ở $count bàn",child.left>=card.left-0.5f&&child.right<=card.right+0.5f)
    assertTrue("$tag bị clip dọc ở $count bàn",child.top>=card.top-0.5f&&child.bottom<=card.bottom+0.5f)
   }
   compose.onNodeWithTag("table-grid").performScrollToNode(hasTestTag("table-name-t$count"))
   val grid=compose.onNodeWithTag("table-grid").fetchSemanticsNode().boundsInRoot
-  val last=compose.onNodeWithTag("table-name-t$count").assertExists().fetchSemanticsNode().boundsInRoot
+  val last=node("table-name-t$count").assertExists().fetchSemanticsNode().boundsInRoot
   assertTrue("bàn cuối không nằm trong viewport sau scroll ở $count bàn",last.top>=grid.top-0.5f&&last.bottom<=grid.bottom+0.5f)
  }
  @Test fun fourTablesRenderWithoutClipping()=verify(4)
