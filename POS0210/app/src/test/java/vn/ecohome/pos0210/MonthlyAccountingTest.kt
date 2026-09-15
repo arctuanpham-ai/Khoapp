@@ -27,4 +27,8 @@ class MonthlyAccountingTest {
   val moved=base.copy(capitalAssets=9999,ownerContribution=8888,ownerWithdrawal=7777)
   assertEquals(calculateMonthlyAccounting(base).operatingProfit,calculateMonthlyAccounting(moved).operatingProfit)
  }
+ @Test fun roundingRemainderIsAssignedWithoutLosingVnd(){
+  val r=calculateMonthlyAccounting(MonthlyAccountingInput(grossRevenue=101,cogs=0,reserveBasisPoints=0,partners=listOf(ProfitShareInput("a","A",3333),ProfitShareInput("b","B",3333),ProfitShareInput("c","C",3334))))
+  assertEquals(101L,r.partnerProfits.sumOf{it.amount})
+ }
 }
