@@ -31,7 +31,9 @@ class TableCardResponsiveTest {
    assertTrue("$tag bị clip ngang ở $count bàn",child.left>=card.left-0.5f&&child.right<=card.right+0.5f)
    assertTrue("$tag bị clip dọc ở $count bàn",child.top>=card.top-0.5f&&child.bottom<=card.bottom+0.5f)
   }
-  compose.onNodeWithTag("table-grid").performScrollToNode(hasTestTag("table-name-t$count"))
+  // Lazy grid exposes cards in its merged tree; text-level tags remain in the
+  // unmerged tree so their geometry can still be measured precisely.
+  compose.onNodeWithTag("table-grid").performScrollToNode(hasTestTag("table-card-t$count"))
   val grid=compose.onNodeWithTag("table-grid").fetchSemanticsNode().boundsInRoot
   val last=node("table-name-t$count").assertExists().fetchSemanticsNode().boundsInRoot
   assertTrue("bàn cuối không nằm trong viewport sau scroll ở $count bàn",last.top>=grid.top-0.5f&&last.bottom<=grid.bottom+0.5f)
