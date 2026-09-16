@@ -1,0 +1,154 @@
+name: POS0210 financial ledger v2 candidate16
+
+on:
+  push:
+    branches:
+      - builder/financial-ledger-v2
+    paths:
+      - .github/workflows/pos0210-financial-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  implement_build:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+    steps:
+      - name: Checkout isolated finance branch
+        uses: actions/checkout@v4
+        with:
+          ref: builder/financial-ledger-v2
+          fetch-depth: 5
+
+      - name: Verify candidate15 baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'versionCode = 76' POS0210/app/build.gradle.kts
+          grep -q 'versionName = "1.0.0-alpha52-candidate15"' POS0210/app/build.gradle.kts
+          grep -q 'version=18' POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt
+          test "$(git rev-list --max-count=1 HEAD^ -- POS0210/app/build.gradle.kts || true)" != ""
+          echo 'Confirmed candidate15 / DB18 baseline.'
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
+
+      - name: Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: RED finance tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/pos0210_financial_v2.py --write-tests
+          cd POS0210
+          set +e
+          gradle --no-daemon :app:testDebugUnitTest --tests vn.ecohome.pos0210.FinancialLedgerV2Test > /tmp/finance-red.log 2>&1
+          code=$?
+          set -e
+          cat /tmp/finance-red.log
+          if [ "$code" -eq 0 ]; then
+            echo 'Expected finance v2 tests to fail before implementation.' >&2
+            exit 1
+          fi
+          grep -Eq 'FinancialPeriodInput|calculateFinancialPeriod|Unresolved reference' /tmp/finance-red.log
+
+      - name: Apply finance-only patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/pos0210_financial_v2.py --apply
+          sed -i '/import androidx.compose.foundation.horizontalScroll/a import androidx.compose.foundation.verticalScroll' POS0210/app/src/main/java/vn/ecohome/pos0210/FinanceDialogs.kt
+          grep -q 'versionCode = 77' POS0210/app/build.gradle.kts
+          grep -q 'versionName = "1.0.0-alpha52-candidate16"' POS0210/app/build.gradle.kts
+          grep -q 'version=19' POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt
+          grep -q 'MIGRATION_18_19' POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt
+          grep -q 'PAYER_REIMBURSEMENT' POS0210/app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt
+          grep -q 'CostCodeEntity' POS0210/app/src/main/java/vn/ecohome/pos0210/data/Entities.kt
+
+      - name: Strict scope guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only | sort
+          unexpected=$(git diff --name-only | grep -Ev '^POS0210/app/(build.gradle.kts|src/main/java/vn/ecohome/pos0210/(FinancialLedgerV2.kt|FinanceDialogs.kt|MonthlyAccounting.kt|MainActivity.kt|PosViewModel.kt|cloud/FirebaseCloudSync.kt|data/(Entities.kt|PosDao.kt|PosDatabase.kt))|src/test/java/vn/ecohome/pos0210/FinancialLedgerV2Test.kt)$' || true)
+          if [ -n "$unexpected" ]; then
+            echo 'Unexpected files changed; refusing build:' >&2
+            echo "$unexpected" >&2
+            exit 1
+          fi
+
+      - name: GREEN targeted finance tests and standard APK gate
+        shell: bash
+        working-directory: POS0210
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :app:testDebugUnitTest --tests vn.ecohome.pos0210.FinancialLedgerV2Test --stacktrace
+          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+
+      - name: Verify APK identity signature and SHA
+        shell: bash
+        working-directory: POS0210
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          test -s "$APK"
+          BADGING=$($AAPT dump badging "$APK" | head -n 1)
+          echo "$BADGING"
+          echo "$BADGING" | grep -q "name='vn.ecohome.pos0210'"
+          echo "$BADGING" | grep -q "versionCode='77'"
+          echo "$BADGING" | grep -q "versionName='1.0.0-alpha52-candidate16'"
+          $APKSIGNER verify --verbose --print-certs "$APK"
+          mkdir -p dist
+          cp "$APK" dist/POS0210_v1.0.0-alpha52-candidate16.apk
+          sha256sum dist/POS0210_v1.0.0-alpha52-candidate16.apk | tee dist/POS0210_v1.0.0-alpha52-candidate16.apk.sha256
+
+      - name: Commit validated finance source only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'POS0210 Builder'
+          git config user.email 'actions@github.com'
+          git add \
+            POS0210/app/build.gradle.kts \
+            POS0210/app/src/main/java/vn/ecohome/pos0210/FinancialLedgerV2.kt \
+            POS0210/app/src/main/java/vn/ecohome/pos0210/FinanceDialogs.kt \
+            POS0210/app/src/main/java/vn/ecohome/pos0210/MonthlyAccounting.kt \
+            POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt \
+            POS0210/app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt \
+            POS0210/app/src/main/java/vn/ecohome/pos0210/cloud/FirebaseCloudSync.kt \
+            POS0210/app/src/main/java/vn/ecohome/pos0210/data/Entities.kt \
+            POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDao.kt \
+            POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt \
+            POS0210/app/src/test/java/vn/ecohome/pos0210/FinancialLedgerV2Test.kt
+          git diff --cached --check
+          git commit -m 'feat(pos0210): cash-based finance ledger and cost analytics [skip ci]'
+          git push origin HEAD:builder/financial-ledger-v2
+          git rev-parse HEAD
+
+      - name: Upload candidate16 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: POS0210-v1.0.0-alpha52-candidate16-vc77-finance-v2
+          path: |
+            POS0210/dist/POS0210_v1.0.0-alpha52-candidate16.apk
+            POS0210/dist/POS0210_v1.0.0-alpha52-candidate16.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
