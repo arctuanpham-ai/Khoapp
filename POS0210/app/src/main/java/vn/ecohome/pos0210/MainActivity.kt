@@ -1160,7 +1160,7 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Nhật ký hệ thống", "Audit thao tác · người thực hiện · thời điểm · dữ liệu thay đổi") { vm.screen.value = "SETTINGS" }
             }
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
-            Text("POS0210 v1.0.0-alpha52-candidate14 · versionCode 75", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("POS0210 v1.0.0-alpha52-candidate15 · versionCode 76", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Text("Tương thích Android 8.0 (API 26) trở lên · Thiết bị hiện tại: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})", fontSize = 11.sp)
             if (Build.VERSION.SDK_INT < 26) Text("Thiết bị không được hỗ trợ. Cần Android 8.0 trở lên.", color = Color.Red, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(30.dp))
@@ -2269,6 +2269,7 @@ fun Purchases(vm: PosViewModel) {
     var unit by remember { mutableStateOf("kg") }
     var unitPriceText by remember { mutableStateOf("") }
     var supplier by remember { mutableStateOf("") }
+    var paidByName by remember { mutableStateOf("") }
     var note by remember { mutableStateOf("") }
     var invoiceImage by remember { mutableStateOf<String?>(null) }
     var selectedPurchase by remember { mutableStateOf<PurchaseEntity?>(null) }
@@ -2365,6 +2366,13 @@ fun Purchases(vm: PosViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Nhà cung cấp (không bắt buộc)") }
                 )
+                if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) OutlinedTextField(
+                    paidByName,
+                    { paidByName = it.take(60) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Người chi / ứng tiền (không bắt buộc)") },
+                    supportingText = { Text("Người thực tế bỏ tiền, độc lập với người nhập và cổ đông") }
+                )
                 OutlinedTextField(
                     itemName,
                     { itemName = it },
@@ -2433,7 +2441,8 @@ fun Purchases(vm: PosViewModel) {
                             imageUri = invoiceImage,
                             categoryId = selectedCategoryId,
                             expenseCategory = FinancialTransactionTypes.legacyExpenseCode(transactionType,expenseCategory),
-                            asset = asset
+                            asset = asset,
+                            paidByName = paidByName
                         )
                         FinancialTransactionTypes.movementCode(transactionType)?.let{vm.addFinancialMovement(it,unitPrice?:0,movementPartnerId,movementMethod,listOf(itemName.trim(),note.trim()).filter(String::isNotBlank).joinToString(" · "),parsedAt)}
                         message = "Đã ghi giao dịch · ${FinancialTransactionTypes.label(transactionType)} · ${money(if(FinancialTransactionTypes.usesPurchaseDocument(transactionType))total else unitPrice?:0)}"
@@ -2441,6 +2450,7 @@ fun Purchases(vm: PosViewModel) {
                         qtyText = ""
                         unitPriceText = ""
                         note = ""
+                        paidByName = ""
                         invoiceImage = null
                     },
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -2463,6 +2473,7 @@ fun Purchases(vm: PosViewModel) {
                     Column(Modifier.padding(12.dp)) {
                         Text(time(p.purchasedAt), fontWeight = FontWeight.Bold)
                         Text("${money(p.total)} · ${p.note.ifBlank { "Không ghi chú" }}")
+                        if(p.paidByName.isNotBlank()) Text("Người chi: ${p.paidByName}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         Text(if (!p.invoiceImageUri.isNullOrBlank()) "📷 Có ảnh hóa đơn · Chạm để xem" else "Chạm để xem chi tiết", fontSize = 12.sp)
                     }
                 }
@@ -2567,6 +2578,7 @@ fun PurchaseDetailDialog(vm: PosViewModel, p: PurchaseEntity, onDismiss: () -> U
                 item {
                     Text("Nhà cung cấp: $supplierName")
                     Text("Người nhập: $enteredBy")
+                    Text("Người chi / ứng tiền: ${p.paidByName.ifBlank { "Chưa xác định" }}", fontWeight = FontWeight.Bold)
                     Text("Loại giao dịch: ${FinancialTransactionTypes.label(FinancialTransactionTypes.fromLegacy(p.expenseCategory))}", fontWeight = FontWeight.Bold)
                     Text("Nhóm báo cáo: ${ExpenseCategories.label(p.expenseCategory)}", fontSize=12.sp)
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -2933,6 +2945,7 @@ fun Report(vm: PosViewModel) {
     var selectedBill by remember { mutableStateOf<BillEntity?>(null) }
     var selectedPurchase by remember { mutableStateOf<PurchaseEntity?>(null) }
     var paymentFilter by remember { mutableStateOf("ALL") }
+    var payerFilter by remember { mutableStateOf("ALL") }
     var historyDateText by remember { mutableStateOf("") }
     var selectedBillIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showBulkDelete by remember { mutableStateOf(false) }
@@ -2951,13 +2964,23 @@ fun Report(vm: PosViewModel) {
 
     val from = if (periodDays == 0) null else periodStart(periodDays)
     val filteredBills = if (from == null) bills else bills.filter { (it.closedAt ?: 0L) >= from }
-    val filteredPurchases = if (from == null) purchases else purchases.filter { it.purchasedAt >= from }
+    val periodPurchases = if (from == null) purchases else purchases.filter { it.purchasedAt >= from }
+    val payerNames = periodPurchases.map { it.paidByName.trim() }.filter { it.isNotBlank() }.distinct().sorted()
+    val hasUnknownPayer = periodPurchases.any { it.paidByName.isBlank() }
+    val filteredPurchases = periodPurchases.filter { p ->
+        when (payerFilter) {
+            "ALL" -> true
+            "UNKNOWN" -> p.paidByName.isBlank()
+            else -> p.paidByName.trim() == payerFilter
+        }
+    }
+    val filteredPurchaseIds = filteredPurchases.map { it.id }.toSet()
     val billIds = filteredBills.map { it.id }.toSet()
     val filteredPayments = payments.filter { it.billId in billIds }
     val revenue = filteredBills.sumOf { it.total }
     val purchaseTotal = filteredPurchases.sumOf { it.total }
     val categorizedCosts = purchaseCosts
-        .filter { from == null || it.purchasedAt >= from }
+        .filter { it.purchaseId in filteredPurchaseIds }
         .groupBy { it.categoryId }
         .map { (categoryId, rows) ->
             val categoryName = purchaseCategories.firstOrNull { it.id == categoryId }?.name ?: "Phân mục khác"
@@ -3018,6 +3041,16 @@ fun Report(vm: PosViewModel) {
             FilterChip(section == "MONTHLY", { section = "MONTHLY" }, { Text("BÁO CÁO THÁNG") })
         }
 
+        if(section == "PURCHASES") {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                FilterChip(payerFilter == "ALL", { payerFilter = "ALL" }, { Text("Tất cả người chi") })
+                payerNames.forEach { name -> FilterChip(payerFilter == name, { payerFilter = name }, { Text(name) }) }
+                if(hasUnknownPayer) FilterChip(payerFilter == "UNKNOWN", { payerFilter = "UNKNOWN" }, { Text("Chưa xác định") })
+            }
+        }
         when (section) {
             "MONTHLY" -> MonthlyProfitReport(vm)
             "OVERVIEW" -> {
@@ -3179,6 +3212,15 @@ fun Report(vm: PosViewModel) {
                 } else {
                     LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
                         item { Text("Tổng chi phí đầu vào: ${money(purchaseTotal)}", fontSize = 22.sp, fontWeight = FontWeight.Bold) }
+                        item {
+                            val summary = filteredPurchases.groupBy { it.paidByName.trim().ifBlank { "Chưa xác định" } }
+                                .mapValues { (_, rows) -> rows.sumOf { it.total } }
+                                .toList().sortedByDescending { it.second }
+                            if(summary.isNotEmpty()) {
+                                Text("Theo người chi / ứng tiền", Modifier.padding(top = 8.dp, bottom = 3.dp), fontWeight = FontWeight.Bold)
+                                summary.forEach { (name, amount) -> Text("$name · ${money(amount)}", fontSize = 12.sp) }
+                            }
+                        }
                         if (categorizedCosts.isNotEmpty()) {
                             item {
                                 Text(
@@ -3211,6 +3253,7 @@ fun Report(vm: PosViewModel) {
                                 Column(Modifier.padding(14.dp)) {
                                     Text(time(p.purchasedAt), fontWeight = FontWeight.Bold)
                                     Text(money(p.total))
+                                    Text("Người chi: ${p.paidByName.ifBlank { "Chưa xác định" }}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     Text(if (!p.invoiceImageUri.isNullOrBlank()) "📷 Có ảnh hóa đơn · Chạm để xem" else "Chạm để xem chi tiết", fontSize = 12.sp)
                                 }
                             }

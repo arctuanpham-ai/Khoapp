@@ -19,7 +19,7 @@ import androidx.room.PrimaryKey
 @Entity(indices=[Index("code"),Index("active")]) data class PricingRuleEntity(@PrimaryKey val id:String,val name:String,val code:String="",val kind:String="DISCOUNT",val percent:Int=0,val startAt:Long?=null,val endAt:Long?=null,val startMinute:Int?=null,val endMinute:Int?=null,val autoApply:Boolean=false,val active:Boolean=true)
 @Entity(indices=[Index("billId"),Index("ruleId")]) data class BillAdjustmentEntity(@PrimaryKey val id:String,val billId:String,val ruleId:String?,val name:String,val kind:String,val percent:Int,val amount:Long,val code:String="",val appliedAt:Long,val actorId:String?)
 @Entity data class SupplierEntity(@PrimaryKey val id:String,val name:String,val phone:String="",val note:String="",val active:Boolean=true)
-@Entity(indices=[Index("supplierId"),Index("status"),Index("expenseCategory")]) data class PurchaseEntity(@PrimaryKey val id:String,val supplierId:String?,val enteredBy:String,val purchasedAt:Long,val total:Long,val note:String="",val invoiceImageUri:String?=null,val status:String="ACTIVE",val expenseCategory:String="UNCLASSIFIED")
+@Entity(indices=[Index("supplierId"),Index("status"),Index("expenseCategory")]) data class PurchaseEntity(@PrimaryKey val id:String,val supplierId:String?,val enteredBy:String,val purchasedAt:Long,val total:Long,val note:String="",val invoiceImageUri:String?=null,val status:String="ACTIVE",val expenseCategory:String="UNCLASSIFIED",val paidByName:String="")
 @Entity data class PurchaseCategoryEntity(@PrimaryKey val id:String,val name:String,val defaultUnit:String="lần",val sortOrder:Int=0,val active:Boolean=true)
 @Entity(indices=[Index("purchaseId"),Index("categoryId")]) data class PurchaseItemEntity(@PrimaryKey val id:String,val purchaseId:String,val categoryId:String="pc_production",val name:String,val qty:Double,val unit:String,val unitPrice:Long,val amount:Long)
 @Entity data class MonthlyAccountingEntity(@PrimaryKey val monthKey:String,val cogs:Long?=null,val cogsSource:String="UNAVAILABLE",val openingCash:Long=0,val reserveBasisPoints:Int=1000,val openingCashOverridden:Boolean=false,val closingCashSnapshot:Long?=null,val operatingProfitSnapshot:Long?=null,val distributableProfitSnapshot:Long?=null)
@@ -40,7 +40,7 @@ data class BankNotificationEventEntity(@PrimaryKey val fingerprint:String,val pa
 
 data class ItemSaleRow(val name:String,val qty:Int,val sessionId:String)
 
-data class PurchaseCostRow(val categoryId:String,val amount:Long,val purchasedAt:Long)
+data class PurchaseCostRow(val purchaseId:String,val categoryId:String,val amount:Long,val purchasedAt:Long)
 
 data class PricingPreview(val subtotal:Long,val surcharge:Long,val discount:Long,val total:Long,val surchargeRules:List<PricingRuleEntity>,val discountRule:PricingRuleEntity?,val message:String="")
 
