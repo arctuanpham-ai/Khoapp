@@ -1,0 +1,30 @@
+name: POS0210 asset integrity candidate21
+
+on:
+  push:
+    branches: [ builder/asset-purchase-integrity-c21 ]
+    paths:
+      - '.github/workflows/pos0210-asset-integrity-candidate21.yml'
+      - 'POS0210/app/src/test/java/vn/ecohome/pos0210/AssetPurchaseIntegrityTest.kt'
+      - 'POS0210/app/src/main/java/vn/ecohome/pos0210/AssetPurchaseIntegrity.kt'
+      - 'POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt'
+      - 'POS0210/app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt'
+      - 'POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDao.kt'
+      - 'POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosRepository.kt'
+      - 'POS0210/app/build.gradle.kts'
+
+jobs:
+  verify_red:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: RED asset integrity test
+        working-directory: POS0210
+        run: gradle --no-daemon :app:testDebugUnitTest --tests vn.ecohome.pos0210.AssetPurchaseIntegrityTest
