@@ -82,6 +82,7 @@ jobs:
           grep -q 'PAYER_REIMBURSEMENT' POS0210/app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt
           grep -q 'CostCodeEntity' POS0210/app/src/main/java/vn/ecohome/pos0210/data/Entities.kt
           grep -q 'fun AccountingCard' POS0210/app/src/main/java/vn/ecohome/pos0210/FinanceDialogs.kt
+          grep -q 'financeMoney' POS0210/app/src/main/java/vn/ecohome/pos0210/FinanceDialogs.kt
 
       - name: Strict scope guard
         shell: bash
