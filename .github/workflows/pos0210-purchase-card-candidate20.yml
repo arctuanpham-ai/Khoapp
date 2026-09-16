@@ -6,25 +6,95 @@ on:
       - builder/purchase-card-c20
     paths:
       - .github/workflows/pos0210-purchase-card-candidate20.yml
-      - POS0210/app/src/test/java/vn/ecohome/pos0210/PurchaseCardPresentationTest.kt
-      - POS0210/app/src/main/java/vn/ecohome/pos0210/PurchaseCardPresentation.kt
-      - POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
-      - POS0210/app/build.gradle.kts
+      - scripts/patch_candidate20_purchase_cards.py
+
+permissions:
+  contents: write
 
 jobs:
-  verify_red:
+  build_candidate20:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - name: Checkout candidate20 branch
+        uses: actions/checkout@v4
+        with:
+          ref: builder/purchase-card-c20
+          fetch-depth: 0
+
+      - name: Verify exact candidate19 baseline lineage
+        run: |
+          git merge-base --is-ancestor 9f88328175af9f10968ab7d217c742c9f4f2ef73 HEAD
+
+      - name: Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Android SDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: RED purchase-card test
+
+      - name: Apply purchase-card-only patch
+        run: python3 scripts/patch_candidate20_purchase_cards.py
+
+      - name: Strict source scope guard
+        run: |
+          allowed='^(POS0210/app/build.gradle.kts|POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt|POS0210/app/src/main/java/vn/ecohome/pos0210/PurchaseCardPresentation.kt|POS0210/app/src/test/java/vn/ecohome/pos0210/PurchaseCardPresentationTest.kt)$'
+          bad=$(git diff --name-only 9f88328175af9f10968ab7d217c742c9f4f2ef73 -- POS0210 | grep -Ev "$allowed" || true)
+          if [ -n "$bad" ]; then echo "Out-of-scope POS source changes:"; echo "$bad"; exit 1; fi
+          git diff --name-only 9f88328175af9f10968ab7d217c742c9f4f2ef73 -- POS0210
+
+      - name: GREEN targeted test
         working-directory: POS0210
         run: gradle --no-daemon :app:testDebugUnitTest --tests vn.ecohome.pos0210.PurchaseCardPresentationTest
 
-# candidate20 RED gate
+      - name: Standard APK gates
+        working-directory: POS0210
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+
+      - name: Verify APK identity signature and SHA
+        working-directory: POS0210
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          test -s "$APK"
+          BADGING=$($AAPT dump badging "$APK" | head -n 1)
+          echo "$BADGING"
+          echo "$BADGING" | grep -q "name='vn.ecohome.pos0210'"
+          echo "$BADGING" | grep -q "versionCode='81'"
+          echo "$BADGING" | grep -q "versionName='1.0.0-alpha52-candidate20'"
+          $APKSIGNER verify --verbose --print-certs "$APK"
+          sha256sum "$APK"
+
+      - name: Prepare artifact
+        working-directory: POS0210
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/POS0210_v1.0.0-alpha52-candidate20.apk
+          sha256sum dist/POS0210_v1.0.0-alpha52-candidate20.apk > dist/POS0210_v1.0.0-alpha52-candidate20.apk.sha256
+
+      - name: Commit validated source only
+        run: |
+          git config user.name "POS0210 Builder"
+          git config user.email "actions@github.com"
+          git add POS0210/app/build.gradle.kts POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt POS0210/app/src/main/java/vn/ecohome/pos0210/PurchaseCardPresentation.kt
+          git diff --cached --quiet || git commit -m "fix(pos0210): show purchase item and note on cards [skip ci]"
+          git push origin HEAD:builder/purchase-card-c20
+
+      - name: Upload candidate20 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: POS0210-v1.0.0-alpha52-candidate20-vc81-purchase-cards
+          path: |
+            POS0210/dist/POS0210_v1.0.0-alpha52-candidate20.apk
+            POS0210/dist/POS0210_v1.0.0-alpha52-candidate20.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
