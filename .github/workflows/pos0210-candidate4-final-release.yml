@@ -1,0 +1,145 @@
+name: POS0210 Candidate4 Final Release Gate
+
+on:
+  push:
+    branches: [ pos0210-factory ]
+    paths:
+      - '.github/workflows/pos0210-candidate4-final-release.yml'
+  workflow_dispatch:
+
+jobs:
+  final-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - name: Checkout alpha50 source
+        uses: actions/checkout@v4
+        with:
+          ref: 9ae84b456b25aeb67ea51a2f3b3e8e6dc1e8c105
+          path: alpha50
+
+      - name: Checkout exact candidate4 source
+        uses: actions/checkout@v4
+        with:
+          ref: 4249c478cbd5d922402111e3e72583ad11ec0b7e
+          path: candidate
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install SDK packages
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build exact release bytes once
+        run: |
+          gradle -p alpha50/POS0210 --no-daemon :app:assembleDebug --stacktrace
+          gradle -p candidate/POS0210 --no-daemon :app:assembleDebug --stacktrace
+          cp alpha50/POS0210/app/build/outputs/apk/debug/app-debug.apk /tmp/alpha50.apk
+          cp candidate/POS0210/app/build/outputs/apk/debug/app-debug.apk /tmp/candidate4.apk
+          test -s /tmp/alpha50.apk
+          test -s /tmp/candidate4.apk
+          sha256sum /tmp/candidate4.apk | tee /tmp/candidate4.sha256
+          $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose --print-certs /tmp/alpha50.apk | tee /tmp/alpha50-signing.txt
+          $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose --print-certs /tmp/candidate4.apk | tee /tmp/candidate4-signing.txt
+          $ANDROID_HOME/build-tools/35.0.0/aapt dump badging /tmp/candidate4.apk | head -20 | tee /tmp/candidate4-badging.txt
+          grep -q "package: name='vn.ecohome.pos0210'" /tmp/candidate4-badging.txt
+          grep -q "versionCode='65'" /tmp/candidate4-badging.txt
+          grep -q "versionName='1.0.0-alpha52-candidate4'" /tmp/candidate4-badging.txt
+          ! unzip -p /tmp/candidate4.apk classes*.dex 2>/dev/null | strings | grep -q 'img.vietqr.io'
+
+      - name: Verify same signer as alpha50
+        run: |
+          A=$(grep 'Signer #1 certificate SHA-256 digest:' /tmp/alpha50-signing.txt | tail -1 | awk '{print $NF}')
+          B=$(grep 'Signer #1 certificate SHA-256 digest:' /tmp/candidate4-signing.txt | tail -1 | awk '{print $NF}')
+          echo "alpha50 signer=$A"
+          echo "candidate4 signer=$B"
+          test -n "$A" && test "$A" = "$B"
+          echo "$B" > /tmp/candidate4-signer-sha256.txt
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+
+      - name: Install sqlite3
+        run: sudo apt-get update -qq && sudo apt-get install -y sqlite3
+
+      - name: Prepare exact-bytes upgrade script
+        run: |
+          cp candidate/.github/scripts/pos0210-upgrade-gate.sh /tmp/release-upgrade.sh
+          sed -i 's#/tmp/alpha51.apk#/tmp/candidate4.apk#g' /tmp/release-upgrade.sh
+          sed -i 's/versionName=1.0.0-alpha52-candidate3|versionCode=64/versionName=1.0.0-alpha52-candidate4|versionCode=65/g' /tmp/release-upgrade.sh
+          chmod +x /tmp/release-upgrade.sh
+
+      - name: Exact bytes upgrade gate Android 15 API35
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 35
+          target: aosp_atd
+          arch: x86_64
+          profile: pixel_2
+          cores: 2
+          ram-size: 2048
+          heap-size: 512
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            bash /tmp/release-upgrade.sh
+            cp /tmp/after.json /tmp/after-api35.json
+            cp /tmp/post_integrity.txt /tmp/post-integrity-api35.txt
+
+      - name: Exact bytes upgrade gate Android 9 API28
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 28
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          cores: 2
+          ram-size: 2048
+          heap-size: 512
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            bash /tmp/release-upgrade.sh
+            cp /tmp/after.json /tmp/after-api28.json
+            cp /tmp/post_integrity.txt /tmp/post-integrity-api28.txt
+
+      - name: Freeze approved APK without modifying bytes
+        run: |
+          mkdir -p release
+          cp /tmp/candidate4.apk release/POS0210_v1.0.0-alpha52-candidate4.apk
+          cp /tmp/candidate4.sha256 release/POS0210_v1.0.0-alpha52-candidate4.apk.sha256
+          sha256sum release/POS0210_v1.0.0-alpha52-candidate4.apk | tee /tmp/release.sha256
+          test "$(cut -d' ' -f1 /tmp/candidate4.sha256)" = "$(cut -d' ' -f1 /tmp/release.sha256)"
+          cp /tmp/candidate4-signing.txt release/signing.txt
+          cp /tmp/candidate4-badging.txt release/badging.txt
+          cp /tmp/candidate4-signer-sha256.txt release/signer-sha256.txt
+          cp /tmp/after-api35.json release/after-api35.json
+          cp /tmp/after-api28.json release/after-api28.json
+          cp /tmp/post-integrity-api35.txt release/post-integrity-api35.txt
+          cp /tmp/post-integrity-api28.txt release/post-integrity-api28.txt
+
+      - name: Upload exact tested APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: POS0210-v1.0.0-alpha52-candidate4-APPROVED-exact-tested-bytes
+          path: release/
+          if-no-files-found: error
+          retention-days: 90

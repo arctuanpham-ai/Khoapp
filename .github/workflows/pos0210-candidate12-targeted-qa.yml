@@ -1,0 +1,196 @@
+name: POS0210 Candidate12 Targeted Financial QA
+
+on:
+  push:
+    branches: [ pos0210-factory ]
+    paths:
+      - '.github/workflows/pos0210-candidate12-targeted-qa.yml'
+  workflow_dispatch:
+
+jobs:
+  targeted-finance-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 0c747d13f866f0aaefb20eba8d33e8cc19edb455
+          path: candidate
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Source sanity and targeted static assertions
+        run: |
+          set -euo pipefail
+          cd candidate/POS0210
+          test "$(head -n 1 app/build.gradle.kts)" = 'plugins {'
+          ! grep -Eq '^\[detached HEAD|^[[:space:]]*Date:|files changed' app/build.gradle.kts
+          grep -q 'versionCode = 73' app/build.gradle.kts
+          grep -q 'versionName = "1.0.0-alpha52-candidate12"' app/build.gradle.kts
+          grep -q 'version=16' app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt
+          grep -q 'Migration(15,16)' app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt
+          grep -q 'operatingProfitSnapshot INTEGER' app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt
+          grep -q 'distributableProfitSnapshot INTEGER' app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt
+          grep -q 'XP_NB8H_58=PrinterTransportProfile(8,60,2048,150,2,false,96,1200)' app/src/main/java/vn/ecohome/pos0210/printing/PrinterProfile.kt
+          grep -q 'Chi phí vận hành' app/src/main/java/vn/ecohome/pos0210/MonthlyAccounting.kt
+          grep -q 'Đầu tư ban đầu không thu hồi' app/src/main/java/vn/ecohome/pos0210/MonthlyAccounting.kt
+          grep -q 'Ghi nhận hoàn vốn' app/src/main/java/vn/ecohome/pos0210/MonthlyAccounting.kt
+          grep -q 'if(transactionType==FinancialTransactionTypes.OPERATING_EXPENSE)' app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+          ! grep -q 'vm.saveAsset(' app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+          grep -q 'db.withTransaction{dao.insertPurchase(p);dao.insertPurchaseItems(items);asset?.let{dao.saveAsset(it)}}' app/src/main/java/vn/ecohome/pos0210/data/PosRepository.kt
+          grep -q 'asset.status in setOf("SOLD","DISPOSED")' app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt
+          grep -q 'note.isBlank()' app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt
+          grep -q '"ASSET_DISPOSAL_IN",disposalPrice' app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt
+          grep -q 'cumulativeDistributableProfit()-dao.financialMovementTotal("RECOVERED_CAPITAL")' app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt
+          grep -q 'if(!billPrinted)' app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+          grep -q 'XÁC NHẬN\\nTIỀN MẶT' app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+          grep -q 'XÁC NHẬN\\nCHUYỂN KHOẢN' app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+          grep -q 'PHẢI IN BILL TRƯỚC KHI XÁC NHẬN THANH TOÁN' app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt
+      - name: Build debug APK
+        run: gradle -p candidate/POS0210 --no-daemon :app:assembleDebug --stacktrace
+      - name: Build AndroidTest APK
+        run: gradle -p candidate/POS0210 --no-daemon :app:assembleDebugAndroidTest --stacktrace
+      - name: Targeted financial unit tests
+        run: gradle -p candidate/POS0210 --no-daemon :app:testDebugUnitTest --tests vn.ecohome.pos0210.MonthlyAccountingTest --stacktrace
+      - name: Verify APK and hash
+        run: |
+          APK=candidate/POS0210/app/build/outputs/apk/debug/app-debug.apk
+          $ANDROID_HOME/build-tools/35.0.0/aapt dump badging "$APK" | head -n1 | tee /tmp/badging.txt
+          grep -q "versionCode='73'" /tmp/badging.txt
+          grep -q "versionName='1.0.0-alpha52-candidate12'" /tmp/badging.txt
+          sha256sum "$APK" | tee /tmp/candidate12.sha256
+          mkdir -p qa-artifact
+          cp "$APK" qa-artifact/POS0210_v1.0.0-alpha52-candidate12.apk
+          cp /tmp/candidate12.sha256 qa-artifact/POS0210_v1.0.0-alpha52-candidate12.apk.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: POS0210-candidate12-targeted-QA-apk
+          path: qa-artifact/*
+
+  migration-15-to-16:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 28
+            target: google_apis
+          - api: 35
+            target: aosp_atd
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 0c747d13f866f0aaefb20eba8d33e8cc19edb455
+          path: candidate
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build exact candidate APK
+        run: |
+          gradle -p candidate/POS0210 --no-daemon :app:assembleDebug --stacktrace
+          cp candidate/POS0210/app/build/outputs/apk/debug/app-debug.apk /tmp/candidate12.apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+      - run: sudo apt-get update -qq && sudo apt-get install -y sqlite3
+      - name: Synthetic DB15 to DB16 finance survival
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
+          arch: x86_64
+          profile: pixel_2
+          cores: 2
+          ram-size: 2048
+          heap-size: 512
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: |
+            set -euo pipefail
+            PKG=vn.ecohome.pos0210
+            ACT=vn.ecohome.pos0210/.MainActivity
+            adb install -r /tmp/candidate12.apk | grep -q Success
+            adb shell am start -W -n "$ACT" >/dev/null
+            sleep 8
+            adb shell pidof "$PKG"
+            adb shell am force-stop "$PKG"
+            adb exec-out run-as "$PKG" cat databases/pos0210.db > /tmp/v16.db
+            adb exec-out run-as "$PKG" cat databases/pos0210.db-wal > /tmp/v16.db-wal 2>/dev/null || true
+            adb exec-out run-as "$PKG" cat databases/pos0210.db-shm > /tmp/v16.db-shm 2>/dev/null || true
+            sqlite3 /tmp/v16.db 'PRAGMA wal_checkpoint(TRUNCATE); PRAGMA integrity_check;' | grep -q '^ok$'
+            rm -f /tmp/v16.db-wal /tmp/v16.db-shm
+            sqlite3 /tmp/v16.db <<'SQL'
+            INSERT OR REPLACE INTO AppSettingEntity(key,value) VALUES('qa_fin_setting','KEEP_ME');
+            INSERT OR REPLACE INTO CustomerEntity(id,phone,name,tier,points,totalSpend,visitCount,lastVisitAt,active,tierManual,address) VALUES('qa_customer12','0900000012','QA C12','VIP',12,120000,2,1700000000000,1,0,'QA');
+            INSERT OR REPLACE INTO TableSessionEntity(id,tableId,openedAt,openedBy,status,version) VALUES('qa_session12','t1',1700000000000,'e0','CLOSED',1);
+            INSERT OR REPLACE INTO OrderBatchEntity(id,sessionId,sequence,ordererId,createdAt,sentAt,status,serviceNo,deliveredAt,deliveredBy) VALUES('qa_batch12','qa_session12',1,'e0',1700000000100,1700000000200,'DELIVERED',12,1700000000300,'e0');
+            INSERT OR REPLACE INTO OrderItemEntity(id,batchId,menuItemId,itemNameSnapshot,unitPriceSnapshot,qty,note,adjustmentOfItemId) VALUES('qa_item12','qa_batch12','m1','QA ITEM',25000,1,'','');
+            INSERT OR REPLACE INTO BillEntity(id,sessionId,billNo,openedAt,closedAt,subtotal,total,status,customerId) VALUES('qa_bill12','qa_session12','QA12',1700000000000,1700000000400,25000,25000,'PAID','qa_customer12');
+            INSERT OR REPLACE INTO PaymentEntity(id,billId,method,amount,cashierId,paidAt,reference) VALUES('qa_payment12','qa_bill12','CASH',25000,'e0',1700000000400,NULL);
+            INSERT OR REPLACE INTO PurchaseEntity(id,supplierId,enteredBy,purchasedAt,total,note,invoiceImageUri,status,expenseCategory) VALUES('qa_purchase12',NULL,'e0',1700000000500,30000000,'QA ASSET PURCHASE',NULL,'ACTIVE','CAPITAL_ASSET');
+            INSERT OR REPLACE INTO PurchaseItemEntity(id,purchaseId,categoryId,name,qty,unit,unitPrice,amount) VALUES('qa_purchase_item12','qa_purchase12','pc_fixed','QA MACHINE',1.0,'cái',30000000,30000000);
+            INSERT OR REPLACE INTO MonthlyAccountingEntity(monthKey,cogs,cogsSource,openingCash,reserveBasisPoints,openingCashOverridden,closingCashSnapshot,operatingProfitSnapshot,distributableProfitSnapshot) VALUES('2026-08',1000000,'MANUAL',5000000,1000,0,5500000,2000000,1800000);
+            INSERT OR REPLACE INTO ProfitPartnerEntity(id,name,shareBasisPoints,sortOrder,active) VALUES('qa_partner12','QA Partner',10000,0,1);
+            INSERT OR REPLACE INTO AssetEntity(id,name,categoryId,purchaseDate,purchasePrice,quantity,totalCost,supplier,usefulLifeMonths,depreciationMethod,residualValue,estimatedLiquidationValue,status,disposalDate,disposalPrice,note) VALUES('qa_asset12','QA Machine','coffee_machine',1700000000500,30000000,1,30000000,'QA Supplier',60,'STRAIGHT_LINE',0,5000000,'ACTIVE',NULL,NULL,'QA');
+            INSERT OR REPLACE INTO AssetValuationEntity(id,assetId,previousValue,newValue,changedAt,note) VALUES('qa_val12','qa_asset12',4000000,5000000,1700000000600,'QA valuation');
+            INSERT OR REPLACE INTO FinancialMovementEntity(id,type,amount,occurredAt,partnerId,method,note) VALUES('qa_move12','CAPITAL_CONTRIBUTION',10000000,1700000000700,NULL,'CASH','QA capital');
+            INSERT OR REPLACE INTO OpeningCashAdjustmentEntity(id,monthKey,previousValue,newValue,note,changedAt) VALUES('qa_open12','2026-08',4000000,5000000,'QA override',1700000000800);
+            SQL
+            sqlite3 /tmp/v16.db 'ALTER TABLE MonthlyAccountingEntity DROP COLUMN operatingProfitSnapshot; ALTER TABLE MonthlyAccountingEntity DROP COLUMN distributableProfitSnapshot; PRAGMA user_version=15; PRAGMA integrity_check;' | grep -q '^ok$'
+            test "$(sqlite3 /tmp/v16.db 'PRAGMA user_version;')" = 15
+            adb shell run-as "$PKG" rm -f databases/pos0210.db-wal databases/pos0210.db-shm
+            adb push /tmp/v16.db /data/local/tmp/qa-v15.db >/dev/null
+            adb shell chmod 644 /data/local/tmp/qa-v15.db
+            adb shell run-as "$PKG" cp /data/local/tmp/qa-v15.db databases/pos0210.db
+            adb shell run-as "$PKG" chmod 600 databases/pos0210.db
+            adb shell rm -f /data/local/tmp/qa-v15.db
+            adb logcat -c
+            adb shell am start -W -n "$ACT" >/dev/null
+            sleep 8
+            adb shell pidof "$PKG"
+            ! adb logcat -d | grep -E 'FATAL EXCEPTION|Room cannot verify the data integrity|A migration from 15 to 16 was required but not found'
+            adb shell am force-stop "$PKG"
+            adb exec-out run-as "$PKG" cat databases/pos0210.db > /tmp/post.db
+            adb exec-out run-as "$PKG" cat databases/pos0210.db-wal > /tmp/post.db-wal 2>/dev/null || true
+            adb exec-out run-as "$PKG" cat databases/pos0210.db-shm > /tmp/post.db-shm 2>/dev/null || true
+            sqlite3 /tmp/post.db 'PRAGMA wal_checkpoint(TRUNCATE); PRAGMA integrity_check;' | grep -q '^ok$'
+            test "$(sqlite3 /tmp/post.db 'PRAGMA user_version;')" = 16
+            sqlite3 /tmp/post.db "PRAGMA table_info(MonthlyAccountingEntity);" | grep -q '|operatingProfitSnapshot|'
+            sqlite3 /tmp/post.db "PRAGMA table_info(MonthlyAccountingEntity);" | grep -q '|distributableProfitSnapshot|'
+            test "$(sqlite3 /tmp/post.db "select value from AppSettingEntity where key='qa_fin_setting';")" = KEEP_ME
+            test "$(sqlite3 /tmp/post.db "select total from PurchaseEntity where id='qa_purchase12';")" = 30000000
+            test "$(sqlite3 /tmp/post.db "select totalCost from AssetEntity where id='qa_asset12';")" = 30000000
+            test "$(sqlite3 /tmp/post.db "select newValue from AssetValuationEntity where id='qa_val12';")" = 5000000
+            test "$(sqlite3 /tmp/post.db "select amount from FinancialMovementEntity where id='qa_move12';")" = 10000000
+            test "$(sqlite3 /tmp/post.db "select newValue from OpeningCashAdjustmentEntity where id='qa_open12';")" = 5000000
+            test "$(sqlite3 /tmp/post.db "select total from BillEntity where id='qa_bill12';")" = 25000
+            test "$(sqlite3 /tmp/post.db "select amount from PaymentEntity where id='qa_payment12';")" = 25000
+            test "$(sqlite3 /tmp/post.db "select count(*) from OrderBatchEntity where id='qa_batch12';")" = 1
+            test "$(sqlite3 /tmp/post.db "select count(*) from MenuItemEntity;")" -gt 0
+            test "$(sqlite3 /tmp/post.db "select count(*) from EmployeeEntity;")" -gt 0
+            test "$(sqlite3 /tmp/post.db "select count(*) from DiningTableEntity;")" -gt 0
+            test "$(sqlite3 /tmp/post.db "select count(*) from CustomerEntity where id='qa_customer12';")" = 1
+            test "$(sqlite3 /tmp/post.db "select openingCash from MonthlyAccountingEntity where monthKey='2026-08';")" = 5000000
