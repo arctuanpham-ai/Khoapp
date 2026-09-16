@@ -1,5 +1,6 @@
 package vn.ecohome.pos0210
 import android.app.Application
+import android.content.Intent
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
@@ -336,6 +337,18 @@ fun firebaseSignIn(email:String,password:String){
 }
 fun firebaseSignOut(){FirebaseCloudSync.signOut(getApplication());viewModelScope.launch(Dispatchers.IO){dao.saveCloudSyncState((dao.cloudSyncStateSnapshot()?:CloudSyncStateEntity()).copy(enabled=false,syncedUid=null));cloudMessage.value="Đã đăng xuất Firebase"};cloudDashboardJob?.cancel()}
 fun syncFirebase(){viewModelScope.launch(Dispatchers.IO){cloudMessage.value="Đang đồng bộ…";FirebaseCloudSync.syncNow(getApplication()).onSuccess{cloudMessage.value="Đồng bộ Firebase thành công"}.onFailure{cloudMessage.value="Đồng bộ lỗi: ${it.message}"}}}
+fun restoreFirebaseBackup(){
+ val e=currentEmployee.value?:return;if(e.role!="ADMIN")return
+ viewModelScope.launch(Dispatchers.IO){
+  cloudMessage.value="Đang khôi phục cloud backup…"
+  runCatching{FirestorePrivateBackup.restoreLatest(getApplication())}.onSuccess{
+   cloudMessage.value="Đã khôi phục cloud backup. Ứng dụng đang mở lại…"
+   val context=getApplication<Application>();val launch=context.packageManager.getLaunchIntentForPackage(context.packageName)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+   if(launch!=null)context.startActivity(launch)
+   android.os.Process.killProcess(android.os.Process.myPid())
+  }.onFailure{cloudMessage.value="Khôi phục lỗi: ${it.message}"}
+ }
+}
 fun observeCloudDashboard(){cloudDashboardJob?.cancel();cloudDashboardJob=viewModelScope.launch{FirebaseCloudSync.dashboard(getApplication()).collect{cloudDashboard.value=it}}}
 fun attachStorageRoot(uri:String,allowWrites:Boolean){
  val e=currentEmployee.value?:return

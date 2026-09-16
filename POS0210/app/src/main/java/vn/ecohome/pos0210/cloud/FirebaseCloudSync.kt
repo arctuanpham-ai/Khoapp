@@ -43,14 +43,14 @@ object FirebaseCloudSync {
         val settings=PosDatabase.get(context).dao().allSettingsSnapshot().associate{it.key to it.value}
         return FirebaseConfig(settings["firebase_project_id"].orEmpty(),settings["firebase_application_id"].orEmpty(),settings["firebase_api_key"].orEmpty())
     }
-    private fun app(context:Context,c:FirebaseConfig):FirebaseApp{
+    internal fun firebaseApp(context:Context,c:FirebaseConfig):FirebaseApp{
         FirebaseApp.getApps(context).firstOrNull{it.name==APP_NAME}?.let{return it}
         return FirebaseApp.initializeApp(context,FirebaseOptions.Builder().setProjectId(c.projectId).setApplicationId(c.applicationId).setApiKey(c.apiKey).build(),APP_NAME)
             ?: error("Không thể khởi tạo Firebase")
     }
     suspend fun signIn(context:Context,email:String,password:String):String{
         val c=config(context);require(c.valid){"Chưa cấu hình Firebase"}
-        return FirebaseAuth.getInstance(app(context,c)).signInWithEmailAndPassword(email.trim(),password).await().user?.uid?:error("Firebase không trả UID")
+        return FirebaseAuth.getInstance(firebaseApp(context,c)).signInWithEmailAndPassword(email.trim(),password).await().user?.uid?:error("Firebase không trả UID")
     }
     fun signOut(context:Context){runCatching{FirebaseApp.getApps(context).firstOrNull{it.name==APP_NAME}?.let{FirebaseAuth.getInstance(it).signOut()}}}
     fun reset(context:Context){runCatching{FirebaseApp.getApps(context).firstOrNull{it.name==APP_NAME}?.delete()}}
@@ -59,7 +59,7 @@ object FirebaseCloudSync {
     suspend fun syncNow(context:Context):Result<Unit> = runCatching{
         val db=PosDatabase.get(context);val dao=db.dao();val old=dao.cloudSyncStateSnapshot()?:CloudSyncStateEntity()
         dao.saveCloudSyncState(old.copy(lastAttemptAt=System.currentTimeMillis(),lastError=null))
-        val c=config(context);require(c.valid){"Chưa cấu hình Firebase"};val firebaseApp=app(context,c);val uid=FirebaseAuth.getInstance(firebaseApp).currentUser?.uid?:error("Chưa đăng nhập Firebase")
+        val c=config(context);require(c.valid){"Chưa cấu hình Firebase"};val firebaseApp=firebaseApp(context,c);val uid=FirebaseAuth.getInstance(firebaseApp).currentUser?.uid?:error("Chưa đăng nhập Firebase")
         val fs=FirebaseFirestore.getInstance(firebaseApp);val root=fs.collection("users").document(uid).collection("stores").document("0210")
         val tables=dao.cloudTablesSnapshot();val sessions=dao.cloudSessionsSnapshot();val bills=dao.cloudBillsSnapshot();val payments=dao.cloudPaymentsSnapshot()
         val today=Calendar.getInstance().apply{set(Calendar.HOUR_OF_DAY,0);set(Calendar.MINUTE,0);set(Calendar.SECOND,0);set(Calendar.MILLISECOND,0)}.timeInMillis
@@ -81,13 +81,14 @@ object FirebaseCloudSync {
         writeMaps(fs,root.collection("assets"),dao.cloudAssetsSnapshot().map{a->a.id to mapOf("id" to a.id,"name" to a.name,"categoryId" to a.categoryId,"purchaseDate" to a.purchaseDate,"totalCost" to a.totalCost,"usefulLifeMonths" to a.usefulLifeMonths,"residualValue" to a.residualValue,"estimatedLiquidationValue" to a.estimatedLiquidationValue,"status" to a.status,"disposalDate" to a.disposalDate,"disposalPrice" to a.disposalPrice)})
         writeMaps(fs,root.collection("financialMovements"),dao.cloudMovementsSnapshot().map{m->m.id to mapOf("id" to m.id,"type" to m.type,"amount" to m.amount,"occurredAt" to m.occurredAt,"partnerId" to m.partnerId,"method" to m.method,"note" to m.note)})
         val settings=dao.allSettingsSnapshot().filter{CloudSyncPolicy.shouldUploadSetting(it.key)}.associate{it.key to it.value};root.collection("config").document("safe").set(settings+mapOf("updatedAt" to now)).await()
+        FirestorePrivateBackup.upload(context,fs,uid,now)
         dao.saveCloudSyncState(old.copy(enabled=true,dirty=false,lastAttemptAt=now,lastSuccessAt=now,lastError=null,syncedUid=uid))
     }.onFailure{e->
         val dao=PosDatabase.get(context).dao();val old=dao.cloudSyncStateSnapshot()?:CloudSyncStateEntity();dao.saveCloudSyncState(old.copy(lastAttemptAt=System.currentTimeMillis(),lastError=e.message?.take(300)))
     }
 
     suspend fun syncDashboardNow(context:Context):Result<Unit> = runCatching{
-        val db=PosDatabase.get(context);val dao=db.dao();val c=config(context);require(c.valid){"Chưa cấu hình Firebase"};val firebaseApp=app(context,c);val uid=FirebaseAuth.getInstance(firebaseApp).currentUser?.uid?:error("Chưa đăng nhập Firebase")
+        val db=PosDatabase.get(context);val dao=db.dao();val c=config(context);require(c.valid){"Chưa cấu hình Firebase"};val firebaseApp=firebaseApp(context,c);val uid=FirebaseAuth.getInstance(firebaseApp).currentUser?.uid?:error("Chưa đăng nhập Firebase")
         val fs=FirebaseFirestore.getInstance(firebaseApp);val root=fs.collection("users").document(uid).collection("stores").document("0210")
         val tables=dao.cloudTablesSnapshot();val sessions=dao.cloudSessionsSnapshot();val batches=dao.cloudOrderBatchesSnapshot();val items=dao.cloudOrderItemsSnapshot();val bills=dao.cloudBillsSnapshot();val open=sessions.filter{it.status=="OPEN"};val openByTable=open.associateBy{it.tableId}
         val today=Calendar.getInstance().apply{set(Calendar.HOUR_OF_DAY,0);set(Calendar.MINUTE,0);set(Calendar.SECOND,0);set(Calendar.MILLISECOND,0)}.timeInMillis;val paidToday=bills.filter{it.status=="PAID"&&(it.closedAt?:0)>=today};val now=System.currentTimeMillis()
@@ -117,7 +118,7 @@ object FirebaseCloudSync {
     }
     fun dashboard(context:Context):Flow<CloudDashboard> = callbackFlow{
         val c=config(context);if(!c.valid){trySend(CloudDashboard(error="Chưa cấu hình Firebase"));close();return@callbackFlow}
-        val firebaseApp=app(context,c);val uid=FirebaseAuth.getInstance(firebaseApp).currentUser?.uid
+        val firebaseApp=firebaseApp(context,c);val uid=FirebaseAuth.getInstance(firebaseApp).currentUser?.uid
         if(uid==null){trySend(CloudDashboard(error="Chưa đăng nhập Firebase"));close();return@callbackFlow}
         val registration=FirebaseFirestore.getInstance(firebaseApp).collection("users").document(uid).collection("stores").document("0210").collection("dashboard").document("current")
             .addSnapshotListener{doc,error->if(error!=null)trySend(CloudDashboard(error=error.message)) else trySend(CloudDashboard(openTables=doc?.getLong("openTables")?.toInt()?:0,revenueToday=doc?.getLong("revenueToday")?:0,paidBillsToday=doc?.getLong("paidBillsToday")?.toInt()?:0,monthRevenue=doc?.getLong("monthRevenue")?:0,operatingProfit=doc?.getLong("operatingProfit"),closingCash=doc?.getLong("closingCash")?:0,initialInvestment=doc?.getLong("initialInvestment")?:0,recoveredCapital=doc?.getLong("recoveredCapital")?:0,paybackBasisPoints=doc?.getLong("paybackBasisPoints")?.toInt()?:0,lastUpdatedAt=doc?.getLong("lastUpdatedAt")?:0,openTableNames=(doc?.get("openTableNames") as? List<*>)?.mapNotNull{it as? String}.orEmpty(),online=true))}

@@ -1160,7 +1160,7 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Nhật ký hệ thống", "Audit thao tác · người thực hiện · thời điểm · dữ liệu thay đổi") { vm.screen.value = "SETTINGS" }
             }
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
-            Text("POS0210 v1.0.0-alpha52-candidate13 · versionCode 74", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("POS0210 v1.0.0-alpha52-candidate14 · versionCode 75", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Text("Tương thích Android 8.0 (API 26) trở lên · Thiết bị hiện tại: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})", fontSize = 11.sp)
             if (Build.VERSION.SDK_INT < 26) Text("Thiết bị không được hỗ trợ. Cần Android 8.0 trở lên.", color = Color.Red, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(30.dp))
@@ -1173,7 +1173,7 @@ fun CloudSyncSettings(vm:PosViewModel){
     val settings by vm.settings.collectAsState();val state by vm.cloudSyncState.collectAsState();val message by vm.cloudMessage.collectAsState();val dashboard by vm.cloudDashboard.collectAsState()
     fun current(key:String)=settings.firstOrNull{it.key==key}?.value.orEmpty()
     var projectId by remember(settings){mutableStateOf(current("firebase_project_id"))};var applicationId by remember(settings){mutableStateOf(current("firebase_application_id"))};var apiKey by remember(settings){mutableStateOf(current("firebase_api_key"))}
-    var email by remember{mutableStateOf("")};var password by remember{mutableStateOf("")}
+    var email by remember{mutableStateOf("")};var password by remember{mutableStateOf("")};var confirmRestore by remember{mutableStateOf(false)}
     LaunchedEffect(state?.syncedUid){if(state?.syncedUid!=null)vm.observeCloudDashboard()}
     Column{
         Header("Cloud & Manager") { vm.screen.value="MANAGE" }
@@ -1191,6 +1191,7 @@ fun CloudSyncSettings(vm:PosViewModel){
             if(state?.syncedUid==null)Button({vm.firebaseSignIn(email,password);password=""},Modifier.fillMaxWidth(),enabled=email.isNotBlank()&&password.length>=6){Text("ĐĂNG NHẬP & BẬT ĐỒNG BỘ")}
             else OutlinedButton({vm.firebaseSignOut()},Modifier.fillMaxWidth()){Text("ĐĂNG XUẤT FIREBASE")}
             Button({vm.syncFirebase()},Modifier.fillMaxWidth(),enabled=state?.syncedUid!=null){Text("ĐỒNG BỘ NGAY")}
+            OutlinedButton({confirmRestore=true},Modifier.fillMaxWidth(),enabled=state?.syncedUid!=null){Text("KHÔI PHỤC CLOUD BACKUP")}
             if(message.isNotBlank())Text(message,fontWeight=FontWeight.Bold)
             Text("Trạng thái: "+when{state?.syncedUid==null->"Chưa đăng nhập";state?.lastError!=null->"Có lỗi";state?.dirty==true->"Có dữ liệu đang chờ";else->"Đã đồng bộ"},fontWeight=FontWeight.Bold)
             state?.lastSuccessAt?.let{Text("Lần thành công: ${time(it)}",fontSize=12.sp)};state?.lastError?.let{Text(it,color=Color(0xFF9A4B3D),fontSize=12.sp)}
@@ -1202,8 +1203,15 @@ fun CloudSyncSettings(vm:PosViewModel){
             MetricCard("Doanh thu tháng",money(dashboard.monthRevenue));MetricCard("Lợi nhuận vận hành",dashboard.operatingProfit?.let(::money)?:"Chưa có giá vốn");MetricCard("Tiền cuối kỳ tạm tính",money(dashboard.closingCash));MetricCard("Tổng vốn đầu tư",money(dashboard.initialInvestment));MetricCard("Đã xác định thu hồi",money(dashboard.recoveredCapital));MetricCard("Tiến độ hoàn vốn","${dashboard.paybackBasisPoints/100.0}%")
             Text("Dashboard chỉ đọc số liệu Firestore; không có quyền sửa order, đóng bill hoặc xác nhận thanh toán.",fontSize=11.sp,fontWeight=FontWeight.Bold)
             if(dashboard.online)Text("● Đang nhận dữ liệu Firestore realtime",color=Color(0xFF41633A),fontWeight=FontWeight.Bold) else Text(dashboard.error?:"Chưa kết nối realtime",color=Color(0xFF9A4B3D))
-            Text("Không đồng bộ ảnh hóa đơn/ảnh món, PIN nhân viên, URI lưu trữ hoặc log notification ngân hàng.",fontSize=11.sp)
+            Text("Backup riêng tư lưu dữ liệu kinh doanh, cấu hình và nhân viên/PIN để khôi phục máy mới. Không lưu ảnh món/ảnh hóa đơn, URI thiết bị/lưu trữ, log ngân hàng hay lịch sử in.",fontSize=11.sp)
         }
+        if(confirmRestore)AlertDialog(
+            onDismissRequest={confirmRestore=false},
+            title={Text("Khôi phục cloud backup?")},
+            text={Text("Dữ liệu POS hiện tại sẽ được lưu một bản an toàn trên máy rồi thay bằng bản cloud mới nhất. Ảnh/media không được khôi phục. Ứng dụng sẽ mở lại sau khi hoàn tất.")},
+            confirmButton={Button({confirmRestore=false;vm.restoreFirebaseBackup()}){Text("KHÔI PHỤC")}},
+            dismissButton={OutlinedButton({confirmRestore=false}){Text("HỦY")}}
+        )
     }
 }
 

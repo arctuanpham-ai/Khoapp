@@ -24,6 +24,12 @@ service cloud.firestore {
       allow write: if isStoreOwner(ownerUid);
     }
 
+    // Raw Room snapshots can contain staff PINs and other restore-only data.
+    // They are deliberately invisible to manager/shareholder accounts.
+    match /users/{ownerUid}/privateBackups/{backupId}/{document=**} {
+      allow read, write: if isStoreOwner(ownerUid);
+    }
+
     match /managerAccess/{managerUid} {
       allow read: if signedIn() && request.auth.uid == managerUid;
       allow write: if false;
