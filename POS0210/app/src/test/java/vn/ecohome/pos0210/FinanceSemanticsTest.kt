@@ -12,11 +12,31 @@ class FinanceSemanticsTest {
         assertEquals(ExpenseCategories.INVENTORY_PURCHASE, expenseCategoryForLegacyDetail("pc_production", ExpenseCategories.OTHER_EXPENSE))
     }
 
-    @Test fun fixedDetailMapsToFixedExpense() {
-        assertEquals(ExpenseCategories.FIXED_EXPENSE, expenseCategoryForLegacyDetail("pc_fixed", ExpenseCategories.OTHER_EXPENSE))
+    @Test fun fixedDetailDoesNotOverwriteFinancialGroup() {
+        assertEquals(ExpenseCategories.ELECTRICITY, expenseCategoryForLegacyDetail("pc_fixed", ExpenseCategories.ELECTRICITY))
     }
 
-    @Test fun customDetailDoesNotOverwriteChosenFinancialGroup() {
-        assertEquals(ExpenseCategories.ELECTRICITY, expenseCategoryForLegacyDetail("custom", ExpenseCategories.ELECTRICITY))
+    @Test fun setupAndInitialSunkCollapseToOneReportingCode() {
+        assertEquals(ExpenseCategories.INITIAL_INVESTMENT_SUNK, canonicalFinancialReportCategory(ExpenseCategories.SETUP_COST))
+        assertEquals(ExpenseCategories.INITIAL_INVESTMENT_SUNK, canonicalFinancialReportCategory(ExpenseCategories.INITIAL_INVESTMENT_SUNK))
+    }
+
+    @Test fun fixedAndVariableLegacyBucketsCollapseToOtherExpenseForReporting() {
+        assertEquals(ExpenseCategories.OTHER_EXPENSE, canonicalFinancialReportCategory(ExpenseCategories.FIXED_EXPENSE))
+        assertEquals(ExpenseCategories.OTHER_EXPENSE, canonicalFinancialReportCategory(ExpenseCategories.VARIABLE_EXPENSE))
+    }
+
+    @Test fun investmentsAreSeparatedFromOperatingExpense() {
+        assertEquals(FinancialReportBucket.INITIAL_ASSET, financialReportBucket(ExpenseCategories.CAPITAL_ASSET))
+        assertEquals(FinancialReportBucket.INITIAL_SUNK, financialReportBucket(ExpenseCategories.SETUP_COST))
+        assertEquals(FinancialReportBucket.ADDITIONAL_INVESTMENT, financialReportBucket(ExpenseCategories.ADDITIONAL_INVESTMENT))
+        assertEquals(FinancialReportBucket.OPERATING, financialReportBucket(ExpenseCategories.ELECTRICITY))
+    }
+
+    @Test fun ownerCapitalFlowsAreNeverOperatingExpense() {
+        assertEquals(FinancialReportBucket.CAPITAL_FLOW, financialReportBucket(ExpenseCategories.OWNER_CONTRIBUTION))
+        assertEquals(FinancialReportBucket.CAPITAL_FLOW, financialReportBucket(ExpenseCategories.WORKING_CAPITAL))
+        assertEquals(FinancialReportBucket.CAPITAL_FLOW, financialReportBucket(ExpenseCategories.OWNER_WITHDRAWAL))
+        assertEquals(FinancialReportBucket.CAPITAL_FLOW, financialReportBucket(ExpenseCategories.PROFIT_WITHDRAWAL))
     }
 }
