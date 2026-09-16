@@ -5,6 +5,7 @@ on:
     branches: [ builder/asset-purchase-integrity-c21 ]
     paths:
       - '.github/workflows/pos0210-asset-integrity-candidate21.yml'
+      - 'scripts/patch_pos0210_asset_integrity_c21.py'
       - 'POS0210/app/src/test/java/vn/ecohome/pos0210/AssetPurchaseIntegrityTest.kt'
       - 'POS0210/app/src/main/java/vn/ecohome/pos0210/AssetPurchaseIntegrity.kt'
       - 'POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt'
@@ -13,18 +14,110 @@ on:
       - 'POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosRepository.kt'
       - 'POS0210/app/build.gradle.kts'
 
+permissions:
+  contents: write
+
+concurrency:
+  group: pos0210-asset-integrity-c21
+  cancel-in-progress: true
+
 jobs:
-  verify_red:
+  build_candidate21:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - name: Checkout candidate21 branch
+        uses: actions/checkout@v4
+        with:
+          ref: builder/asset-purchase-integrity-c21
+          fetch-depth: 0
+
+      - name: Verify candidate20 baseline lineage
+        run: git merge-base --is-ancestor 6fc15a97c9d88c5a422829bbd5756a57b992b0a4 HEAD
+
+      - name: Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Android SDK
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: RED asset integrity test
+
+      - name: Apply asset-purchase integrity patch only
+        run: python scripts/patch_pos0210_asset_integrity_c21.py
+
+      - name: Strict source scope guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          ALLOWED='^(POS0210/app/build.gradle.kts|POS0210/app/src/main/java/vn/ecohome/pos0210/AssetPurchaseIntegrity.kt|POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt|POS0210/app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt|POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDao.kt|POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosRepository.kt|POS0210/app/src/test/java/vn/ecohome/pos0210/AssetPurchaseIntegrityTest.kt)$'
+          BAD=$(git diff --name-only 6fc15a97c9d88c5a422829bbd5756a57b992b0a4 -- POS0210 | grep -Ev "$ALLOWED" || true)
+          if [ -n "$BAD" ]; then echo "Unexpected POS0210 files changed:"; echo "$BAD"; exit 1; fi
+          echo "Scope guard PASS"
+
+      - name: GREEN targeted asset integrity tests
         working-directory: POS0210
         run: gradle --no-daemon :app:testDebugUnitTest --tests vn.ecohome.pos0210.AssetPurchaseIntegrityTest
+
+      - name: Standard APK gates
+        working-directory: POS0210
+        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug --stacktrace
+
+      - name: Verify APK identity signature and SHA
+        working-directory: POS0210
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          BADGING=$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | head -n1)
+          echo "$BADGING"
+          echo "$BADGING" | grep -q "name='vn.ecohome.pos0210'"
+          echo "$BADGING" | grep -q "versionCode='82'"
+          echo "$BADGING" | grep -q "versionName='1.0.0-alpha52-candidate21'"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
+          sha256sum "$APK"
+
+      - name: Prepare artifact
+        working-directory: POS0210
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk dist/POS0210_v1.0.0-alpha52-candidate21.apk
+          sha256sum dist/POS0210_v1.0.0-alpha52-candidate21.apk > dist/POS0210_v1.0.0-alpha52-candidate21.apk.sha256
+
+      - name: Commit validated source only
+        shell: bash
+        run: |
+          git config user.name 'POS0210 Builder'
+          git config user.email 'actions@github.com'
+          git add POS0210/app/build.gradle.kts \
+                  POS0210/app/src/main/java/vn/ecohome/pos0210/AssetPurchaseIntegrity.kt \
+                  POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt \
+                  POS0210/app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt \
+                  POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDao.kt \
+                  POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosRepository.kt \
+                  POS0210/app/src/test/java/vn/ecohome/pos0210/AssetPurchaseIntegrityTest.kt
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(pos0210): keep asset ledger aligned with purchases [skip ci]'
+            git push origin HEAD:builder/asset-purchase-integrity-c21
+          fi
+
+      - name: Upload candidate21 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: POS0210-v1.0.0-alpha52-candidate21-vc82-asset-integrity
+          path: |
+            POS0210/dist/POS0210_v1.0.0-alpha52-candidate21.apk
+            POS0210/dist/POS0210_v1.0.0-alpha52-candidate21.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
