@@ -117,12 +117,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm .github/workflows/pos0210-payer-update.yml scripts/pos0210_payer_update.py
           git config user.name 'POS0210 Builder'
           git config user.email 'actions@github.com'
-          git add -A
+          git add \
+            POS0210/app/build.gradle.kts \
+            POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt \
+            POS0210/app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt \
+            POS0210/app/src/main/java/vn/ecohome/pos0210/cloud/FirebaseCloudSync.kt \
+            POS0210/app/src/main/java/vn/ecohome/pos0210/data/Entities.kt \
+            POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDao.kt \
+            POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt \
+            POS0210/app/src/test/java/vn/ecohome/pos0210/PurchasePayerTrackingTest.kt
           git diff --cached --check
-          git commit -m 'feat(pos0210): track actual payer on expenses'
+          git commit -m 'feat(pos0210): track actual payer on expenses [skip ci]'
           git push origin HEAD:builder/payer-tracking
           git rev-parse HEAD
 
