@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 52961)
-Total output lines: 3679
-
 package vn.ecohome.pos0210
 
 import android.net.Uri
@@ -1870,7 +1867,207 @@ fun ComboEditDialog(
         confirmButton = {
             Button(
                 onClick = { onSave(name, priceText.toLongOrNull() ?: 0L, description, imageUri, selected.toMap()) },
-                enabled = name.isNotBlank() && (priceText.toLong…2961 tokens truncated…Button(onClick = {
+                enabled = name.isNotBlank() && (priceText.toLongOrNull() ?: 0L) > 0 && selected.isNotEmpty()
+            ) { Text("LƯU COMBO") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("HỦY") } },
+        text = {
+            LazyColumn {
+                item {
+                    OutlinedTextField(name, { name = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Tên combo") })
+                    OutlinedTextField(priceText, { priceText = it.filter(Char::isDigit) }, modifier = Modifier.fillMaxWidth(), label = { Text("Giá combo") })
+                    OutlinedTextField(description, { description = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Mô tả / ghi chú combo") }, minLines = 2)
+                    OutlinedButton(onClick = { picker.launch(arrayOf("image/*")) }, modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                        Text(if (imageUri == null) "＋ ẢNH COMBO" else "✓ ĐÃ CHỌN ẢNH")
+                    }
+                    if (imageUri != null) TextButton(onClick = { imageUri = null }, modifier = Modifier.fillMaxWidth()) { Text("DÙNG ẢNH GHÉP TỪ CÁC MÓN") }
+                    Text("Giá lẻ các món đã chọn: ${money(normalTotal)}", fontWeight = FontWeight.Bold)
+                    val comboPrice = priceText.toLongOrNull() ?: 0L
+                    if (comboPrice > 0 && normalTotal > comboPrice) Text("Tiết kiệm: ${money(normalTotal - comboPrice)}", fontSize = 12.sp)
+                    Text("Chọn món trong combo", Modifier.padding(top = 10.dp), fontWeight = FontWeight.Bold)
+                }
+                items(menu) { item ->
+                    val q = selected[item.id] ?: 0
+                    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(item.name, fontWeight = FontWeight.Bold)
+                            Text(money(item.price), fontSize = 11.sp)
+                        }
+                        if (q > 0) {
+                            TextButton(onClick = { if (q <= 1) selected.remove(item.id) else selected[item.id] = q - 1 }) { Text("−") }
+                            Text(q.toString(), fontWeight = FontWeight.Bold)
+                        }
+                        TextButton(onClick = { selected[item.id] = q + 1 }) { Text("+") }
+                    }
+                }
+            }
+        }
+    )
+}
+
+@Composable
+fun PricingManager(vm: PosViewModel) {
+    val rules by vm.pricingRules.collectAsState()
+    var showAdd by remember { mutableStateOf(false) }
+    Column {
+        Header("Ưu đãi & điều chỉnh giá") { vm.screen.value = "MANAGE" }
+        Button(onClick = { showAdd = true }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)) {
+            Text("＋ TẠO CHƯƠNG TRÌNH")
+        }
+        Text("Giảm giá không cộng dồn: hệ thống chỉ áp dụng 1 mức giảm có giá trị lớn nhất.", Modifier.padding(horizontal = 16.dp), fontSize = 12.sp)
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+            items(rules) { rule ->
+                Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(rule.name, fontWeight = FontWeight.Bold)
+                            Text("${if (rule.kind == "DISCOUNT") "Giảm" else "Phụ thu"} ${rule.percent}%${if (rule.code.isNotBlank()) " · Mã ${rule.code}" else ""}")
+                            val mode = if (rule.autoApply) "Tự động" else "Theo mã"
+                            Text(mode, fontSize = 11.sp)
+                        }
+                        Switch(checked = rule.active, onCheckedChange = { vm.togglePricingRule(rule) })
+                    }
+                }
+            }
+        }
+    }
+    if (showAdd) {
+        PricingRuleDialog(onDismiss = { showAdd = false }) { name, code, kind, percent, startAt, endAt, startMin, endMin, autoApply ->
+            vm.savePricingRule(name, code, kind, percent, startAt, endAt, startMin, endMin, autoApply)
+            showAdd = false
+        }
+    }
+}
+
+@Composable
+fun PricingRuleDialog(
+    onDismiss: () -> Unit,
+    onSave: (String, String, String, Int, Long?, Long?, Int?, Int?, Boolean) -> Unit
+) {
+    var name by remember { mutableStateOf("") }
+    var code by remember { mutableStateOf("") }
+    var kind by remember { mutableStateOf("DISCOUNT") }
+    var percentText by remember { mutableStateOf("") }
+    var startText by remember { mutableStateOf("") }
+    var endText by remember { mutableStateOf("") }
+    var startHour by remember { mutableStateOf("") }
+    var endHour by remember { mutableStateOf("") }
+    var autoApply by remember { mutableStateOf(true) }
+    fun parseDate(text: String): Long? = if (text.isBlank()) null else runCatching {
+        SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).apply { isLenient = false }.parse(text)?.time
+    }.getOrNull()
+    fun parseMinute(text: String): Int? {
+        if (text.isBlank()) return null
+        val parts = text.split(":")
+        if (parts.size != 2) return null
+        val h = parts[0].toIntOrNull() ?: return null
+        val m = parts[1].toIntOrNull() ?: return null
+        if (h !in 0..23 || m !in 0..59) return null
+        return h * 60 + m
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Chương trình giá") },
+        confirmButton = {
+            Button(
+                onClick = { onSave(name, code, kind, percentText.toIntOrNull() ?: 0, parseDate(startText), parseDate(endText), parseMinute(startHour), parseMinute(endHour), autoApply) },
+                enabled = name.isNotBlank() && (percentText.toIntOrNull() ?: 0) in 1..100 && (autoApply || code.isNotBlank())
+            ) { Text("LƯU") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("HỦY") } },
+        text = {
+            LazyColumn {
+                item {
+                    OutlinedTextField(name, { name = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Tên chương trình") })
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(kind == "DISCOUNT", { kind = "DISCOUNT" }, { Text("GIẢM") })
+                        FilterChip(kind == "SURCHARGE", { kind = "SURCHARGE" }, { Text("TĂNG / PHỤ THU") })
+                    }
+                    OutlinedTextField(percentText, { percentText = it.filter(Char::isDigit).take(3) }, modifier = Modifier.fillMaxWidth(), label = { Text("% điều chỉnh") })
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Tự động áp dụng", Modifier.weight(1f))
+                        Switch(checked = autoApply, onCheckedChange = { autoApply = it })
+                    }
+                    if (!autoApply) {
+                        OutlinedTextField(code, { code = it.uppercase().filter { ch -> ch.isLetterOrDigit() || ch == '_' || ch == '-' }.take(30) }, modifier = Modifier.fillMaxWidth(), label = { Text("Mã ưu đãi") })
+                    } else {
+                        OutlinedTextField(code, { code = it.uppercase().take(30) }, modifier = Modifier.fillMaxWidth(), label = { Text("Mã tham chiếu (không bắt buộc)") })
+                    }
+                    Text("Thời hạn chung (để trống nếu không giới hạn)", Modifier.padding(top = 8.dp), fontWeight = FontWeight.Bold)
+                    OutlinedTextField(startText, { startText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Từ dd/MM/yyyy HH:mm") })
+                    OutlinedTextField(endText, { endText = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Đến dd/MM/yyyy HH:mm") })
+                    Text("Khung giờ lặp hàng ngày (để trống nếu cả ngày)", Modifier.padding(top = 8.dp), fontWeight = FontWeight.Bold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(startHour, { startHour = it.take(5) }, modifier = Modifier.weight(1f), label = { Text("Từ HH:mm") })
+                        OutlinedTextField(endHour, { endHour = it.take(5) }, modifier = Modifier.weight(1f), label = { Text("Đến HH:mm") })
+                    }
+                }
+            }
+        }
+    )
+}
+
+@Composable
+fun MenuManager(vm: PosViewModel) {
+    val menu by vm.menu.collectAsState()
+    val categories by vm.categories.collectAsState()
+    val context = LocalContext.current
+    var showAdd by remember { mutableStateOf(false) }
+    var showCategoryManager by remember { mutableStateOf(false) }
+    var editTarget by remember { mutableStateOf<MenuItemEntity?>(null) }
+    var deleteTarget by remember { mutableStateOf<MenuItemEntity?>(null) }
+    var imageTarget by remember { mutableStateOf<MenuItemEntity?>(null) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            imageTarget?.let { vm.setMenuImage(it, uri.toString()) }
+        }
+        imageTarget = null
+    }
+    Column {
+        Header("Quản lý menu") { vm.screen.value = "MANAGE" }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Button(onClick = { showAdd = true }, modifier = Modifier.weight(1f)) { Text("＋ THÊM MÓN") }
+            OutlinedButton(onClick = { showCategoryManager = true }, modifier = Modifier.weight(1f)) { Text("NHÓM MÓN") }
+        }
+        LazyColumn {
+            items(menu) { m ->
+                Card(Modifier.fillMaxWidth().padding(6.dp)) {
+                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (!m.imageUri.isNullOrBlank()) {
+                            AsyncImage(
+                                model = m.imageUri,
+                                contentDescription = m.name,
+                                modifier = Modifier.size(58.dp)
+                            )
+                            Spacer(Modifier.width(10.dp))
+                        } else {
+                            Surface(
+                                modifier = Modifier.size(58.dp),
+                                color = Tint,
+                                shape = MaterialTheme.shapes.medium
+                            ) {
+                                Box(contentAlignment = Alignment.Center) { Text("ẢNH", fontSize = 11.sp) }
+                            }
+                            Spacer(Modifier.width(10.dp))
+                        }
+                        Column(Modifier.weight(1f)) {
+                            Text(m.name, fontWeight = FontWeight.Bold)
+                            Text("${m.productCode} · ${categories.firstOrNull { it.id == m.categoryId }?.name ?: "Khác"}", fontSize = 12.sp)
+                            Text(money(m.price))
+                            if (m.description.isNotBlank()) Text(m.description, fontSize = 12.sp, maxLines = 2)
+                            if (!m.active) Text("TẠM NGƯNG BÁN", color = Color(0xFF9A3412), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        TextButton(onClick = { editTarget = m }) { Text("SỬA") }
+                        TextButton(onClick = {
                             imageTarget = m
                             picker.launch(arrayOf("image/*"))
                         }) { Text(if (m.imageUri.isNullOrBlank()) "＋ ẢNH" else "ĐỔI ẢNH") }
