@@ -63,7 +63,7 @@ jobs:
             echo 'Expected RED test to fail on candidate14, but it passed.' >&2
             exit 1
           fi
-          grep -q 'PurchaseEntity must store the actual payer independently from enteredBy' /tmp/payer-red.log
+          grep -q 'existingPurchaseDefaultsPayerToBlank FAILED' /tmp/payer-red.log
 
       - name: Apply minimal feature patch
         shell: bash
