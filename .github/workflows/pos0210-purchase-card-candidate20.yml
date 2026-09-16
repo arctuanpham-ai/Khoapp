@@ -1,0 +1,28 @@
+name: POS0210 purchase card candidate20
+
+on:
+  push:
+    branches:
+      - builder/purchase-card-c20
+    paths:
+      - .github/workflows/pos0210-purchase-card-candidate20.yml
+      - POS0210/app/src/test/java/vn/ecohome/pos0210/PurchaseCardPresentationTest.kt
+      - POS0210/app/src/main/java/vn/ecohome/pos0210/PurchaseCardPresentation.kt
+      - POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+      - POS0210/app/build.gradle.kts
+
+jobs:
+  verify_red:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: RED purchase-card test
+        working-directory: POS0210
+        run: gradle --no-daemon :app:testDebugUnitTest --tests vn.ecohome.pos0210.PurchaseCardPresentationTest
