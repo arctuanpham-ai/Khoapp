@@ -67,9 +67,9 @@ sleep 2
 echo '=== Install candidate IN PLACE (no uninstall) ==='
 adb install -r /tmp/alpha51.apk | tee /tmp/install51.txt
 grep -q Success /tmp/install51.txt
-adb shell dumpsys package "$PKG" | grep -E 'versionName=1.0.0-alpha52-candidate12|versionCode=73'
+adb shell dumpsys package "$PKG" | grep -E 'versionName=1.0.0-alpha52-candidate13|versionCode=74'
 
-echo '=== Launch candidate to execute Room migration to 16 ==='
+echo '=== Launch candidate to execute Room migration to 17 ==='
 adb logcat -c
 adb shell am start -W -n "$ACT"
 sleep 8
@@ -109,10 +109,11 @@ for k,v in checks.items():
     exp=tuple(before['markers'][k]) if isinstance(before['markers'][k],list) else before['markers'][k]
     if v != exp: errors.append(f'marker changed {k}: expected {exp}, got {v}')
 uv=one('pragma user_version')[0]
-if uv != 16: errors.append(f'user_version expected 16 got {uv}')
+if uv != 17: errors.append(f'user_version expected 17 got {uv}')
 tables={r[0] for r in db.execute("select name from sqlite_master where type='table'")}
 for required in ('PaymentSessionEntity','BankNotificationEventEntity','AssetCategoryEntity','AssetEntity','AssetValuationEntity','FinancialMovementEntity','OpeningCashAdjustmentEntity'):
     if required not in tables: errors.append(f'missing additive table {required}')
+if 'CloudSyncStateEntity' not in tables: errors.append('missing additive table CloudSyncStateEntity')
 accounting_cols={r[1] for r in db.execute('pragma table_info(MonthlyAccountingEntity)')}
 for col in ('openingCashOverridden','closingCashSnapshot','operatingProfitSnapshot','distributableProfitSnapshot'):
     if col not in accounting_cols: errors.append(f'missing MonthlyAccountingEntity.{col}')

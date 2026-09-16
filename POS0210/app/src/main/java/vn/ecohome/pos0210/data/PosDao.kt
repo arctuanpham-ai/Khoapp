@@ -68,6 +68,8 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Query("SELECT * FROM PrintJobEntity WHERE batchId=:batchId AND type=\'KITCHEN\' LIMIT 1") suspend fun kitchenPrintJob(batchId:String):PrintJobEntity?
 @Query("SELECT * FROM AuditEventEntity ORDER BY occurredAt DESC LIMIT 500") fun audits():Flow<List<AuditEventEntity>>
 @Query("SELECT * FROM AppSettingEntity") fun settings():Flow<List<AppSettingEntity>>
+@Query("SELECT * FROM CloudSyncStateEntity WHERE id='firebase' LIMIT 1") fun cloudSyncState():Flow<CloudSyncStateEntity?>
+@Query("SELECT * FROM CloudSyncStateEntity WHERE id='firebase' LIMIT 1") suspend fun cloudSyncStateSnapshot():CloudSyncStateEntity?
 @Query("SELECT * FROM PaymentSessionEntity WHERE tableSessionId=:tableSessionId AND status IN ('WAITING','PAYMENT_DETECTED') ORDER BY openedAt DESC LIMIT 1") fun activePaymentSession(tableSessionId:String):Flow<PaymentSessionEntity?>
 @Query("SELECT * FROM PaymentSessionEntity WHERE tableSessionId=:tableSessionId AND status IN ('WAITING','PAYMENT_DETECTED') ORDER BY openedAt DESC LIMIT 1") suspend fun activePaymentSessionSnapshot(tableSessionId:String):PaymentSessionEntity?
 @Query("SELECT ps.* FROM PaymentSessionEntity ps INNER JOIN TableSessionEntity ts ON ts.id=ps.tableSessionId WHERE ps.status='WAITING' AND ps.expectedAmount=:amount AND ps.expiresAt>=:now AND ts.status='OPEN'") suspend fun waitingPaymentSessions(amount:Long,now:Long):List<PaymentSessionEntity>
@@ -81,6 +83,16 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Query("SELECT * FROM MenuItemEntity WHERE id=:id LIMIT 1") suspend fun menuItemById(id:String):MenuItemEntity?
 @Query("SELECT * FROM EmployeeEntity ORDER BY name") suspend fun allEmployeesSnapshot():List<EmployeeEntity>
 @Query("SELECT * FROM AppSettingEntity") suspend fun allSettingsSnapshot():List<AppSettingEntity>
+@Query("SELECT * FROM DiningTableEntity ORDER BY sortOrder,name") suspend fun cloudTablesSnapshot():List<DiningTableEntity>
+@Query("SELECT * FROM TableSessionEntity ORDER BY openedAt DESC") suspend fun cloudSessionsSnapshot():List<TableSessionEntity>
+@Query("SELECT * FROM OrderBatchEntity ORDER BY createdAt") suspend fun cloudOrderBatchesSnapshot():List<OrderBatchEntity>
+@Query("SELECT * FROM OrderItemEntity") suspend fun cloudOrderItemsSnapshot():List<OrderItemEntity>
+@Query("SELECT * FROM BillEntity ORDER BY openedAt DESC") suspend fun cloudBillsSnapshot():List<BillEntity>
+@Query("SELECT * FROM PaymentEntity ORDER BY paidAt DESC") suspend fun cloudPaymentsSnapshot():List<PaymentEntity>
+@Query("SELECT * FROM PurchaseEntity ORDER BY purchasedAt DESC") suspend fun cloudPurchasesSnapshot():List<PurchaseEntity>
+@Query("SELECT * FROM MonthlyAccountingEntity ORDER BY monthKey") suspend fun cloudAccountingSnapshot():List<MonthlyAccountingEntity>
+@Query("SELECT * FROM AssetEntity ORDER BY purchaseDate") suspend fun cloudAssetsSnapshot():List<AssetEntity>
+@Query("SELECT * FROM FinancialMovementEntity ORDER BY occurredAt") suspend fun cloudMovementsSnapshot():List<FinancialMovementEntity>
 @Query("SELECT * FROM EmployeeEntity WHERE pin=:pin AND active=1 LIMIT 1") suspend fun employeeByPin(pin:String):EmployeeEntity?
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertSession(v:TableSessionEntity)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertBatch(v:OrderBatchEntity)
@@ -102,6 +114,8 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveSupplier(v:SupplierEntity)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun savePurchaseCategory(v:PurchaseCategoryEntity)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveSetting(v:AppSettingEntity)
+@Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveCloudSyncState(v:CloudSyncStateEntity)
+@Query("UPDATE CloudSyncStateEntity SET dirty=1 WHERE id='firebase'") suspend fun markCloudDirty():Int
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertPaymentSession(v:PaymentSessionEntity)
 @Insert(onConflict=OnConflictStrategy.IGNORE) suspend fun insertBankNotification(v:BankNotificationEventEntity):Long
 @Query("UPDATE PaymentSessionEntity SET status='CANCELLED' WHERE tableSessionId=:tableSessionId AND status IN ('WAITING','PAYMENT_DETECTED')") suspend fun cancelPaymentSessions(tableSessionId:String):Int
@@ -134,7 +148,7 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Query("UPDATE PricingRuleEntity SET active=0") suspend fun deactivateAllPricingRules()
 @Query("UPDATE EmployeeEntity SET active=0") suspend fun deactivateAllEmployees()
 @Query("UPDATE PurchaseCategoryEntity SET active=0") suspend fun deactivateAllPurchaseCategories()
-@Query("DELETE FROM AppSettingEntity WHERE key NOT IN ('autoback_tree_uri','master_config_uri','storage_root_uri','storage_write_enabled')") suspend fun clearConfigSettings()
+@Query("DELETE FROM AppSettingEntity WHERE key NOT IN ('autoback_tree_uri','master_config_uri','storage_root_uri','storage_write_enabled','firebase_project_id','firebase_application_id','firebase_api_key')") suspend fun clearConfigSettings()
 @Query("UPDATE EmployeeEntity SET active=:active WHERE id=:id") suspend fun setEmployeeActive(id:String,active:Boolean)
 @Query("UPDATE OrderBatchEntity SET status=:newStatus,sentAt=:sentAt WHERE id=:id AND status=:expected") suspend fun transitionBatch(id:String,expected:String,newStatus:String,sentAt:Long?):Int
 @Query("UPDATE OrderBatchEntity SET status='DELIVERED',deliveredAt=:at,deliveredBy=:employeeId WHERE id=:id AND status='WAITING'") suspend fun markDelivered(id:String,at:Long,employeeId:String):Int

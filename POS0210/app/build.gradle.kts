@@ -5,15 +5,15 @@ plugins {
     id("org.jetbrains.kotlin.kapt")
 }
 android {
-    // Candidate12: targeted financial cleanup; existing POS, payment, and print pipelines stay intact.
+    // Candidate13: optional Firebase backup and read-only realtime manager dashboard.
     namespace = "vn.ecohome.pos0210"
     compileSdk = 35
     defaultConfig {
         applicationId = "vn.ecohome.pos0210"
         minSdk = 26
         targetSdk = 35
-        versionCode = 73
-        versionName = "1.0.0-alpha52-candidate12"
+        versionCode = 74
+        versionName = "1.0.0-alpha52-candidate13"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -39,9 +39,14 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.room:room-runtime:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
     kapt("androidx.room:room-compiler:2.6.1")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("com.google.zxing:core:3.5.3")
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-auth-ktx")
+    implementation("com.google.firebase:firebase-firestore-ktx")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")

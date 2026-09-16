@@ -121,6 +121,7 @@ fun App(vm: PosViewModel = viewModel()) {
         "SETTINGS" -> Settings(vm)
         "BANK_PAYMENT_SETTINGS" -> BankPaymentSettings(vm)
         "BANK_NOTIFICATION_TEST" -> BankNotificationTest(vm)
+        "CLOUD" -> CloudSyncSettings(vm)
     }
 }
 
@@ -1155,13 +1156,50 @@ fun Manage(vm: PosViewModel) {
             }
             if (employee?.role == "ADMIN") {
                 Rowx("Kiểm tra dữ liệu", "Đối soát Payment · Bill · Customer · điểm · trạng thái bàn") { vm.screen.value = "HEALTH" }
+                Rowx("Cloud & Manager realtime", "Firebase backup · trạng thái bàn · doanh thu trực tiếp") { vm.screen.value = "CLOUD" }
                 Rowx("Nhật ký hệ thống", "Audit thao tác · người thực hiện · thời điểm · dữ liệu thay đổi") { vm.screen.value = "SETTINGS" }
             }
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
-            Text("POS0210 v1.0.0-alpha52-candidate10 · versionCode 71", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("POS0210 v1.0.0-alpha52-candidate13 · versionCode 74", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Text("Tương thích Android 8.0 (API 26) trở lên · Thiết bị hiện tại: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})", fontSize = 11.sp)
             if (Build.VERSION.SDK_INT < 26) Text("Thiết bị không được hỗ trợ. Cần Android 8.0 trở lên.", color = Color.Red, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(30.dp))
+        }
+    }
+}
+
+@Composable
+fun CloudSyncSettings(vm:PosViewModel){
+    val settings by vm.settings.collectAsState();val state by vm.cloudSyncState.collectAsState();val message by vm.cloudMessage.collectAsState();val dashboard by vm.cloudDashboard.collectAsState()
+    fun current(key:String)=settings.firstOrNull{it.key==key}?.value.orEmpty()
+    var projectId by remember(settings){mutableStateOf(current("firebase_project_id"))};var applicationId by remember(settings){mutableStateOf(current("firebase_application_id"))};var apiKey by remember(settings){mutableStateOf(current("firebase_api_key"))}
+    var email by remember{mutableStateOf("")};var password by remember{mutableStateOf("")}
+    LaunchedEffect(state?.syncedUid){if(state?.syncedUid!=null)vm.observeCloudDashboard()}
+    Column{
+        Header("Cloud & Manager") { vm.screen.value="MANAGE" }
+        Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(10.dp)){
+            Text("FIREBASE FREE · LOCAL-FIRST",fontWeight=FontWeight.Black,fontSize=18.sp)
+            Text("POS vẫn dùng Room khi mất mạng. Cloud là bản sao dự phòng và nguồn xem realtime; Manager không sửa order từ xa ở phiên bản này.",fontSize=12.sp)
+            OutlinedTextField(projectId,{projectId=it.trim()},Modifier.fillMaxWidth(),label={Text("Firebase Project ID")},singleLine=true)
+            OutlinedTextField(applicationId,{applicationId=it.trim()},Modifier.fillMaxWidth(),label={Text("Firebase Android App ID")},singleLine=true)
+            OutlinedTextField(apiKey,{apiKey=it.trim()},Modifier.fillMaxWidth(),label={Text("Firebase Web API Key")},singleLine=true)
+            Button({vm.configureFirebase(projectId,applicationId,apiKey)},Modifier.fillMaxWidth(),enabled=projectId.isNotBlank()&&applicationId.isNotBlank()&&apiKey.isNotBlank()){Text("LƯU CẤU HÌNH FIREBASE")}
+            HorizontalDivider()
+            Text("TÀI KHOẢN CHỦ QUÁN",fontWeight=FontWeight.Black)
+            OutlinedTextField(email,{email=it.trim()},Modifier.fillMaxWidth(),label={Text("Email Firebase")},singleLine=true)
+            OutlinedTextField(password,{password=it},Modifier.fillMaxWidth(),label={Text("Mật khẩu")},visualTransformation=PasswordVisualTransformation(),singleLine=true)
+            if(state?.syncedUid==null)Button({vm.firebaseSignIn(email,password);password=""},Modifier.fillMaxWidth(),enabled=email.isNotBlank()&&password.length>=6){Text("ĐĂNG NHẬP & BẬT ĐỒNG BỘ")}
+            else OutlinedButton({vm.firebaseSignOut()},Modifier.fillMaxWidth()){Text("ĐĂNG XUẤT FIREBASE")}
+            Button({vm.syncFirebase()},Modifier.fillMaxWidth(),enabled=state?.syncedUid!=null){Text("ĐỒNG BỘ NGAY")}
+            if(message.isNotBlank())Text(message,fontWeight=FontWeight.Bold)
+            Text("Trạng thái: "+when{state?.syncedUid==null->"Chưa đăng nhập";state?.lastError!=null->"Có lỗi";state?.dirty==true->"Có dữ liệu đang chờ";else->"Đã đồng bộ"},fontWeight=FontWeight.Bold)
+            state?.lastSuccessAt?.let{Text("Lần thành công: ${time(it)}",fontSize=12.sp)};state?.lastError?.let{Text(it,color=Color(0xFF9A4B3D),fontSize=12.sp)}
+            HorizontalDivider()
+            Text("MANAGER REALTIME",fontWeight=FontWeight.Black,fontSize=18.sp)
+            MetricCard("Bàn đang có khách","${dashboard.openTables}");MetricCard("Doanh thu hôm nay",money(dashboard.revenueToday));MetricCard("Bill hôm nay","${dashboard.paidBillsToday}")
+            if(dashboard.openTableNames.isNotEmpty())Text("Đang phục vụ: ${dashboard.openTableNames.joinToString(" · ")}",fontWeight=FontWeight.Bold)
+            if(dashboard.online)Text("● Đang nhận dữ liệu Firestore realtime",color=Color(0xFF41633A),fontWeight=FontWeight.Bold) else Text(dashboard.error?:"Chưa kết nối realtime",color=Color(0xFF9A4B3D))
+            Text("Không đồng bộ ảnh hóa đơn/ảnh món, PIN nhân viên, URI lưu trữ hoặc log notification ngân hàng.",fontSize=11.sp)
         }
     }
 }

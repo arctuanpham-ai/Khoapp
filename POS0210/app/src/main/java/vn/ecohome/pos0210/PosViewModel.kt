@@ -8,6 +8,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.Job
+import vn.ecohome.pos0210.cloud.*
 import vn.ecohome.pos0210.data.*
 import vn.ecohome.pos0210.printing.PrinterText
 import vn.ecohome.pos0210.printing.BluetoothPrinter
@@ -25,6 +27,8 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  val assetValuations=dao.assetValuations().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList())
  val financialMovements=dao.financialMovements().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList())
  val openingCashAdjustments=dao.openingCashAdjustments().stateIn(viewModelScope,SharingStarted.WhileSubscribed(5000),emptyList())
+ val cloudSyncState=dao.cloudSyncState().stateIn(viewModelScope,SharingStarted.Eagerly,null)
+ val cloudMessage=MutableStateFlow("");val cloudDashboard=MutableStateFlow(CloudDashboard());private var cloudDashboardJob:Job?=null
  init{viewModelScope.launch{bootstrap()}}
  private suspend fun bootstrap(){
   val recovered=dao.recoverClaimedPrints()
@@ -318,6 +322,21 @@ fun saveSetting(key:String,value:String){
   if(key!="master_config_uri"&&key!="autoback_tree_uri"&&key!="storage_root_uri")autoMasterConfig()
  }
 }
+fun configureFirebase(projectId:String,applicationId:String,apiKey:String){
+ val e=currentEmployee.value?:return;if(e.role!="ADMIN"||projectId.isBlank()||applicationId.isBlank()||apiKey.isBlank())return
+ viewModelScope.launch(Dispatchers.IO){
+  db.withTransaction{dao.saveSetting(AppSettingEntity("firebase_project_id",projectId.trim()));dao.saveSetting(AppSettingEntity("firebase_application_id",applicationId.trim()));dao.saveSetting(AppSettingEntity("firebase_api_key",apiKey.trim()));dao.saveCloudSyncState((dao.cloudSyncStateSnapshot()?:CloudSyncStateEntity()).copy(enabled=false,dirty=true,lastError=null,syncedUid=null))}
+  FirebaseCloudSync.reset(getApplication())
+  cloudMessage.value="Đã lưu cấu hình Firebase · cần đăng nhập";audit("CLOUD","FIREBASE","CONFIGURE","project=$projectId")
+ }
+}
+fun firebaseSignIn(email:String,password:String){
+ val e=currentEmployee.value?:return;if(e.role!="ADMIN"||email.isBlank()||password.isBlank())return
+ viewModelScope.launch(Dispatchers.IO){runCatching{FirebaseCloudSync.signIn(getApplication(),email,password)}.onSuccess{uid->dao.saveCloudSyncState((dao.cloudSyncStateSnapshot()?:CloudSyncStateEntity()).copy(enabled=true,dirty=true,lastError=null,syncedUid=uid));FirebaseCloudSync.schedule(getApplication());cloudMessage.value="Đăng nhập Firebase thành công";syncFirebase();observeCloudDashboard()}.onFailure{cloudMessage.value="Đăng nhập lỗi: ${it.message}"}}
+}
+fun firebaseSignOut(){FirebaseCloudSync.signOut(getApplication());viewModelScope.launch(Dispatchers.IO){dao.saveCloudSyncState((dao.cloudSyncStateSnapshot()?:CloudSyncStateEntity()).copy(enabled=false,syncedUid=null));cloudMessage.value="Đã đăng xuất Firebase"};cloudDashboardJob?.cancel()}
+fun syncFirebase(){viewModelScope.launch(Dispatchers.IO){cloudMessage.value="Đang đồng bộ…";FirebaseCloudSync.syncNow(getApplication()).onSuccess{cloudMessage.value="Đồng bộ Firebase thành công"}.onFailure{cloudMessage.value="Đồng bộ lỗi: ${it.message}"}}}
+fun observeCloudDashboard(){cloudDashboardJob?.cancel();cloudDashboardJob=viewModelScope.launch{FirebaseCloudSync.dashboard(getApplication()).collect{cloudDashboard.value=it}}}
 fun attachStorageRoot(uri:String,allowWrites:Boolean){
  val e=currentEmployee.value?:return
  if(e.role!="ADMIN"&&!e.canManageSystem)return
