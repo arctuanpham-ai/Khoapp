@@ -26,3 +26,5 @@ jobs:
       - name: RED purchase-card test
         working-directory: POS0210
         run: gradle --no-daemon :app:testDebugUnitTest --tests vn.ecohome.pos0210.PurchaseCardPresentationTest
+
+# candidate20 RED gate
