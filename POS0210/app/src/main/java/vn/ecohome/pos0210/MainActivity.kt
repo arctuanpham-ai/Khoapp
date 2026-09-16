@@ -1161,7 +1161,7 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Nhật ký hệ thống", "Audit thao tác · người thực hiện · thời điểm · dữ liệu thay đổi") { vm.screen.value = "SETTINGS" }
             }
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
-            Text("POS0210 v1.0.0-alpha52-candidate18 · versionCode 79", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("POS0210 v1.0.0-alpha52-candidate20 · versionCode 81", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Text("Tương thích Android 8.0 (API 26) trở lên · Thiết bị hiện tại: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})", fontSize = 11.sp)
             if (Build.VERSION.SDK_INT < 26) Text("Thiết bị không được hỗ trợ. Cần Android 8.0 trở lên.", color = Color.Red, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(30.dp))
@@ -2495,12 +2495,15 @@ fun Purchases(vm: PosViewModel) {
             }
 
             items(purchases.take(20)) { p ->
+                val purchaseLines by vm.purchaseItems(p.id).collectAsState(initial = emptyList())
+                val card = purchaseCardPresentation(purchaseLines.firstOrNull()?.name.orEmpty(), p.note)
                 Card(
                     Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { selectedPurchase = p }
                 ) {
                     Column(Modifier.padding(12.dp)) {
                         Text(time(p.purchasedAt), fontWeight = FontWeight.Bold)
-                        Text("${money(p.total)} · ${p.note.ifBlank { "Không ghi chú" }}")
+                        Text("${money(p.total)} · ${card.itemName.ifBlank { "Chưa có nội dung" }}")
+                        if (card.note.isNotBlank()) Text("Ghi chú: ${card.note}", fontSize = 12.sp)
                         if(p.paidByName.isNotBlank()) Text("Người chi: ${p.paidByName}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         Text(if (!p.invoiceImageUri.isNullOrBlank()) "📷 Có ảnh hóa đơn · Chạm để xem" else "Chạm để xem chi tiết", fontSize = 12.sp)
                     }
@@ -3229,10 +3232,13 @@ fun Report(vm: PosViewModel) {
                             Text("Phiếu nhập trong kỳ", Modifier.padding(top = 14.dp, bottom = 4.dp), fontWeight = FontWeight.Bold)
                         }
                         items(filteredPurchases) { p ->
+                            val purchaseLines by vm.purchaseItems(p.id).collectAsState(initial = emptyList())
+                            val card = purchaseCardPresentation(purchaseLines.firstOrNull()?.name.orEmpty(), p.note)
                             Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { selectedPurchase = p }) {
                                 Column(Modifier.padding(14.dp)) {
                                     Text(time(p.purchasedAt), fontWeight = FontWeight.Bold)
-                                    Text(money(p.total))
+                                    Text("${money(p.total)} · ${card.itemName.ifBlank { "Chưa có nội dung" }}")
+                                    if (card.note.isNotBlank()) Text("Ghi chú: ${card.note}", fontSize = 12.sp)
                                     Text("Người chi: ${p.paidByName.ifBlank { "Chưa xác định" }}", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                     Text(if (!p.invoiceImageUri.isNullOrBlank()) "📷 Có ảnh hóa đơn · Chạm để xem" else "Chạm để xem chi tiết", fontSize = 12.sp)
                                 }
