@@ -1160,7 +1160,7 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Nhật ký hệ thống", "Audit thao tác · người thực hiện · thời điểm · dữ liệu thay đổi") { vm.screen.value = "SETTINGS" }
             }
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
-            Text("POS0210 v1.0.0-alpha52-candidate17 · versionCode 78", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("POS0210 v1.0.0-alpha52-candidate18 · versionCode 79", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Text("Tương thích Android 8.0 (API 26) trở lên · Thiết bị hiện tại: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})", fontSize = 11.sp)
             if (Build.VERSION.SDK_INT < 26) Text("Thiết bị không được hỗ trợ. Cần Android 8.0 trở lên.", color = Color.Red, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(30.dp))
@@ -2327,7 +2327,7 @@ fun Purchases(vm: PosViewModel) {
                 if(transactionType==FinancialTransactionTypes.OPERATING_EXPENSE){
                     Text("Nhóm chi phí",Modifier.padding(top=8.dp),fontWeight=FontWeight.Bold)
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)){
-                        listOf(ExpenseCategories.INVENTORY_PURCHASE,ExpenseCategories.PAYROLL,ExpenseCategories.ELECTRICITY,ExpenseCategories.WATER,ExpenseCategories.RENT,ExpenseCategories.MARKETING,ExpenseCategories.CONSUMABLES,ExpenseCategories.MAINTENANCE,ExpenseCategories.SERVICES,ExpenseCategories.BANK_FEES,ExpenseCategories.FIXED_EXPENSE,ExpenseCategories.VARIABLE_EXPENSE,ExpenseCategories.OTHER_EXPENSE).forEach{value->FilterChip(expenseCategory==value,{expenseCategory=value},{Text(ExpenseCategories.label(value))})}
+                        listOf(ExpenseCategories.INVENTORY_PURCHASE,ExpenseCategories.PAYROLL,ExpenseCategories.ELECTRICITY,ExpenseCategories.WATER,ExpenseCategories.RENT,ExpenseCategories.MARKETING,ExpenseCategories.CONSUMABLES,ExpenseCategories.MAINTENANCE,ExpenseCategories.SERVICES,ExpenseCategories.BANK_FEES,ExpenseCategories.OTHER_EXPENSE).forEach{value->FilterChip(expenseCategory==value,{expenseCategory=value},{Text(ExpenseCategories.label(value))})}
                     }
                 }
                 if (purchaseCategories.isNotEmpty() && transactionType==FinancialTransactionTypes.OPERATING_EXPENSE) {
@@ -2917,14 +2917,21 @@ fun Report(vm: PosViewModel) {
     val billIds = filteredBills.map { it.id }.toSet()
     val filteredPayments = payments.filter { it.billId in billIds }
     val revenue = filteredBills.sumOf { it.total }
-    val purchaseTotal = filteredPurchases.sumOf { it.total }
-    val categorizedCosts = filteredPurchases
-        .groupBy { it.expenseCategory }
+    val cashOutPurchases = filteredPurchases.filter { financialReportBucket(it.expenseCategory) != FinancialReportBucket.CAPITAL_FLOW }
+    val purchaseTotal = cashOutPurchases.sumOf { it.total }
+    val operatingPurchases = cashOutPurchases.filter { financialReportBucket(it.expenseCategory) == FinancialReportBucket.OPERATING }
+    val categorizedCosts = operatingPurchases
+        .groupBy { canonicalFinancialReportCategory(it.expenseCategory) }
         .map { (expenseCategory, rows) ->
             Triple(expenseCategory, ExpenseCategories.label(expenseCategory), rows.sumOf { it.total })
         }
         .sortedByDescending { it.third }
     val categorizedCostTotal = categorizedCosts.sumOf { it.third }
+    val investmentRows = listOf(
+        Triple(FinancialReportBucket.ADDITIONAL_INVESTMENT, "Đầu tư bổ sung", cashOutPurchases.filter { financialReportBucket(it.expenseCategory) == FinancialReportBucket.ADDITIONAL_INVESTMENT }.sumOf { it.total }),
+        Triple(FinancialReportBucket.INITIAL_ASSET, "Tài sản đầu tư ban đầu", cashOutPurchases.filter { financialReportBucket(it.expenseCategory) == FinancialReportBucket.INITIAL_ASSET }.sumOf { it.total }),
+        Triple(FinancialReportBucket.INITIAL_SUNK, "Đầu tư ban đầu không thu hồi", cashOutPurchases.filter { financialReportBucket(it.expenseCategory) == FinancialReportBucket.INITIAL_SUNK }.sumOf { it.total })
+    ).filter { it.third > 0L }
     val cash = filteredPayments.filter { it.method == "CASH" }.sumOf { it.amount }
     val transfer = filteredPayments.filter { it.method == "TRANSFER" }.sumOf { it.amount }
     val avgBill = if (filteredBills.isEmpty()) 0L else revenue / filteredBills.size
@@ -3006,8 +3013,8 @@ fun Report(vm: PosViewModel) {
                     item { MetricCard("Bill trung bình", money(avgBill)) }
                     item { MetricCard("Tiền mặt", money(cash)) }
                     item { MetricCard("Chuyển khoản", money(transfer)) }
-                    item { MetricCard("Tổng chi phí đầu vào", money(purchaseTotal)) }
-                    item { MetricCard("Chênh lệch thu - chi đầu vào", money(revenue - purchaseTotal)) }
+                    item { MetricCard("Tổng tiền chi trong kỳ", money(purchaseTotal)) }
+                    item { MetricCard("Chênh lệch thu - tổng tiền chi", money(revenue - purchaseTotal)) }
                     item {
                         PeakHoursChart(
                             hourlyCounts = hourlyBillCounts,
@@ -3017,7 +3024,7 @@ fun Report(vm: PosViewModel) {
                     }
                     item {
                         Text(
-                            "Chi phí theo nhóm tài chính",
+                            "Chi phí vận hành theo nhóm",
                             Modifier.padding(start = 8.dp, top = 16.dp, bottom = 6.dp),
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp
@@ -3038,6 +3045,19 @@ fun Report(vm: PosViewModel) {
                                         Text(row.second, fontWeight = FontWeight.Bold)
                                         Text("$pct% tổng chi phí", fontSize = 11.sp)
                                     }
+                                    Text(money(row.third), fontWeight = FontWeight.Black)
+                                }
+                            }
+                        }
+                    }
+                    if (investmentRows.isNotEmpty()) {
+                        item {
+                            Text("Đầu tư trong kỳ", Modifier.padding(start = 8.dp, top = 16.dp, bottom = 6.dp), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                        }
+                        items(investmentRows) { row ->
+                            Card(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                                Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text(row.second, Modifier.weight(1f), fontWeight = FontWeight.Bold)
                                     Text(money(row.third), fontWeight = FontWeight.Black)
                                 }
                             }
@@ -3148,7 +3168,7 @@ fun Report(vm: PosViewModel) {
                     Text("Chưa có phiếu nhập trong kỳ đã chọn", Modifier.padding(20.dp))
                 } else {
                     LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
-                        item { Text("Tổng chi phí đầu vào: ${money(purchaseTotal)}", fontSize = 22.sp, fontWeight = FontWeight.Bold) }
+                        item { Text("Tổng tiền chi trong kỳ: ${money(purchaseTotal)}", fontSize = 22.sp, fontWeight = FontWeight.Bold) }
                         item {
                             val summary = filteredPurchases.groupBy { it.paidByName.trim().ifBlank { "Chưa xác định" } }
                                 .mapValues { (_, rows) -> rows.sumOf { it.total } }
@@ -3161,7 +3181,7 @@ fun Report(vm: PosViewModel) {
                         if (categorizedCosts.isNotEmpty()) {
                             item {
                                 Text(
-                                    "Theo phân mục",
+                                    "Chi phí vận hành theo nhóm",
                                     Modifier.padding(top = 12.dp, bottom = 4.dp),
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 17.sp
@@ -3177,13 +3197,22 @@ fun Report(vm: PosViewModel) {
                                     }
                                 }
                             }
+                        }
+                        if (investmentRows.isNotEmpty()) {
                             item {
-                                Text(
-                                    "Phiếu nhập trong kỳ",
-                                    Modifier.padding(top = 14.dp, bottom = 4.dp),
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Text("Đầu tư trong kỳ", Modifier.padding(top = 12.dp, bottom = 4.dp), fontWeight = FontWeight.Bold, fontSize = 17.sp)
                             }
+                            items(investmentRows) { row ->
+                                Card(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(row.second, Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                                        Text(money(row.third))
+                                    }
+                                }
+                            }
+                        }
+                        item {
+                            Text("Phiếu nhập trong kỳ", Modifier.padding(top = 14.dp, bottom = 4.dp), fontWeight = FontWeight.Bold)
                         }
                         items(filteredPurchases) { p ->
                             Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).clickable { selectedPurchase = p }) {
