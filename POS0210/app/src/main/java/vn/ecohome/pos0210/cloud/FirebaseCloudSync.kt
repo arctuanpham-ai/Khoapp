@@ -19,14 +19,17 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 import vn.ecohome.pos0210.data.CloudSyncStateEntity
+import vn.ecohome.pos0210.data.PosDao
 import vn.ecohome.pos0210.data.PosDatabase
+import vn.ecohome.pos0210.ExpenseCategories
+import vn.ecohome.pos0210.calculateAssetValue
 import java.util.Calendar
 import java.util.concurrent.TimeUnit
 
 data class FirebaseConfig(val projectId:String,val applicationId:String,val apiKey:String){
     val valid:Boolean get()=projectId.isNotBlank()&&applicationId.isNotBlank()&&apiKey.isNotBlank()
 }
-data class CloudDashboard(val openTables:Int=0,val revenueToday:Long=0,val paidBillsToday:Int=0,val lastUpdatedAt:Long=0,val openTableNames:List<String> = emptyList(),val online:Boolean=false,val error:String?=null)
+data class CloudDashboard(val openTables:Int=0,val revenueToday:Long=0,val paidBillsToday:Int=0,val monthRevenue:Long=0,val operatingProfit:Long?=null,val closingCash:Long=0,val initialInvestment:Long=0,val recoveredCapital:Long=0,val paybackBasisPoints:Int=0,val lastUpdatedAt:Long=0,val openTableNames:List<String> = emptyList(),val online:Boolean=false,val error:String?=null)
 object CloudSyncPolicy{
     val safeSettingKeys=setOf("bank_name","bank_account","bank_holder","qr_prefix","printer_paper_mm","loyalty_auto_tier","member_discount_percent","vip_min_points","vip_discount_percent","vvip_min_points","vvip_discount_percent")
     fun shouldUploadSetting(key:String)=key in safeSettingKeys
@@ -63,7 +66,7 @@ object FirebaseCloudSync {
         val paidToday=bills.filter{it.status=="PAID"&&(it.closedAt?:0)>=today};val open=sessions.filter{it.status=="OPEN"};val now=System.currentTimeMillis()
         root.set(mapOf("name" to "0210","updatedAt" to now,"schemaVersion" to 1)).await()
         val openByTable=open.associateBy{it.tableId}
-        root.collection("dashboard").document("current").set(mapOf("openTables" to open.size,"openTableNames" to tables.filter{openByTable.containsKey(it.id)}.map{it.name},"revenueToday" to paidToday.sumOf{it.total},"paidBillsToday" to paidToday.size,"lastUpdatedAt" to now)).await()
+        root.collection("dashboard").document("current").set(financialDashboard(dao,bills,payments,now)+mapOf("openTables" to open.size,"openTableNames" to tables.filter{openByTable.containsKey(it.id)}.map{it.name},"revenueToday" to paidToday.sumOf{it.total},"paidBillsToday" to paidToday.size,"lastUpdatedAt" to now)).await()
         writeMaps(fs,root.collection("tableStatus"),tables.map{t->t.id to mapOf("id" to t.id,"name" to t.name,"areaId" to t.areaId,"active" to t.active,"occupied" to openByTable.containsKey(t.id),"openedAt" to openByTable[t.id]?.openedAt,"updatedAt" to now)})
         writeMaps(fs,root.collection("menu"),dao.allMenuSnapshot().map{m->m.id to mapOf("id" to m.id,"categoryId" to m.categoryId,"name" to m.name,"price" to m.price,"sortOrder" to m.sortOrder,"active" to m.active,"productCode" to m.productCode,"description" to m.description)})
         writeMaps(fs,root.collection("areas"),dao.allAreasSnapshot().map{a->a.id to mapOf("id" to a.id,"name" to a.name,"sortOrder" to a.sortOrder,"active" to a.active)})
@@ -88,19 +91,31 @@ object FirebaseCloudSync {
         val fs=FirebaseFirestore.getInstance(firebaseApp);val root=fs.collection("users").document(uid).collection("stores").document("0210")
         val tables=dao.cloudTablesSnapshot();val sessions=dao.cloudSessionsSnapshot();val bills=dao.cloudBillsSnapshot();val open=sessions.filter{it.status=="OPEN"};val openByTable=open.associateBy{it.tableId}
         val today=Calendar.getInstance().apply{set(Calendar.HOUR_OF_DAY,0);set(Calendar.MINUTE,0);set(Calendar.SECOND,0);set(Calendar.MILLISECOND,0)}.timeInMillis;val paidToday=bills.filter{it.status=="PAID"&&(it.closedAt?:0)>=today};val now=System.currentTimeMillis()
-        root.collection("dashboard").document("current").set(mapOf("openTables" to open.size,"openTableNames" to tables.filter{openByTable.containsKey(it.id)}.map{it.name},"revenueToday" to paidToday.sumOf{it.total},"paidBillsToday" to paidToday.size,"lastUpdatedAt" to now)).await()
+        root.collection("dashboard").document("current").set(financialDashboard(dao,bills,dao.cloudPaymentsSnapshot(),now)+mapOf("openTables" to open.size,"openTableNames" to tables.filter{openByTable.containsKey(it.id)}.map{it.name},"revenueToday" to paidToday.sumOf{it.total},"paidBillsToday" to paidToday.size,"lastUpdatedAt" to now)).await()
         writeMaps(fs,root.collection("tableStatus"),tables.map{t->t.id to mapOf("id" to t.id,"name" to t.name,"areaId" to t.areaId,"active" to t.active,"occupied" to openByTable.containsKey(t.id),"openedAt" to openByTable[t.id]?.openedAt,"updatedAt" to now)})
     }
 
     private suspend fun writeMaps(fs:FirebaseFirestore,collection:com.google.firebase.firestore.CollectionReference,rows:List<Pair<String,Map<String,Any?>>>){
         rows.chunked(400).forEach{chunk->val batch=fs.batch();chunk.forEach{(id,data)->batch.set(collection.document(id),data)};batch.commit().await()}
     }
+    private suspend fun financialDashboard(dao:PosDao,bills:List<vn.ecohome.pos0210.data.BillEntity>,payments:List<vn.ecohome.pos0210.data.PaymentEntity>,now:Long):Map<String,Any?>{
+        val month=Calendar.getInstance().apply{timeInMillis=now;set(Calendar.DAY_OF_MONTH,1);set(Calendar.HOUR_OF_DAY,0);set(Calendar.MINUTE,0);set(Calendar.SECOND,0);set(Calendar.MILLISECOND,0)}
+        val from=month.timeInMillis;val to=Calendar.getInstance().apply{timeInMillis=from;add(Calendar.MONTH,1)}.timeInMillis;val monthKey="%04d-%02d".format(month.get(Calendar.YEAR),month.get(Calendar.MONTH)+1)
+        val monthBills=bills.filter{it.status=="PAID"&&(it.closedAt?:Long.MIN_VALUE) in from until to};val billIds=monthBills.map{it.id}.toSet();val monthRevenue=monthBills.sumOf{it.total};val received=payments.filter{it.billId in billIds}.sumOf{it.amount}
+        val purchases=dao.cloudPurchasesSnapshot();val monthPurchases=purchases.filter{it.status=="ACTIVE"&&it.purchasedAt in from until to};fun sum(category:String)=monthPurchases.filter{it.expenseCategory==category}.sumOf{it.total}
+        val fixed=sum(ExpenseCategories.FIXED_EXPENSE);val variableExpense=sum(ExpenseCategories.VARIABLE_EXPENSE);val other=sum(ExpenseCategories.OTHER_EXPENSE);val inventory=sum(ExpenseCategories.INVENTORY_PURCHASE);val capital=sum(ExpenseCategories.CAPITAL_ASSET);val setup=sum(ExpenseCategories.SETUP_COST)+sum(ExpenseCategories.INITIAL_INVESTMENT_SUNK);val unclassified=sum(ExpenseCategories.UNCLASSIFIED)
+        val movements=dao.cloudMovementsSnapshot();val monthMovements=movements.filter{it.occurredAt in from until to};val contribution=sum(ExpenseCategories.OWNER_CONTRIBUTION)+monthMovements.filter{it.type=="CAPITAL_CONTRIBUTION"}.sumOf{it.amount};val workingCapital=monthMovements.filter{it.type=="WORKING_CAPITAL"}.sumOf{it.amount};val otherCashIn=monthMovements.filter{it.type in setOf("OTHER_CASH_IN","OTHER_CASH_ADJUSTMENT","ASSET_DISPOSAL_IN")}.sumOf{it.amount};val withdrawal=sum(ExpenseCategories.OWNER_WITHDRAWAL)+monthMovements.filter{it.type=="OWNER_WITHDRAWAL"}.sumOf{it.amount};val profitWithdrawal=sum(ExpenseCategories.PROFIT_WITHDRAWAL)+monthMovements.filter{it.type=="PROFIT_WITHDRAWAL"}.sumOf{it.amount}
+        val assets=dao.cloudAssetsSnapshot();val activeAssets=assets.filter{it.status in setOf("ACTIVE","DAMAGED","TRANSFERRED")};val depreciation=activeAssets.filter{it.purchaseDate<to}.sumOf{a->val p=Calendar.getInstance().apply{timeInMillis=a.purchaseDate};val used=((month.get(Calendar.YEAR)-p.get(Calendar.YEAR))*12+month.get(Calendar.MONTH)-p.get(Calendar.MONTH)+1).coerceAtLeast(0);calculateAssetValue(a.totalCost,a.residualValue,a.usefulLifeMonths,used).monthlyDepreciation}
+        val accounting=dao.cloudAccountingSnapshot().firstOrNull{it.monthKey==monthKey};val operatingProfit=accounting?.cogs?.let{monthRevenue-it-fixed-variableExpense-other-depreciation};val openingCash=accounting?.openingCash?:0;val closingCash=openingCash+received+contribution+workingCapital+otherCashIn-inventory-fixed-variableExpense-other-unclassified-capital-setup-withdrawal-profitWithdrawal
+        val initialInvestment=purchases.filter{it.status=="ACTIVE"&&it.expenseCategory in setOf(ExpenseCategories.SETUP_COST,ExpenseCategories.INITIAL_INVESTMENT_SUNK)}.sumOf{it.total}+assets.sumOf{it.totalCost};val recoveredCapital=movements.filter{it.type=="RECOVERED_CAPITAL"}.sumOf{it.amount};val paybackBp=if(initialInvestment<=0)0 else ((recoveredCapital.coerceAtMost(initialInvestment)*10_000)/initialInvestment).toInt()
+        return mapOf("monthKey" to monthKey,"monthRevenue" to monthRevenue,"operatingProfit" to operatingProfit,"closingCash" to closingCash,"initialInvestment" to initialInvestment,"recoveredCapital" to recoveredCapital,"paybackBasisPoints" to paybackBp)
+    }
     fun dashboard(context:Context):Flow<CloudDashboard> = callbackFlow{
         val c=config(context);if(!c.valid){trySend(CloudDashboard(error="Chưa cấu hình Firebase"));close();return@callbackFlow}
         val firebaseApp=app(context,c);val uid=FirebaseAuth.getInstance(firebaseApp).currentUser?.uid
         if(uid==null){trySend(CloudDashboard(error="Chưa đăng nhập Firebase"));close();return@callbackFlow}
         val registration=FirebaseFirestore.getInstance(firebaseApp).collection("users").document(uid).collection("stores").document("0210").collection("dashboard").document("current")
-            .addSnapshotListener{doc,error->if(error!=null)trySend(CloudDashboard(error=error.message)) else trySend(CloudDashboard(doc?.getLong("openTables")?.toInt()?:0,doc?.getLong("revenueToday")?:0,doc?.getLong("paidBillsToday")?.toInt()?:0,doc?.getLong("lastUpdatedAt")?:0,(doc?.get("openTableNames") as? List<*>)?.mapNotNull{it as? String}.orEmpty(),true))}
+            .addSnapshotListener{doc,error->if(error!=null)trySend(CloudDashboard(error=error.message)) else trySend(CloudDashboard(openTables=doc?.getLong("openTables")?.toInt()?:0,revenueToday=doc?.getLong("revenueToday")?:0,paidBillsToday=doc?.getLong("paidBillsToday")?.toInt()?:0,monthRevenue=doc?.getLong("monthRevenue")?:0,operatingProfit=doc?.getLong("operatingProfit"),closingCash=doc?.getLong("closingCash")?:0,initialInvestment=doc?.getLong("initialInvestment")?:0,recoveredCapital=doc?.getLong("recoveredCapital")?:0,paybackBasisPoints=doc?.getLong("paybackBasisPoints")?.toInt()?:0,lastUpdatedAt=doc?.getLong("lastUpdatedAt")?:0,openTableNames=(doc?.get("openTableNames") as? List<*>)?.mapNotNull{it as? String}.orEmpty(),online=true))}
         awaitClose{registration.remove()}
     }
     fun schedule(context:Context){
