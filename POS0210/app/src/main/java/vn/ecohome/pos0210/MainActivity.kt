@@ -2327,7 +2327,7 @@ fun Purchases(vm: PosViewModel) {
                 if(transactionType==FinancialTransactionTypes.OPERATING_EXPENSE){
                     Text("Nhóm chi phí",Modifier.padding(top=8.dp),fontWeight=FontWeight.Bold)
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)){
-                        listOf(ExpenseCategories.INVENTORY_PURCHASE,ExpenseCategories.FIXED_EXPENSE,ExpenseCategories.VARIABLE_EXPENSE,ExpenseCategories.OTHER_EXPENSE).forEach{value->FilterChip(expenseCategory==value,{expenseCategory=value},{Text(ExpenseCategories.label(value))})}
+                        listOf(ExpenseCategories.INVENTORY_PURCHASE,ExpenseCategories.PAYROLL,ExpenseCategories.ELECTRICITY,ExpenseCategories.WATER,ExpenseCategories.RENT,ExpenseCategories.MARKETING,ExpenseCategories.CONSUMABLES,ExpenseCategories.MAINTENANCE,ExpenseCategories.SERVICES,ExpenseCategories.BANK_FEES,ExpenseCategories.FIXED_EXPENSE,ExpenseCategories.VARIABLE_EXPENSE,ExpenseCategories.OTHER_EXPENSE).forEach{value->FilterChip(expenseCategory==value,{expenseCategory=value},{Text(ExpenseCategories.label(value))})}
                     }
                 }
                 if (purchaseCategories.isNotEmpty() && transactionType==FinancialTransactionTypes.OPERATING_EXPENSE) {
@@ -2342,6 +2342,7 @@ fun Purchases(vm: PosViewModel) {
                                 onClick = {
                                     selectedCategoryId = c.id
                                     unit = c.defaultUnit
+                                    expenseCategory = expenseCategoryForLegacyDetail(c.id, expenseCategory)
                                 },
                                 label = { Text(c.name) }
                             )
@@ -2388,7 +2389,7 @@ fun Purchases(vm: PosViewModel) {
                     itemName,
                     { itemName = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text(if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) if (selectedCategory?.id == "pc_salary") "Nội dung / nhân sự" else "Mặt hàng / nội dung chi" else "Nội dung giao dịch") }
+                    label = { Text(if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) if (selectedCategory?.id == "pc_salary") "Người nhận lương / nhân sự" else "Mặt hàng / nội dung chi" else "Nội dung giao dịch") }
                 )
                 if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
@@ -2917,12 +2918,10 @@ fun Report(vm: PosViewModel) {
     val filteredPayments = payments.filter { it.billId in billIds }
     val revenue = filteredBills.sumOf { it.total }
     val purchaseTotal = filteredPurchases.sumOf { it.total }
-    val categorizedCosts = purchaseCosts
-        .filter { it.purchaseId in filteredPurchaseIds }
-        .groupBy { it.categoryId }
-        .map { (categoryId, rows) ->
-            val categoryName = purchaseCategories.firstOrNull { it.id == categoryId }?.name ?: "Phân mục khác"
-            Triple(categoryId, categoryName, rows.sumOf { it.amount })
+    val categorizedCosts = filteredPurchases
+        .groupBy { it.expenseCategory }
+        .map { (expenseCategory, rows) ->
+            Triple(expenseCategory, ExpenseCategories.label(expenseCategory), rows.sumOf { it.total })
         }
         .sortedByDescending { it.third }
     val categorizedCostTotal = categorizedCosts.sumOf { it.third }
@@ -3018,7 +3017,7 @@ fun Report(vm: PosViewModel) {
                     }
                     item {
                         Text(
-                            "Chi phí đầu vào theo phân mục",
+                            "Chi phí theo nhóm tài chính",
                             Modifier.padding(start = 8.dp, top = 16.dp, bottom = 6.dp),
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp
