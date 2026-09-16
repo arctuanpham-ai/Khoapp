@@ -17,19 +17,42 @@ jobs:
       ANDROID_HOME: /usr/local/lib/android/sdk
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
-      - name: Checkout exact candidate16-derived branch
+      - name: Checkout exact candidate17 branch
         uses: actions/checkout@v4
         with:
           ref: builder/finance-report-semantics-fix
-          fetch-depth: 5
+          fetch-depth: 20
 
-      - name: Verify baseline identity
+      - name: Verify candidate17 finance-only scope
         shell: bash
         run: |
           set -euo pipefail
-          grep -q 'versionCode = 77' POS0210/app/build.gradle.kts
-          grep -q 'versionName = "1.0.0-alpha52-candidate16"' POS0210/app/build.gradle.kts
+          grep -q 'versionCode = 78' POS0210/app/build.gradle.kts
+          grep -q 'versionName = "1.0.0-alpha52-candidate17"' POS0210/app/build.gradle.kts
           grep -q 'version=19' POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt
+          git diff --name-only eb1bcb86ceaa2f60dbd498eff0dfa50ce0c9a7b2..HEAD | tee /tmp/candidate17-files.txt
+          unexpected=$(grep -Ev '^(.github/workflows/pos0210-finance-semantics-candidate17.yml|POS0210/app/build.gradle.kts|POS0210/app/src/main/java/vn/ecohome/pos0210/(MainActivity.kt|FinanceSemantics.kt)|POS0210/app/src/test/java/vn/ecohome/pos0210/FinanceSemanticsTest.kt|scripts/pos0210_finance_semantics_(fix|finalize).py)$' /tmp/candidate17-files.txt || true)
+          if [ -n "$unexpected" ]; then
+            echo 'Unexpected file outside finance semantics scope:' >&2
+            echo "$unexpected" >&2
+            exit 1
+          fi
+
+      - name: Finalize visible candidate label only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/pos0210_finance_semantics_finalize.py
+          grep -q 'Người nhận lương / nhân sự' POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+          grep -q 'Chi phí theo nhóm tài chính' POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+          grep -q 'POS0210 v1.0.0-alpha52-candidate17 · versionCode 78' POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+          changed=$(git status --porcelain | sed -E 's/^.. //' | grep -Ev '^POS0210/(\.gradle/|app/build/)' | sort -u)
+          unexpected=$(printf '%s\n' "$changed" | grep -Ev '^POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt$' || true)
+          if [ -n "$unexpected" ]; then
+            echo 'Runtime patch touched unexpected file:' >&2
+            echo "$unexpected" >&2
+            exit 1
+          fi
 
       - name: Java 17
         uses: actions/setup-java@v4
@@ -49,30 +72,7 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Apply only finance UI/report fix
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 scripts/pos0210_finance_semantics_fix.py
-          grep -q 'versionCode = 78' POS0210/app/build.gradle.kts
-          grep -q 'versionName = "1.0.0-alpha52-candidate17"' POS0210/app/build.gradle.kts
-          grep -q 'Người nhận lương / nhân sự' POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
-          grep -q 'Chi phí theo nhóm tài chính' POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
-
-      - name: Strict scope guard
-        shell: bash
-        run: |
-          set -euo pipefail
-          git status --porcelain
-          changed=$(git status --porcelain | sed -E 's/^.. //' | grep -Ev '^POS0210/(\.gradle/|app/build/)' | sort -u)
-          unexpected=$(printf '%s\n' "$changed" | grep -Ev '^POS0210/app/(build.gradle.kts|src/main/java/vn/ecohome/pos0210/MainActivity.kt)$' || true)
-          if [ -n "$unexpected" ]; then
-            echo 'Unexpected source files changed; refusing build:' >&2
-            echo "$unexpected" >&2
-            exit 1
-          fi
-
-      - name: Targeted semantics tests
+      - name: Targeted finance semantics tests
         shell: bash
         working-directory: POS0210
         run: |
@@ -100,21 +100,23 @@ jobs:
           echo "$BADGING" | grep -q "name='vn.ecohome.pos0210'"
           echo "$BADGING" | grep -q "versionCode='78'"
           echo "$BADGING" | grep -q "versionName='1.0.0-alpha52-candidate17'"
-          $APKSIGNER verify --verbose --print-certs "$APK"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
           mkdir -p dist
           cp "$APK" dist/POS0210_v1.0.0-alpha52-candidate17.apk
           sha256sum dist/POS0210_v1.0.0-alpha52-candidate17.apk | tee dist/POS0210_v1.0.0-alpha52-candidate17.apk.sha256
 
-      - name: Commit validated source patch only
+      - name: Commit validated visible version label
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name 'POS0210 Builder'
-          git config user.email 'actions@github.com'
-          git add POS0210/app/build.gradle.kts POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
-          git diff --cached --check
-          git commit -m 'fix(pos0210): separate payer from payroll and financial reporting [skip ci]'
-          git push origin HEAD:builder/finance-report-semantics-fix
+          if ! git diff --quiet -- POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt; then
+            git config user.name 'POS0210 Builder'
+            git config user.email 'actions@github.com'
+            git add POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+            git diff --cached --check
+            git commit -m 'chore(pos0210): show candidate17 identity [skip ci]'
+            git push origin HEAD:builder/finance-report-semantics-fix
+          fi
 
       - name: Upload candidate17 APK
         uses: actions/upload-artifact@v4
