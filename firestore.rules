@@ -1,0 +1,32 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isStoreOwner(ownerUid) {
+      return signedIn() && request.auth.uid == ownerUid;
+    }
+
+    // Future shareholder/manager accounts are granted by an administrator in
+    // /managerAccess/{theirUid}. They can read only, never write POS data.
+    function hasManagerReadAccess(ownerUid) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/managerAccess/$(request.auth.uid))
+        && get(/databases/$(database)/documents/managerAccess/$(request.auth.uid)).data.ownerUid == ownerUid
+        && get(/databases/$(database)/documents/managerAccess/$(request.auth.uid)).data.active == true;
+    }
+
+    match /users/{ownerUid}/stores/{storeId}/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+      allow write: if isStoreOwner(ownerUid);
+    }
+
+    match /managerAccess/{managerUid} {
+      allow read: if signedIn() && request.auth.uid == managerUid;
+      allow write: if false;
+    }
+  }
+}
