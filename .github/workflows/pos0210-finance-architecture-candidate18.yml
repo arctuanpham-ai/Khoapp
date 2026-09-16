@@ -1,0 +1,128 @@
+name: POS0210 finance architecture candidate18
+
+on:
+  push:
+    branches:
+      - builder/finance-architecture-cleanup
+    paths:
+      - .github/workflows/pos0210-finance-architecture-candidate18.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build_candidate18:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+    steps:
+      - name: Checkout exact candidate17-derived branch
+        uses: actions/checkout@v4
+        with:
+          ref: builder/finance-architecture-cleanup
+          fetch-depth: 10
+
+      - name: Verify baseline identity and scope inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'versionCode = 78' POS0210/app/build.gradle.kts
+          grep -q 'versionName = "1.0.0-alpha52-candidate17"' POS0210/app/build.gradle.kts
+          grep -q 'version=19' POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt
+          grep -q 'canonicalFinancialReportCategory' POS0210/app/src/main/java/vn/ecohome/pos0210/FinanceSemantics.kt
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
+
+      - name: Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Apply finance architecture UI cleanup only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/pos0210_finance_architecture_cleanup.py
+          grep -q 'versionCode = 79' POS0210/app/build.gradle.kts
+          grep -q 'versionName = "1.0.0-alpha52-candidate18"' POS0210/app/build.gradle.kts
+          grep -q 'Tổng tiền chi trong kỳ' POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+          grep -q 'Đầu tư ban đầu không thu hồi' POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+          ! grep -q 'ExpenseCategories.FIXED_EXPENSE,ExpenseCategories.VARIABLE_EXPENSE' POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+
+      - name: Strict source scope guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed=$(git status --porcelain | sed -E 's/^.. //' | grep -Ev '^POS0210/(\.gradle/|app/build/)' | sort -u)
+          unexpected=$(printf '%s\n' "$changed" | grep -Ev '^POS0210/app/(build.gradle.kts|src/main/java/vn/ecohome/pos0210/MainActivity.kt)$' || true)
+          if [ -n "$unexpected" ]; then
+            echo 'Unexpected generated source files changed; refusing build:' >&2
+            echo "$unexpected" >&2
+            exit 1
+          fi
+
+      - name: Targeted finance semantics tests
+        shell: bash
+        working-directory: POS0210
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :app:testDebugUnitTest --tests vn.ecohome.pos0210.FinanceSemanticsTest --stacktrace
+
+      - name: Standard APK gates
+        shell: bash
+        working-directory: POS0210
+        run: |
+          set -euo pipefail
+          gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+
+      - name: Verify APK identity signature and SHA
+        shell: bash
+        working-directory: POS0210
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          test -s "$APK"
+          BADGING=$($AAPT dump badging "$APK" | head -n 1)
+          echo "$BADGING"
+          echo "$BADGING" | grep -q "name='vn.ecohome.pos0210'"
+          echo "$BADGING" | grep -q "versionCode='79'"
+          echo "$BADGING" | grep -q "versionName='1.0.0-alpha52-candidate18'"
+          $APKSIGNER verify --verbose --print-certs "$APK"
+          mkdir -p dist
+          cp "$APK" dist/POS0210_v1.0.0-alpha52-candidate18.apk
+          sha256sum dist/POS0210_v1.0.0-alpha52-candidate18.apk | tee dist/POS0210_v1.0.0-alpha52-candidate18.apk.sha256
+
+      - name: Commit validated generated source only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'POS0210 Builder'
+          git config user.email 'actions@github.com'
+          git add POS0210/app/build.gradle.kts POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt
+          git diff --cached --check
+          git commit -m 'fix(pos0210): clean finance reporting architecture [skip ci]'
+          git push origin HEAD:builder/finance-architecture-cleanup
+
+      - name: Upload candidate18 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: POS0210-v1.0.0-alpha52-candidate18-vc79-finance-architecture
+          path: |
+            POS0210/dist/POS0210_v1.0.0-alpha52-candidate18.apk
+            POS0210/dist/POS0210_v1.0.0-alpha52-candidate18.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
