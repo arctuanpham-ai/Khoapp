@@ -7,6 +7,8 @@ marker = "@Composable fun AccountingCard("
 if marker not in s:
     s += r'''
 
+private fun financeMoney(v: Long) = "%,dđ".format(v).replace(',', '.')
+
 @Composable
 fun AccountingCard(rows: List<Pair<String, Long?>>) {
     Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
@@ -18,7 +20,7 @@ fun AccountingCard(rows: List<Pair<String, Long?>>) {
                         Modifier.weight(1f),
                         fontWeight = if (label.uppercase() == label) FontWeight.Black else FontWeight.Normal
                     )
-                    Text(value?.let { money(it) } ?: "—", fontWeight = FontWeight.Bold)
+                    Text(value?.let { financeMoney(it) } ?: "—", fontWeight = FontWeight.Bold)
                 }
             }
         }
