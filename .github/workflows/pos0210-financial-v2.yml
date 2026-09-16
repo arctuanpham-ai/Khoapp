@@ -74,19 +74,22 @@ jobs:
           set -euo pipefail
           python3 scripts/pos0210_financial_v2.py --apply
           sed -i '/import androidx.compose.foundation.horizontalScroll/a import androidx.compose.foundation.verticalScroll' POS0210/app/src/main/java/vn/ecohome/pos0210/FinanceDialogs.kt
+          python3 scripts/pos0210_financial_v2_fix1.py
           grep -q 'versionCode = 77' POS0210/app/build.gradle.kts
           grep -q 'versionName = "1.0.0-alpha52-candidate16"' POS0210/app/build.gradle.kts
           grep -q 'version=19' POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt
           grep -q 'MIGRATION_18_19' POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt
           grep -q 'PAYER_REIMBURSEMENT' POS0210/app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt
           grep -q 'CostCodeEntity' POS0210/app/src/main/java/vn/ecohome/pos0210/data/Entities.kt
+          grep -q 'fun AccountingCard' POS0210/app/src/main/java/vn/ecohome/pos0210/FinanceDialogs.kt
 
       - name: Strict scope guard
         shell: bash
         run: |
           set -euo pipefail
-          git diff --name-only | sort
-          unexpected=$(git diff --name-only | grep -Ev '^POS0210/app/(build.gradle.kts|src/main/java/vn/ecohome/pos0210/(FinancialLedgerV2.kt|FinanceDialogs.kt|MonthlyAccounting.kt|MainActivity.kt|PosViewModel.kt|cloud/FirebaseCloudSync.kt|data/(Entities.kt|PosDao.kt|PosDatabase.kt))|src/test/java/vn/ecohome/pos0210/FinancialLedgerV2Test.kt)$' || true)
+          git status --porcelain
+          changed=$(git status --porcelain | sed -E 's/^.. //' | sort -u)
+          unexpected=$(printf '%s\n' "$changed" | grep -Ev '^POS0210/app/(build.gradle.kts|src/main/java/vn/ecohome/pos0210/(FinancialLedgerV2.kt|FinanceDialogs.kt|MonthlyAccounting.kt|MainActivity.kt|PosViewModel.kt|cloud/FirebaseCloudSync.kt|data/(Entities.kt|PosDao.kt|PosDatabase.kt))|src/test/java/vn/ecohome/pos0210/FinancialLedgerV2Test.kt)$' || true)
           if [ -n "$unexpected" ]; then
             echo 'Unexpected files changed; refusing build:' >&2
             echo "$unexpected" >&2
