@@ -88,10 +88,10 @@ jobs:
         run: |
           set -euo pipefail
           git status --porcelain
-          changed=$(git status --porcelain | sed -E 's/^.. //' | sort -u)
+          changed=$(git status --porcelain | sed -E 's/^.. //' | grep -Ev '^POS0210/(\.gradle/|app/build/)' | sort -u)
           unexpected=$(printf '%s\n' "$changed" | grep -Ev '^POS0210/app/(build.gradle.kts|src/main/java/vn/ecohome/pos0210/(FinancialLedgerV2.kt|FinanceDialogs.kt|MonthlyAccounting.kt|MainActivity.kt|PosViewModel.kt|cloud/FirebaseCloudSync.kt|data/(Entities.kt|PosDao.kt|PosDatabase.kt))|src/test/java/vn/ecohome/pos0210/FinancialLedgerV2Test.kt)$' || true)
           if [ -n "$unexpected" ]; then
-            echo 'Unexpected files changed; refusing build:' >&2
+            echo 'Unexpected source files changed; refusing build:' >&2
             echo "$unexpected" >&2
             exit 1
           fi
