@@ -2,39 +2,34 @@ name: POS0210 payer tracking candidate15
 
 on:
   push:
-    branches: [ builder/payer-tracking ]
+    branches:
+      - builder/payer-tracking
     paths:
-      - '.github/workflows/pos0210-payer-update.yml'
+      - .github/workflows/pos0210-payer-update.yml
 
 permissions:
   contents: write
 
-env:
-  ANDROID_HOME: /usr/local/lib/android/sdk
-  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-
 jobs:
-  implement-build:
+  implement_build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: POS0210
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
-      - name: Checkout exact branch
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: builder/payer-tracking
-          fetch-depth: 2
+          fetch-depth: 5
 
-      - name: Verify candidate14 baseline
+      - name: Verify latest candidate baseline
         shell: bash
-        working-directory: .
         run: |
           set -euo pipefail
-          git show HEAD^:POS0210/app/build.gradle.kts | grep -q 'versionCode = 75'
-          git show HEAD^:POS0210/app/build.gradle.kts | grep -q 'versionName = "1.0.0-alpha52-candidate14"'
-          test "$(git diff --name-only HEAD^ HEAD)" = ".github/workflows/pos0210-payer-update.yml"
-          echo "Baseline source is candidate14 / VC75."
+          grep -q 'versionCode = 75' POS0210/app/build.gradle.kts
+          grep -q 'versionName = "1.0.0-alpha52-candidate14"' POS0210/app/build.gradle.kts
+          echo 'Confirmed candidate14 / versionCode 75 baseline.'
 
       - name: Java 17
         uses: actions/setup-java@v4
@@ -42,264 +37,69 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install SDK packages
+      - name: Android SDK
+        shell: bash
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-35' 'build-tools;35.0.0' 'platform-tools'
 
       - name: Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: RED - add payer test and prove candidate14 fails it
+      - name: RED payer test
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p app/src/test/java/vn/ecohome/pos0210
-          cat > app/src/test/java/vn/ecohome/pos0210/PurchasePayerTrackingTest.kt <<'EOF'
-          package vn.ecohome.pos0210
-          import org.junit.Assert.assertEquals
-          import org.junit.Assert.assertNotNull
-          import org.junit.Test
-          import vn.ecohome.pos0210.data.PurchaseEntity
-
-          class PurchasePayerTrackingTest {
-              @Test fun existingPurchaseDefaultsPayerToBlank() {
-                  val purchase = PurchaseEntity("p", null, "employee", 1L, 100L)
-                  val field = runCatching { PurchaseEntity::class.java.getDeclaredField("paidByName") }.getOrNull()
-                  assertNotNull("PurchaseEntity must store the actual payer independently from enteredBy", field)
-                  field!!.isAccessible = true
-                  assertEquals("", field.get(purchase))
-              }
-          }
-          EOF
+          python3 scripts/pos0210_payer_update.py --write-test
+          cd POS0210
           set +e
           gradle --no-daemon :app:testDebugUnitTest --tests vn.ecohome.pos0210.PurchasePayerTrackingTest > /tmp/payer-red.log 2>&1
           code=$?
           set -e
           cat /tmp/payer-red.log
           if [ "$code" -eq 0 ]; then
-            echo "RED gate failed: test unexpectedly passed on candidate14" >&2
+            echo 'Expected RED test to fail on candidate14, but it passed.' >&2
             exit 1
           fi
-          grep -q 'PurchaseEntity must store the actual payer independently from enteredBy' /tmp/payer-red.log || {
-            echo "RED gate did not fail for the intended missing-payer behavior" >&2
-            exit 1
-          }
-          echo "RED confirmed: candidate14 lacks payer field."
+          grep -q 'PurchaseEntity must store the actual payer independently from enteredBy' /tmp/payer-red.log
 
-      - name: Apply minimal payer-tracking patch
+      - name: Apply minimal feature patch
         shell: bash
-        working-directory: .
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-
-          def replace_once(path, old, new):
-              p=Path(path)
-              s=p.read_text()
-              n=s.count(old)
-              if n!=1:
-                  raise SystemExit(f"{path}: expected exactly one match, got {n} for {old[:90]!r}")
-              p.write_text(s.replace(old,new,1))
-
-          # Data model: actual payer is independent from employee/shareholder/profit partner.
-          replace_once(
-              'POS0210/app/src/main/java/vn/ecohome/pos0210/data/Entities.kt',
-              '@Entity(indices=[Index("supplierId"),Index("status"),Index("expenseCategory")]) data class PurchaseEntity(@PrimaryKey val id:String,val supplierId:String?,val enteredBy:String,val purchasedAt:Long,val total:Long,val note:String="",val invoiceImageUri:String?=null,val status:String="ACTIVE",val expenseCategory:String="UNCLASSIFIED")',
-              '@Entity(indices=[Index("supplierId"),Index("status"),Index("expenseCategory")]) data class PurchaseEntity(@PrimaryKey val id:String,val supplierId:String?,val enteredBy:String,val purchasedAt:Long,val total:Long,val note:String="",val invoiceImageUri:String?=null,val status:String="ACTIVE",val expenseCategory:String="UNCLASSIFIED",val paidByName:String="")'
-          )
-          replace_once(
-              'POS0210/app/src/main/java/vn/ecohome/pos0210/data/Entities.kt',
-              'data class PurchaseCostRow(val categoryId:String,val amount:Long,val purchasedAt:Long)',
-              'data class PurchaseCostRow(val purchaseId:String,val categoryId:String,val amount:Long,val purchasedAt:Long)'
-          )
-
-          # DAO: carry purchaseId so detailed category summaries can honor payer filtering.
-          replace_once(
-              'POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDao.kt',
-              '@Query("SELECT pi.categoryId AS categoryId, pi.amount AS amount, p.purchasedAt AS purchasedAt FROM PurchaseItemEntity pi INNER JOIN PurchaseEntity p ON p.id=pi.purchaseId WHERE p.status=\'ACTIVE\'") fun purchaseCosts():Flow<List<PurchaseCostRow>>',
-              '@Query("SELECT pi.purchaseId AS purchaseId, pi.categoryId AS categoryId, pi.amount AS amount, p.purchasedAt AS purchasedAt FROM PurchaseItemEntity pi INNER JOIN PurchaseEntity p ON p.id=pi.purchaseId WHERE p.status=\'ACTIVE\'") fun purchaseCosts():Flow<List<PurchaseCostRow>>'
-          )
-
-          # Additive Room migration only.
-          replace_once(
-              'POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt',
-              'OpeningCashAdjustmentEntity::class,CloudSyncStateEntity::class],version=17,exportSchema=false)',
-              'OpeningCashAdjustmentEntity::class,CloudSyncStateEntity::class],version=18,exportSchema=false)'
-          )
-          replace_once(
-              'POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt',
-              '''  private val MIGRATION_16_17=object:Migration(16,17){
-   override fun migrate(db:SupportSQLiteDatabase){
-    db.execSQL("CREATE TABLE IF NOT EXISTS CloudSyncStateEntity (id TEXT NOT NULL, enabled INTEGER NOT NULL, dirty INTEGER NOT NULL, lastAttemptAt INTEGER, lastSuccessAt INTEGER, lastError TEXT, syncedUid TEXT, PRIMARY KEY(id))")
-    db.execSQL("INSERT OR IGNORE INTO CloudSyncStateEntity(id,enabled,dirty) VALUES('firebase',0,1)")
-   }
-  }
-''',
-              '''  private val MIGRATION_16_17=object:Migration(16,17){
-   override fun migrate(db:SupportSQLiteDatabase){
-    db.execSQL("CREATE TABLE IF NOT EXISTS CloudSyncStateEntity (id TEXT NOT NULL, enabled INTEGER NOT NULL, dirty INTEGER NOT NULL, lastAttemptAt INTEGER, lastSuccessAt INTEGER, lastError TEXT, syncedUid TEXT, PRIMARY KEY(id))")
-    db.execSQL("INSERT OR IGNORE INTO CloudSyncStateEntity(id,enabled,dirty) VALUES('firebase',0,1)")
-   }
-  }
-  private val MIGRATION_17_18=object:Migration(17,18){
-   override fun migrate(db:SupportSQLiteDatabase){
-    db.execSQL("ALTER TABLE PurchaseEntity ADD COLUMN paidByName TEXT NOT NULL DEFAULT ''")
-   }
-  }
-'''
-          )
-          replace_once(
-              'POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt',
-              '.addMigrations(MIGRATION_3_4,MIGRATION_4_5,MIGRATION_5_6,MIGRATION_6_7,MIGRATION_7_8,MIGRATION_8_9,MIGRATION_9_10,MIGRATION_10_11,MIGRATION_11_12,MIGRATION_12_13,MIGRATION_13_14,MIGRATION_14_15,MIGRATION_15_16,MIGRATION_16_17)',
-              '.addMigrations(MIGRATION_3_4,MIGRATION_4_5,MIGRATION_5_6,MIGRATION_6_7,MIGRATION_7_8,MIGRATION_8_9,MIGRATION_9_10,MIGRATION_10_11,MIGRATION_11_12,MIGRATION_12_13,MIGRATION_13_14,MIGRATION_14_15,MIGRATION_15_16,MIGRATION_16_17,MIGRATION_17_18)'
-          )
-
-          # ViewModel: persist payer and audit it; no accounting behavior changes.
-          replace_once(
-              'POS0210/app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt',
-              'fun addPurchaseDetailed(name:String,qty:Double,unit:String,unitPrice:Long,note:String,at:Long=System.currentTimeMillis(),supplierName:String="",imageUri:String?=null,categoryId:String="pc_production",expenseCategory:String="UNCLASSIFIED",asset:AssetEntity?=null){',
-              'fun addPurchaseDetailed(name:String,qty:Double,unit:String,unitPrice:Long,note:String,at:Long=System.currentTimeMillis(),supplierName:String="",imageUri:String?=null,categoryId:String="pc_production",expenseCategory:String="UNCLASSIFIED",asset:AssetEntity?=null,paidByName:String=""){'
-          )
-          replace_once(
-              'POS0210/app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt',
-              'PurchaseEntity(id,supplierId,e.id,at,amount,note,managed,expenseCategory=expenseCategory),',
-              'PurchaseEntity(id,supplierId,e.id,at,amount,note,managed,expenseCategory=expenseCategory,paidByName=paidByName.trim()),'
-          )
-          replace_once(
-              'POS0210/app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt',
-              'audit("PURCHASE",id,"CREATE","${name.trim()}:$qty:$unit:$unitPrice:$amount");autoBackup();autoBackupMedia()',
-              'audit("PURCHASE",id,"CREATE","${name.trim()}:$qty:$unit:$unitPrice:$amount:payer=${paidByName.trim()}");autoBackup();autoBackupMedia()'
-          )
-
-          # Firestore purchase payload only; private DB backup already carries the migrated column.
-          replace_once(
-              'POS0210/app/src/main/java/vn/ecohome/pos0210/cloud/FirebaseCloudSync.kt',
-              '"status" to p.status,"expenseCategory" to p.expenseCategory)',
-              '"status" to p.status,"expenseCategory" to p.expenseCategory,"paidByName" to p.paidByName)'
-          )
-
-          # Purchase entry UI and detail display.
-          main='POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt'
-          replace_once(main,
-              '    var supplier by remember { mutableStateOf("") }\n    var note by remember { mutableStateOf("") }',
-              '    var supplier by remember { mutableStateOf("") }\n    var paidByName by remember { mutableStateOf("") }\n    var note by remember { mutableStateOf("") }')
-          replace_once(main,
-              '''                OutlinedTextField(
-                    itemName,
-                    { itemName = it },''',
-              '''                if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) OutlinedTextField(
-                    paidByName,
-                    { paidByName = it.take(60) },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Người chi / ứng tiền (không bắt buộc)") },
-                    supportingText = { Text("Người thực tế bỏ tiền, độc lập với người nhập và cổ đông") }
-                )
-                OutlinedTextField(
-                    itemName,
-                    { itemName = it },''')
-          replace_once(main,
-              '''                            expenseCategory = FinancialTransactionTypes.legacyExpenseCode(transactionType,expenseCategory),
-                            asset = asset
-                        )''',
-              '''                            expenseCategory = FinancialTransactionTypes.legacyExpenseCode(transactionType,expenseCategory),
-                            asset = asset,
-                            paidByName = paidByName
-                        )''')
-          replace_once(main,
-              '                        note = ""\n                        invoiceImage = null',
-              '                        note = ""\n                        paidByName = ""\n                        invoiceImage = null')
-          replace_once(main,
-              '                        Text("${money(p.total)} · ${p.note.ifBlank { "Không ghi chú" }}")\n                        Text(if (!p.invoiceImageUri.isNullOrBlank()) "📷 Có ảnh hóa đơn · Chạm để xem" else "Chạm để xem chi tiết", fontSize = 12.sp)',
-              '                        Text("${money(p.total)} · ${p.note.ifBlank { "Không ghi chú" }}")\n                        if(p.paidByName.isNotBlank()) Text("Người chi: ${p.paidByName}", fontSize = 12.sp, fontWeight = FontWeight.Bold)\n                        Text(if (!p.invoiceImageUri.isNullOrBlank()) "📷 Có ảnh hóa đơn · Chạm để xem" else "Chạm để xem chi tiết", fontSize = 12.sp)')
-          replace_once(main,
-              '                    Text("Người nhập: $enteredBy")\n                    Text("Loại giao dịch:',
-              '                    Text("Người nhập: $enteredBy")\n                    Text("Người chi / ứng tiền: ${p.paidByName.ifBlank { "Chưa xác định" }}", fontWeight = FontWeight.Bold)\n                    Text("Loại giao dịch:')
-
-          # Report: period + payer filter. Existing totals/category summary now use the payer-filtered purchase set.
-          replace_once(main,
-              '    var paymentFilter by remember { mutableStateOf("ALL") }\n    var historyDateText by remember { mutableStateOf("") }',
-              '    var paymentFilter by remember { mutableStateOf("ALL") }\n    var payerFilter by remember { mutableStateOf("ALL") }\n    var historyDateText by remember { mutableStateOf("") }')
-          replace_once(main,
-              '    val filteredPurchases = if (from == null) purchases else purchases.filter { it.purchasedAt >= from }\n    val billIds = filteredBills.map { it.id }.toSet()',
-              '''    val periodPurchases = if (from == null) purchases else purchases.filter { it.purchasedAt >= from }
-    val payerNames = periodPurchases.map { it.paidByName.trim() }.filter { it.isNotBlank() }.distinct().sorted()
-    val hasUnknownPayer = periodPurchases.any { it.paidByName.isBlank() }
-    val filteredPurchases = periodPurchases.filter { p ->
-        when (payerFilter) {
-            "ALL" -> true
-            "UNKNOWN" -> p.paidByName.isBlank()
-            else -> p.paidByName.trim() == payerFilter
-        }
-    }
-    val filteredPurchaseIds = filteredPurchases.map { it.id }.toSet()
-    val billIds = filteredBills.map { it.id }.toSet()''')
-          replace_once(main,
-              '    val categorizedCosts = purchaseCosts\n        .filter { from == null || it.purchasedAt >= from }',
-              '    val categorizedCosts = purchaseCosts\n        .filter { it.purchaseId in filteredPurchaseIds }')
-          replace_once(main,
-              '''        when (section) {
-            "MONTHLY" -> MonthlyProfitReport(vm)''',
-              '''        if(section == "PURCHASES") {
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp).horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
-            ) {
-                FilterChip(payerFilter == "ALL", { payerFilter = "ALL" }, { Text("Tất cả người chi") })
-                payerNames.forEach { name -> FilterChip(payerFilter == name, { payerFilter = name }, { Text(name) }) }
-                if(hasUnknownPayer) FilterChip(payerFilter == "UNKNOWN", { payerFilter = "UNKNOWN" }, { Text("Chưa xác định") })
-            }
-        }
-        when (section) {
-            "MONTHLY" -> MonthlyProfitReport(vm)''')
-          replace_once(main,
-              '                        item { Text("Tổng chi phí đầu vào: ${money(purchaseTotal)}", fontSize = 22.sp, fontWeight = FontWeight.Bold) }',
-              '''                        item { Text("Tổng chi phí đầu vào: ${money(purchaseTotal)}", fontSize = 22.sp, fontWeight = FontWeight.Bold) }
-                        item {
-                            val summary = filteredPurchases.groupBy { it.paidByName.trim().ifBlank { "Chưa xác định" } }
-                                .mapValues { (_, rows) -> rows.sumOf { it.total } }
-                                .toList().sortedByDescending { it.second }
-                            if(summary.isNotEmpty()) {
-                                Text("Theo người chi / ứng tiền", Modifier.padding(top = 8.dp, bottom = 3.dp), fontWeight = FontWeight.Bold)
-                                summary.forEach { (name, amount) -> Text("$name · ${money(amount)}", fontSize = 12.sp) }
-                            }
-                        }''')
-          replace_once(main,
-              '                                    Text(money(p.total))\n                                    Text(if (!p.invoiceImageUri.isNullOrBlank())',
-              '                                    Text(money(p.total))\n                                    Text("Người chi: ${p.paidByName.ifBlank { "Chưa xác định" }}", fontSize = 12.sp, fontWeight = FontWeight.Bold)\n                                    Text(if (!p.invoiceImageUri.isNullOrBlank())')
-
-          # Candidate bump only after feature patch is complete.
-          replace_once('POS0210/app/build.gradle.kts','        versionCode = 75\n        versionName = "1.0.0-alpha52-candidate14"','        versionCode = 76\n        versionName = "1.0.0-alpha52-candidate15"')
-          replace_once(main,'POS0210 v1.0.0-alpha52-candidate14 · versionCode 75','POS0210 v1.0.0-alpha52-candidate15 · versionCode 76')
-          PY
-
-      - name: Static migration and scope checks
-        shell: bash
-        working-directory: .
-        run: |
-          set -euo pipefail
+          python3 scripts/pos0210_payer_update.py --apply
           grep -q 'version=18' POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt
           grep -q "ALTER TABLE PurchaseEntity ADD COLUMN paidByName TEXT NOT NULL DEFAULT ''" POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt
           grep -q 'versionCode = 76' POS0210/app/build.gradle.kts
           grep -q 'versionName = "1.0.0-alpha52-candidate15"' POS0210/app/build.gradle.kts
-          git diff --name-only | sort
-          unexpected=$(git diff --name-only | grep -Ev '^POS0210/app/(build.gradle.kts|src/main/java/vn/ecohome/pos0210/(MainActivity.kt|PosViewModel.kt|cloud/FirebaseCloudSync.kt|data/(Entities.kt|PosDao.kt|PosDatabase.kt))|src/test/java/vn/ecohome/pos0210/PurchasePayerTrackingTest.kt)$|^\.github/workflows/pos0210-payer-update.yml$' || true)
-          if [ -n "$unexpected" ]; then echo "Unexpected files changed:"; echo "$unexpected"; exit 1; fi
 
-      - name: GREEN - targeted test and standard build gate
+      - name: Scope guard
         shell: bash
+        run: |
+          set -euo pipefail
+          git diff --name-only | sort
+          unexpected=$(git diff --name-only | grep -Ev '^POS0210/app/(build.gradle.kts|src/main/java/vn/ecohome/pos0210/(MainActivity.kt|PosViewModel.kt|cloud/FirebaseCloudSync.kt|data/(Entities.kt|PosDao.kt|PosDatabase.kt))|src/test/java/vn/ecohome/pos0210/PurchasePayerTrackingTest.kt)$' || true)
+          if [ -n "$unexpected" ]; then
+            echo 'Unexpected source files changed:' >&2
+            echo "$unexpected" >&2
+            exit 1
+          fi
+
+      - name: GREEN targeted test and build
+        shell: bash
+        working-directory: POS0210
         run: |
           set -euo pipefail
           gradle --no-daemon :app:testDebugUnitTest --tests vn.ecohome.pos0210.PurchasePayerTrackingTest :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
 
-      - name: Verify APK identity and signature
+      - name: Verify APK
         shell: bash
+        working-directory: POS0210
         run: |
           set -euo pipefail
-          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APK=app/build/outputs/apk/debug/app-debug.apk
           AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt"
           APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
           test -s "$APK"
@@ -313,21 +113,20 @@ jobs:
           cp "$APK" dist/POS0210_v1.0.0-alpha52-candidate15.apk
           sha256sum dist/POS0210_v1.0.0-alpha52-candidate15.apk | tee dist/POS0210_v1.0.0-alpha52-candidate15.apk.sha256
 
-      - name: Commit only validated source changes
+      - name: Commit validated source only
         shell: bash
-        working-directory: .
         run: |
           set -euo pipefail
-          rm .github/workflows/pos0210-payer-update.yml
-          git config user.name "POS0210 Builder"
-          git config user.email "actions@github.com"
-          git add POS0210 .github/workflows/pos0210-payer-update.yml
+          rm .github/workflows/pos0210-payer-update.yml scripts/pos0210_payer_update.py
+          git config user.name 'POS0210 Builder'
+          git config user.email 'actions@github.com'
+          git add -A
           git diff --cached --check
-          git commit -m "feat(pos0210): track actual payer on expenses"
+          git commit -m 'feat(pos0210): track actual payer on expenses'
           git push origin HEAD:builder/payer-tracking
-          git rev-parse HEAD | tee /tmp/candidate_commit.txt
+          git rev-parse HEAD
 
-      - name: Upload candidate15 APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: POS0210-v1.0.0-alpha52-candidate15-vc76
