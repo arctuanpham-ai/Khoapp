@@ -1160,7 +1160,7 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Nhật ký hệ thống", "Audit thao tác · người thực hiện · thời điểm · dữ liệu thay đổi") { vm.screen.value = "SETTINGS" }
             }
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
-            Text("POS0210 v1.0.0-alpha52-candidate15 · versionCode 76", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("POS0210 v1.0.0-alpha52-candidate16 · versionCode 77", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Text("Tương thích Android 8.0 (API 26) trở lên · Thiết bị hiện tại: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})", fontSize = 11.sp)
             if (Build.VERSION.SDK_INT < 26) Text("Thiết bị không được hỗ trợ. Cần Android 8.0 trở lên.", color = Color.Red, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(30.dp))
@@ -2261,6 +2261,7 @@ fun Purchases(vm: PosViewModel) {
     }
     val purchases by vm.purchases.collectAsState()
     val purchaseCategories by vm.purchaseCategories.collectAsState()
+    val costCodes by vm.costCodes.collectAsState()
     val assetCategories by vm.assetCategories.collectAsState()
     val profitPartners by vm.profitPartners.collectAsState()
     val context = LocalContext.current
@@ -2270,6 +2271,8 @@ fun Purchases(vm: PosViewModel) {
     var unitPriceText by remember { mutableStateOf("") }
     var supplier by remember { mutableStateOf("") }
     var paidByName by remember { mutableStateOf("") }
+    var selectedCostCodeId by remember { mutableStateOf<String?>(null) }
+    var showCostCodeManager by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf("") }
     var invoiceImage by remember { mutableStateOf<String?>(null) }
     var selectedPurchase by remember { mutableStateOf<PurchaseEntity?>(null) }
@@ -2312,7 +2315,7 @@ fun Purchases(vm: PosViewModel) {
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text("Giao dịch tài chính", Modifier.weight(1f), fontWeight = FontWeight.Black, fontSize = 18.sp)
-            OutlinedButton(onClick = { showCategoryManager = true }) { Text("DANH MỤC CHI TIẾT") }
+            Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)){OutlinedButton(onClick = { showCategoryManager = true }) { Text("DANH MỤC") };OutlinedButton(onClick={showCostCodeManager=true}){Text("MÃ CHI PHÍ")}}
         }
 
         LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
@@ -2345,7 +2348,15 @@ fun Purchases(vm: PosViewModel) {
                         }
                     }
                 }
-                if(transactionType==FinancialTransactionTypes.ASSET_PURCHASE){
+                if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)){
+                    Text("Mã chi phí theo dõi",Modifier.padding(top=8.dp),fontWeight=FontWeight.Bold)
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)){
+                        FilterChip(selectedCostCodeId==null,{selectedCostCodeId=null},{Text("Không mã")})
+                        costCodes.forEach{cc->FilterChip(selectedCostCodeId==cc.id,{selectedCostCodeId=cc.id;unit=cc.defaultUnit;if(itemName.isBlank())itemName=cc.name;if(supplier.isBlank())supplier=cc.defaultSupplier;expenseCategory=cc.parentExpenseCategory},{Text(cc.code)})}
+                    }
+                    selectedCostCodeId?.let{id->costCodes.firstOrNull{it.id==id}?.let{cc->Text("${cc.name} · ${ExpenseCategories.label(cc.parentExpenseCategory)} · ĐVT ${cc.defaultUnit}",fontSize=11.sp)}}
+                }
+                if(transactionType in setOf(FinancialTransactionTypes.ASSET_PURCHASE,FinancialTransactionTypes.ADDITIONAL_INVESTMENT)){
                     Text("2. Nhóm tài sản",Modifier.padding(top=8.dp),fontWeight=FontWeight.Bold)
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)){assetCategories.forEach{c->FilterChip(selectedAssetCategory?.id==c.id,{selectedAssetCategory=c;if(usefulLifeText.isBlank())usefulLifeText=c.defaultUsefulLifeMonths.toString()},{Text(c.name)})}}
                     selectedAssetCategory?.let{Text("Thời gian khấu hao tham khảo: ${it.minUsefulLifeMonths}–${it.maxUsefulLifeMonths} tháng",fontSize=12.sp,fontWeight=FontWeight.Bold)}
@@ -2429,7 +2440,7 @@ fun Purchases(vm: PosViewModel) {
                         val parser = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
                         val parsedAt = runCatching { parser.parse(dateText)?.time }.getOrNull()
                             ?: System.currentTimeMillis()
-                        val asset=if(transactionType==FinancialTransactionTypes.ASSET_PURCHASE)selectedAssetCategory?.let{c->AssetEntity(UUID.randomUUID().toString(),itemName.trim(),c.id,parsedAt,unitPrice?:0,qty?.toInt()?.coerceAtLeast(1)?:1,total,supplier=supplier.trim(),usefulLifeMonths=usefulLifeText.toIntOrNull()?:c.defaultUsefulLifeMonths,residualValue=(residualText.toLongOrNull()?:0).coerceAtMost(total),estimatedLiquidationValue=liquidationText.toLongOrNull()?:0,note=note)} else null
+                        val asset=if(transactionType in setOf(FinancialTransactionTypes.ASSET_PURCHASE,FinancialTransactionTypes.ADDITIONAL_INVESTMENT))selectedAssetCategory?.let{c->AssetEntity(UUID.randomUUID().toString(),itemName.trim(),c.id,parsedAt,unitPrice?:0,qty?.toInt()?.coerceAtLeast(1)?:1,total,supplier=supplier.trim(),usefulLifeMonths=usefulLifeText.toIntOrNull()?:c.defaultUsefulLifeMonths,residualValue=(residualText.toLongOrNull()?:0).coerceAtMost(total),estimatedLiquidationValue=liquidationText.toLongOrNull()?:0,note=note,investmentClass=if(transactionType==FinancialTransactionTypes.ADDITIONAL_INVESTMENT)"ADDITIONAL" else "INITIAL")} else null
                         if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) vm.addPurchaseDetailed(
                             name = itemName,
                             qty = qty ?: 0.0,
@@ -2442,7 +2453,8 @@ fun Purchases(vm: PosViewModel) {
                             categoryId = selectedCategoryId,
                             expenseCategory = FinancialTransactionTypes.legacyExpenseCode(transactionType,expenseCategory),
                             asset = asset,
-                            paidByName = paidByName
+                            paidByName = paidByName,
+                            costCodeId = selectedCostCodeId
                         )
                         FinancialTransactionTypes.movementCode(transactionType)?.let{vm.addFinancialMovement(it,unitPrice?:0,movementPartnerId,movementMethod,listOf(itemName.trim(),note.trim()).filter(String::isNotBlank).joinToString(" · "),parsedAt)}
                         message = "Đã ghi giao dịch · ${FinancialTransactionTypes.label(transactionType)} · ${money(if(FinancialTransactionTypes.usesPurchaseDocument(transactionType))total else unitPrice?:0)}"
@@ -2451,12 +2463,13 @@ fun Purchases(vm: PosViewModel) {
                         unitPriceText = ""
                         note = ""
                         paidByName = ""
+                        selectedCostCodeId = null
                         invoiceImage = null
                     },
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                     enabled = itemName.isNotBlank() && (unitPrice ?: 0L) > 0 &&
                         (!FinancialTransactionTypes.usesPurchaseDocument(transactionType)||(selectedCategoryId.isNotBlank()&&(qty?:0.0)>0)) &&
-                        (transactionType!=FinancialTransactionTypes.ASSET_PURCHASE||(selectedAssetCategory!=null&&(usefulLifeText.toIntOrNull()?:0)>0&&(residualText.toLongOrNull()?:0)<=total)) &&
+                        (transactionType !in setOf(FinancialTransactionTypes.ASSET_PURCHASE,FinancialTransactionTypes.ADDITIONAL_INVESTMENT)||(selectedAssetCategory!=null&&(usefulLifeText.toIntOrNull()?:0)>0&&(residualText.toLongOrNull()?:0)<=total)) &&
                         (transactionType !in setOf(FinancialTransactionTypes.PROFIT_WITHDRAWAL,FinancialTransactionTypes.OWNER_WITHDRAWAL)||movementPartnerId!=null)
                 ) { Text("LƯU GIAO DỊCH") }
 
@@ -2480,6 +2493,8 @@ fun Purchases(vm: PosViewModel) {
             }
         }
     }
+
+    if(showCostCodeManager){CostCodeManagerDialog(costCodes,{showCostCodeManager=false}){code,name,parent,unit0,supplier0->vm.addCostCode(code,name,parent,unit0,supplier0)}}
 
     if (showCategoryManager) {
         PurchaseCategoryManagerDialog(
@@ -2554,96 +2569,19 @@ fun PurchaseCategoryManagerDialog(
 @Composable
 fun PurchaseDetailDialog(vm: PosViewModel, p: PurchaseEntity, onDismiss: () -> Unit) {
     val items by vm.purchaseItems(p.id).collectAsState(initial = emptyList())
-    val suppliers by vm.suppliers.collectAsState()
-    val employees by vm.employees.collectAsState()
-    val current by vm.currentEmployee.collectAsState()
-    var showDelete by remember { mutableStateOf(false) }
-    var deleteReason by remember { mutableStateOf("") }
-    var expenseCategory by remember(p.id,p.expenseCategory) { mutableStateOf(p.expenseCategory) }
-
-    val supplierName = suppliers.firstOrNull { it.id == p.supplierId }?.name ?: "Không ghi"
+    val suppliers by vm.suppliers.collectAsState();val employees by vm.employees.collectAsState();val current by vm.currentEmployee.collectAsState()
+    val purchaseCategories by vm.purchaseCategories.collectAsState();val costCodes by vm.costCodes.collectAsState()
+    var showDelete by remember { mutableStateOf(false) };var showEdit by remember{mutableStateOf(false)};var deleteReason by remember { mutableStateOf("") }
+    val supplierName = suppliers.firstOrNull { it.id == p.supplierId }?.name ?: ""
     val enteredBy = employees.firstOrNull { it.id == p.enteredBy }?.name ?: p.enteredBy
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        confirmButton = { Button(onClick = onDismiss) { Text("ĐÓNG") } },
-        dismissButton = {
-            if (current?.role == "ADMIN") {
-                TextButton(onClick = { showDelete = true }) { Text("XOÁ PHIẾU · ADMIN") }
-            }
-        },
-        title = { Text("Phiếu nhập · ${time(p.purchasedAt)}") },
-        text = {
-            LazyColumn {
-                item {
-                    Text("Nhà cung cấp: $supplierName")
-                    Text("Người nhập: $enteredBy")
-                    Text("Người chi / ứng tiền: ${p.paidByName.ifBlank { "Chưa xác định" }}", fontWeight = FontWeight.Bold)
-                    Text("Loại giao dịch: ${FinancialTransactionTypes.label(FinancialTransactionTypes.fromLegacy(p.expenseCategory))}", fontWeight = FontWeight.Bold)
-                    Text("Nhóm báo cáo: ${ExpenseCategories.label(p.expenseCategory)}", fontSize=12.sp)
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                        ExpenseCategories.all.forEach { value -> FilterChip(expenseCategory==value,{expenseCategory=value},{Text(ExpenseCategories.label(value))}) }
-                    }
-                    Button(onClick={vm.updatePurchaseExpenseCategory(p,expenseCategory)},enabled=expenseCategory!=p.expenseCategory,modifier=Modifier.fillMaxWidth()) { Text("LƯU LOẠI GIAO DỊCH") }
-                    if (p.note.isNotBlank()) Text("Ghi chú: ${p.note}")
-                    Spacer(Modifier.height(8.dp))
-                }
-                items(items) { line ->
-                    Card(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-                        Column(Modifier.padding(10.dp)) {
-                            Text(line.name, fontWeight = FontWeight.Bold)
-                            Text("${line.qty} ${line.unit} × ${money(line.unitPrice)}")
-                            Text("= ${money(line.amount)}")
-                        }
-                    }
-                }
-                item {
-                    Text("TỔNG: ${money(p.total)}", Modifier.padding(vertical = 10.dp), fontWeight = FontWeight.Black)
-                    if (!p.invoiceImageUri.isNullOrBlank()) {
-                        Text("Ảnh hóa đơn", fontWeight = FontWeight.Bold)
-                        AsyncImage(
-                            model = p.invoiceImageUri,
-                            contentDescription = "Ảnh hóa đơn",
-                            modifier = Modifier.fillMaxWidth().height(320.dp).padding(top = 8.dp)
-                        )
-                    }
-                }
-            }
-        }
-    )
-
-    if (showDelete) {
-        AlertDialog(
-            onDismissRequest = { showDelete = false },
-            title = { Text("XOÁ PHIẾU NHẬP") },
-            text = {
-                Column {
-                    Text("Phiếu ${money(p.total)} sẽ bị loại khỏi chi phí đầu vào và báo cáo, nhưng vẫn giữ dấu vết audit.")
-                    OutlinedTextField(
-                        value = deleteReason,
-                        onValueChange = { deleteReason = it },
-                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-                        label = { Text("Lý do xoá bắt buộc") }
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        vm.deletePurchase(p, deleteReason)
-                        showDelete = false
-                        onDismiss()
-                    },
-                    enabled = deleteReason.isNotBlank()
-                ) { Text("XÁC NHẬN XOÁ") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDelete = false }) { Text("HỦY") }
-            }
-        )
-    }
+    AlertDialog(onDismissRequest=onDismiss,confirmButton={Button(onClick=onDismiss){Text("ĐÓNG")}},dismissButton={if(current?.role=="ADMIN")TextButton(onClick={showDelete=true}){Text("XOÁ PHIẾU · ADMIN")}},title={Text("Phiếu nhập · ${time(p.purchasedAt)}")},text={LazyColumn{
+        item{Text("Nhà cung cấp: ${supplierName.ifBlank{"Không ghi"}}");Text("Người nhập: $enteredBy");Text("Người chi / ứng tiền: ${p.paidByName.ifBlank{"Chưa xác định"}}",fontWeight=FontWeight.Bold);Text("Loại: ${ExpenseCategories.label(p.expenseCategory)}");Text("Mã chi phí: ${costCodes.firstOrNull{it.id==p.costCodeId}?.let{"${it.code} · ${it.name}"}?:"Không mã"}",fontSize=12.sp);if(p.updatedAt!=null)Text("Sửa gần nhất: ${time(p.updatedAt)}",fontSize=11.sp);if(current?.role=="ADMIN")Button({showEdit=true},Modifier.fillMaxWidth().padding(top=8.dp)){Text("CHỈNH SỬA PHIẾU")};if(p.note.isNotBlank())Text("Ghi chú: ${p.note}");Spacer(Modifier.height(8.dp))}
+        items(items){line->Card(Modifier.fillMaxWidth().padding(vertical=3.dp)){Column(Modifier.padding(10.dp)){Text(line.name,fontWeight=FontWeight.Bold);Text("${line.qty} ${line.unit} × ${money(line.unitPrice)}");Text("= ${money(line.amount)}")}}}
+        item{Text("TỔNG: ${money(p.total)}",Modifier.padding(vertical=10.dp),fontWeight=FontWeight.Black);if(!p.invoiceImageUri.isNullOrBlank()){Text("Ảnh hóa đơn",fontWeight=FontWeight.Bold);AsyncImage(model=p.invoiceImageUri,contentDescription="Ảnh hóa đơn",modifier=Modifier.fillMaxWidth().height(320.dp).padding(top=8.dp))}}
+    }})
+    if(showEdit&&items.isNotEmpty())PurchaseEditDialog(vm,p,items.first(),purchaseCategories,costCodes,supplierName,{showEdit=false}){showEdit=false;onDismiss()}
+    if(showDelete)AlertDialog(onDismissRequest={showDelete=false},title={Text("XOÁ PHIẾU NHẬP")},text={Column{Text("Phiếu ${money(p.total)} sẽ bị loại khỏi báo cáo nhưng vẫn giữ audit.");OutlinedTextField(deleteReason,{deleteReason=it},Modifier.fillMaxWidth().padding(top=10.dp),label={Text("Lý do xoá bắt buộc")})}},confirmButton={Button(onClick={vm.deletePurchase(p,deleteReason);showDelete=false;onDismiss()},enabled=deleteReason.isNotBlank()){Text("XÁC NHẬN XOÁ")}},dismissButton={TextButton(onClick={showDelete=false}){Text("HỦY")}})
 }
-
 @Composable
 fun VietQr(vm: PosViewModel) {
     val current by vm.currentEmployee.collectAsState()
@@ -3305,99 +3243,42 @@ fun Report(vm: PosViewModel) {
 
 @Composable
 fun MonthlyProfitReport(vm:PosViewModel){
-    val bills by vm.bills.collectAsState();val payments by vm.payments.collectAsState();val adjustments by vm.billAdjustments.collectAsState()
-    val purchases by vm.purchases.collectAsState();val configs by vm.monthlyAccounting.collectAsState();val partners by vm.profitPartners.collectAsState()
-    val assets by vm.assets.collectAsState();val assetValuations by vm.assetValuations.collectAsState();val movements by vm.financialMovements.collectAsState()
-    var monthOffset by remember{mutableIntStateOf(0)};var expenseFilter by remember{mutableStateOf("ALL")}
+    val bills by vm.bills.collectAsState();val payments by vm.payments.collectAsState();val purchases by vm.purchases.collectAsState();val partners by vm.profitPartners.collectAsState()
+    val assets by vm.assets.collectAsState();val movements by vm.financialMovements.collectAsState();val costCodes by vm.costCodes.collectAsState();val allItems by vm.purchaseItemsAll.collectAsState()
+    var monthOffset by remember{mutableIntStateOf(0)};var reimbursementPayer by remember{mutableStateOf<String?>(null)}
     val month=remember(monthOffset){Calendar.getInstance().apply{set(Calendar.DAY_OF_MONTH,1);set(Calendar.HOUR_OF_DAY,0);set(Calendar.MINUTE,0);set(Calendar.SECOND,0);set(Calendar.MILLISECOND,0);add(Calendar.MONTH,monthOffset)}}
     val from=month.timeInMillis;val to=Calendar.getInstance().apply{timeInMillis=from;add(Calendar.MONTH,1)}.timeInMillis
-    val monthKey="%04d-%02d".format(month.get(Calendar.YEAR),month.get(Calendar.MONTH)+1)
-    val previousMonth=Calendar.getInstance().apply{timeInMillis=from;add(Calendar.MONTH,-1)}
-    val previousMonthKey="%04d-%02d".format(previousMonth.get(Calendar.YEAR),previousMonth.get(Calendar.MONTH)+1)
-    val monthBills=bills.filter{(it.closedAt?:Long.MIN_VALUE) in from until to};val billIds=monthBills.map{it.id}.toSet()
-    val monthAdjustments=adjustments.filter{it.billId in billIds};val monthPurchases=purchases.filter{it.purchasedAt in from until to}
-    val config=configs.firstOrNull{it.monthKey==monthKey}
-    var cogsText by remember(monthKey,config){mutableStateOf(config?.cogs?.toString().orEmpty())};var source by remember(monthKey,config){mutableStateOf(config?.cogsSource?:"UNAVAILABLE")}
-    val previousClosing=configs.firstOrNull{it.monthKey==previousMonthKey}?.closingCashSnapshot
-    val rolledOpening=resolveOpeningCash(config?.openingCash,config?.openingCashOverridden==true,previousClosing)
-    var reserveText by remember(monthKey,config){mutableStateOf(((config?.reserveBasisPoints?:1000)/100).toString())};var openingCashText by remember(monthKey,config,rolledOpening){mutableStateOf(rolledOpening.toString())}
-    fun sum(category:String)=monthPurchases.filter{it.expenseCategory==category}.sumOf{it.total}
-    val grossRevenue=monthBills.sumOf{it.subtotal};val discounts=monthAdjustments.filter{it.kind=="DISCOUNT"}.sumOf{it.amount};val surcharges=monthAdjustments.filter{it.kind=="SURCHARGE"}.sumOf{it.amount}
-    val fixed=sum(ExpenseCategories.FIXED_EXPENSE);val variableExpense=sum(ExpenseCategories.VARIABLE_EXPENSE);val other=sum(ExpenseCategories.OTHER_EXPENSE)
-    val inventory=sum(ExpenseCategories.INVENTORY_PURCHASE);val capital=sum(ExpenseCategories.CAPITAL_ASSET);val setup=sum(ExpenseCategories.SETUP_COST)+sum(ExpenseCategories.INITIAL_INVESTMENT_SUNK)
-    val monthMovements=movements.filter{it.occurredAt in from until to}
-    val contribution=sum(ExpenseCategories.OWNER_CONTRIBUTION)+monthMovements.filter{it.type=="CAPITAL_CONTRIBUTION"}.sumOf{it.amount}
-    val workingCapital=monthMovements.filter{it.type=="WORKING_CAPITAL"}.sumOf{it.amount};val otherCashIn=monthMovements.filter{it.type in setOf("OTHER_CASH_IN","OTHER_CASH_ADJUSTMENT","ASSET_DISPOSAL_IN")}.sumOf{it.amount}
-    val withdrawal=sum(ExpenseCategories.OWNER_WITHDRAWAL)+monthMovements.filter{it.type=="OWNER_WITHDRAWAL"}.sumOf{it.amount};val profitWithdrawal=sum(ExpenseCategories.PROFIT_WITHDRAWAL)+monthMovements.filter{it.type=="PROFIT_WITHDRAWAL"}.sumOf{it.amount};val unclassified=sum(ExpenseCategories.UNCLASSIFIED)
+    val monthBills=bills.filter{(it.closedAt?:Long.MIN_VALUE) in from until to};val billIds=monthBills.map{it.id}.toSet();val revenue=payments.filter{it.billId in billIds}.sumOf{it.amount}
+    val monthPurchases=purchases.filter{it.purchasedAt in from until to}
+    val initialCodes=setOf(ExpenseCategories.SETUP_COST,ExpenseCategories.INITIAL_INVESTMENT_SUNK,ExpenseCategories.CAPITAL_ASSET)
+    val additional=monthPurchases.filter{it.expenseCategory==ExpenseCategories.ADDITIONAL_INVESTMENT}.sumOf{it.total}
+    val operating=monthPurchases.filter{it.expenseCategory !in initialCodes&&it.expenseCategory!=ExpenseCategories.ADDITIONAL_INVESTMENT}.sumOf{it.total}
     val activeAssets=assets.filter{it.status=="ACTIVE"||it.status=="DAMAGED"||it.status=="TRANSFERRED"}
     fun assetValue(a:AssetEntity):AssetValue{val p=Calendar.getInstance().apply{timeInMillis=a.purchaseDate};val used=((month.get(Calendar.YEAR)-p.get(Calendar.YEAR))*12+month.get(Calendar.MONTH)-p.get(Calendar.MONTH)+1).coerceAtLeast(0);return calculateAssetValue(a.totalCost,a.residualValue,a.usefulLifeMonths,used)}
-    val depreciation=activeAssets.filter{it.purchaseDate<to}.sumOf{assetValue(it).monthlyDepreciation};val accumulatedDepreciation=activeAssets.sumOf{assetValue(it).accumulatedDepreciation};val assetBookValue=activeAssets.sumOf{assetValue(it).bookValue};val assetCost=assets.sumOf{it.totalCost};val liquidationValue=activeAssets.sumOf{it.estimatedLiquidationValue}
-    val received=payments.filter{it.billId in billIds}.sumOf{it.amount};val reserveBp=(reserveText.toIntOrNull()?:10).coerceIn(0,100)*100
-    val result=calculateMonthlyAccounting(MonthlyAccountingInput(grossRevenue,discounts,0,surcharges,cogsText.toLongOrNull(),fixed,variableExpense,other,setup,inventory,capital,contribution,withdrawal,unclassified,openingCashText.toLongOrNull()?:0,received,reserveBp,partners.map{ProfitShareInput(it.id,it.name,it.shareBasisPoints)},depreciation,otherCashIn,workingCapital,profitWithdrawal,capital+setup))
-    val sunkInvestment=purchases.filter{it.expenseCategory==ExpenseCategories.SETUP_COST||it.expenseCategory==ExpenseCategories.INITIAL_INVESTMENT_SUNK}.sumOf{it.total};val initialInvestment=sunkInvestment+assetCost
-    val recoveredCapital=movements.filter{it.type=="RECOVERED_CAPITAL"}.sumOf{it.amount}
-    val recentProfits=(configs.filter{it.monthKey<monthKey}.sortedBy{it.monthKey}.mapNotNull{it.distributableProfitSnapshot}.takeLast(2)+listOfNotNull(result.distributableProfit))
-    val payback=calculatePayback(initialInvestment,recoveredCapital,recentProfits)
-    val partnerPositions=calculatePartnerWithdrawalPositions(result.partnerProfits,monthMovements.filter{it.type=="PROFIT_WITHDRAWAL"&&it.partnerId!=null}.groupBy{it.partnerId!!}.mapValues{(_,rows)->rows.sumOf{it.amount}})
-    var showPartners by remember{mutableStateOf(false)};var selectedAsset by remember{mutableStateOf<AssetEntity?>(null)}
-    var showOpeningOverride by remember{mutableStateOf(false)};var openingOverrideNote by remember{mutableStateOf("")}
+    val depreciation=activeAssets.filter{it.purchaseDate<to}.sumOf{assetValue(it).monthlyDepreciation}
+    val result=calculateFinancialPeriod(FinancialPeriodInput(revenue,operating,additional,depreciation))
+    val shares=allocatePositiveCash(result.netCashResult,partners.map{ProfitShareInput(it.id,it.name,it.shareBasisPoints)})
+    val reimbursements=movements.filter{it.type=="PAYER_REIMBURSEMENT"&&it.counterpartyName.isNotBlank()}.map{PayerReimbursement(it.counterpartyName,it.amount)}
+    val payerLedger=calculatePayerLedger(purchases.filter{it.paidByName.isNotBlank()}.map{PayerAdvance(it.paidByName,it.total)},reimbursements)
+    val initialSunk=purchases.filter{it.expenseCategory in setOf(ExpenseCategories.SETUP_COST,ExpenseCategories.INITIAL_INVESTMENT_SUNK)}.sumOf{it.total};val initialAssets=assets.filter{it.investmentClass=="INITIAL"}.sumOf{it.totalCost};val initialInvestment=initialSunk+initialAssets
+    val allBillIds=bills.map{it.id}.toSet();val allRevenue=payments.filter{it.billId in allBillIds}.sumOf{it.amount};val allOperating=purchases.filter{it.expenseCategory !in initialCodes}.sumOf{it.total};val cumulativeNet=allRevenue-allOperating;val payback=calculateCashPayback(initialInvestment,cumulativeNet)
+    fun periodResult(start:Long,end:Long):FinancialPeriodResult{val ids=bills.filter{(it.closedAt?:Long.MIN_VALUE) in start until end}.map{it.id}.toSet();val rev=payments.filter{it.billId in ids}.sumOf{it.amount};val ps=purchases.filter{it.purchasedAt in start until end};val add=ps.filter{it.expenseCategory==ExpenseCategories.ADDITIONAL_INVESTMENT}.sumOf{it.total};val op=ps.filter{it.expenseCategory !in initialCodes&&it.expenseCategory!=ExpenseCategories.ADDITIONAL_INVESTMENT}.sumOf{it.total};return calculateFinancialPeriod(FinancialPeriodInput(rev,op,add,0))}
+    val quarterStart=Calendar.getInstance().apply{timeInMillis=from;set(Calendar.MONTH,(get(Calendar.MONTH)/3)*3);set(Calendar.DAY_OF_MONTH,1)}.timeInMillis;val yearStart=Calendar.getInstance().apply{timeInMillis=from;set(Calendar.MONTH,0);set(Calendar.DAY_OF_MONTH,1)}.timeInMillis
+    val quarter=periodResult(quarterStart,to);val year=periodResult(yearStart,to)
     LazyColumn(Modifier.fillMaxSize().padding(12.dp)){
-        item{Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){OutlinedButton({monthOffset--}){Text("‹")};Text(SimpleDateFormat("MM / yyyy",Locale.getDefault()).format(Date(from)),Modifier.weight(1f),textAlign=TextAlign.Center,fontWeight=FontWeight.Black,fontSize=20.sp);OutlinedButton({monthOffset++}){Text("›")}}}
-        item{Card(Modifier.fillMaxWidth().padding(vertical=5.dp)){Column(Modifier.padding(14.dp)){
-            Text("NGUỒN GIÁ VỐN",fontWeight=FontWeight.Black);Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){FilterChip(source=="INVENTORY",{source="INVENTORY"},{Text("Theo kiểm kê")});FilterChip(source=="RECIPE",{source="RECIPE"},{Text("Theo recipe")});FilterChip(source=="UNAVAILABLE",{source="UNAVAILABLE";cogsText=""},{Text("Chưa có")})}
-            OutlinedTextField(cogsText,{cogsText=it.filter(Char::isDigit)},Modifier.fillMaxWidth(),label={Text("Giá vốn tháng (VND)")},enabled=source!="UNAVAILABLE")
-            if(source=="UNAVAILABLE")Text("Chưa đủ dữ liệu giá vốn; hệ thống không lấy tiền nhập hàng thay cho COGS.",color=Color(0xFF9A4B3D),fontWeight=FontWeight.Bold)
-            OutlinedTextField(reserveText,{reserveText=it.filter(Char::isDigit).take(3)},Modifier.fillMaxWidth(),label={Text("Trích quỹ dự phòng (%)")})
-            OutlinedTextField(openingCashText,{openingCashText=it.filter{c->c.isDigit()||c=='-'}},Modifier.fillMaxWidth(),label={Text("Tiền đầu kỳ")},readOnly=true)
-            if(config==null&&configs.any{it.monthKey==previousMonthKey&&it.closingCashSnapshot!=null})Text("Tiền đầu kỳ tự chuyển từ cuối kỳ tháng trước.",fontWeight=FontWeight.Bold)
-            TextButton({showOpeningOverride=true}){Text("ĐIỀU CHỈNH TIỀN ĐẦU KỲ")}
-            Button({vm.saveMonthlyAccounting(MonthlyAccountingEntity(monthKey,if(source=="UNAVAILABLE")null else cogsText.toLongOrNull(),source,openingCashText.toLongOrNull()?:0,reserveBp,config?.openingCashOverridden?:false,result.closingCash,result.operatingProfit,result.distributableProfit))},Modifier.fillMaxWidth(),enabled=source=="UNAVAILABLE"||cogsText.toLongOrNull()!=null){Text("LƯU THÔNG SỐ THÁNG")}
-        }}}
-        item{Text("KẾT QUẢ KINH DOANH",Modifier.padding(top=12.dp,bottom=4.dp),fontWeight=FontWeight.Black,fontSize=18.sp)}
-        item{AccountingCard(listOf("Doanh thu gộp" to grossRevenue,"Giảm giá" to -discounts,"Điều chỉnh doanh thu" to surcharges,"Doanh thu thuần" to result.netRevenue,"Giá vốn" to result.grossProfit?.let{-(result.netRevenue-it)},"Lãi gộp" to result.grossProfit,"Chi phí cố định" to -fixed,"Chi phí biến đổi" to -variableExpense,"Chi phí khác" to -other,"Khấu hao (không chi tiền)" to -depreciation,"LỢI NHUẬN KINH DOANH" to result.operatingProfit))}
-        item{Text("Chi phí setup trong kỳ: ${money(setup)} · không tự trừ vào lợi nhuận hoạt động.",Modifier.padding(8.dp),fontWeight=FontWeight.Bold)}
-        if(unclassified>0)item{Text("Còn ${money(unclassified)} chưa phân loại; chưa đưa vào P&L.",Modifier.padding(8.dp),color=Color(0xFF9A4B3D),fontWeight=FontWeight.Bold)}
-        if(result.closingCash<0)item{Text("Cảnh báo: tiền cuối kỳ đang âm. Hãy kiểm tra tiền đầu kỳ và các giao dịch tiền mặt.",Modifier.padding(8.dp),color=Color(0xFF9A4B3D),fontWeight=FontWeight.Bold)}
-        item{Text("PHÂN PHỐI LỢI NHUẬN",Modifier.padding(top=12.dp,bottom=4.dp),fontWeight=FontWeight.Black,fontSize=18.sp)}
-        item{AccountingCard(listOf("Lợi nhuận kinh doanh" to result.operatingProfit,"Giữ lại cho quán" to result.retainedProfit?.let{-it},"LỢI NHUẬN ĐƯỢC CHIA" to result.distributableProfit,"Đã rút thực tế" to -profitWithdrawal,"Chưa rút" to result.distributableProfit?.let{it-profitWithdrawal}))}
-        items(partnerPositions){p->MetricCard("${p.partner.name} · hưởng ${money(p.partner.amount)}","Đã rút ${money(p.withdrawn)} · Chưa rút ${money(p.unwithdrawn)}")}
-        if(partnerPositions.any{it.overdrawn})item{Text("Có người rút vượt phần lợi nhuận được hưởng trong tháng.",color=Color(0xFF9A4B3D),fontWeight=FontWeight.Bold)}
-        item{Button({showPartners=true},Modifier.fillMaxWidth()){Text("CẤU HÌNH NGƯỜI CHIA LỢI")};if(!result.shareConfigurationValid)Text("Tổng tỷ lệ người nhận phải đúng 100%.",color=Color(0xFF9A4B3D),fontWeight=FontWeight.Bold)}
-        item{Text("DÒNG TIỀN",Modifier.padding(top=12.dp,bottom=4.dp),fontWeight=FontWeight.Black,fontSize=18.sp);AccountingCard(listOf("Tiền đầu kỳ" to (openingCashText.toLongOrNull()?:0),"Tiền thu bán hàng" to received,"Góp vốn đầu tư" to contribution,"Vốn lưu động" to workingCapital,"Thu khác" to otherCashIn,"Tiền nhập hàng" to -inventory,"Chi vận hành" to -(fixed+variableExpense+other+unclassified),"Chi đầu tư" to -(capital+setup),"Rút lợi nhuận" to -profitWithdrawal,"Rút vốn" to -withdrawal,"TIỀN CUỐI KỲ" to result.closingCash));Text("Khấu hao không làm giảm tiền mặt trong tháng.",Modifier.padding(8.dp),fontWeight=FontWeight.Bold)}
-        item{Text("VỐN & ĐẦU TƯ",Modifier.padding(top=12.dp,bottom=4.dp),fontWeight=FontWeight.Black,fontSize=18.sp);AccountingCard(listOf("Vốn góp tháng" to contribution,"Rút vốn tháng" to withdrawal,"Đầu tư tài sản tháng" to capital,"Chi phí setup tháng" to setup,"Vốn góp toàn kỳ" to purchases.filter{it.expenseCategory==ExpenseCategories.OWNER_CONTRIBUTION}.sumOf{it.total},"Đầu tư tài sản toàn kỳ" to purchases.filter{it.expenseCategory==ExpenseCategories.CAPITAL_ASSET}.sumOf{it.total}))}
-        item{Text("TÀI SẢN",Modifier.padding(top=12.dp,bottom=4.dp),fontWeight=FontWeight.Black,fontSize=18.sp);AccountingCard(listOf("Tổng nguyên giá" to assetCost,"Khấu hao lũy kế" to -accumulatedDepreciation,"Giá trị còn lại theo sổ" to assetBookValue,"Giá thanh lý ước tính" to liquidationValue));OutlinedButton({vm.screen.value="PURCHASE"},Modifier.fillMaxWidth()){Text("GHI NHẬN MUA TÀI SẢN")}}
-        items(assets){a->Card(Modifier.fillMaxWidth().padding(vertical=3.dp).clickable{selectedAsset=a}){Column(Modifier.padding(10.dp)){Text(a.name,fontWeight=FontWeight.Bold);Text("${a.status} · Sổ ${money(assetValue(a).bookValue)} · Thanh lý ước tính ${money(a.estimatedLiquidationValue)}",fontSize=12.sp)}}}
-        item{Text("HOÀN VỐN",Modifier.padding(top=12.dp,bottom=4.dp),fontWeight=FontWeight.Black,fontSize=18.sp);AccountingCard(listOf("Tổng vốn đầu tư" to initialInvestment,"Đã xác định thu hồi" to recoveredCapital,"Còn lại" to payback.remainingToRecover));Text("Đã thu hồi ${payback.paybackBasisPoints/100.0}% · "+(payback.estimatedMonthsRemaining?.let{"ước tính %.1f tháng còn lại".format(it)}?:"Chưa thể ước tính hoàn vốn"),Modifier.padding(8.dp),fontWeight=FontWeight.Bold)}
-        item{Text("Góp vốn, rút vốn và rút lợi nhuận được nhập tại màn Giao dịch tài chính để tránh khai báo hai lần.",Modifier.padding(8.dp),fontSize=12.sp,fontWeight=FontWeight.Bold)}
-        item{Text("LỌC GIAO DỊCH CHI",Modifier.padding(top=12.dp),fontWeight=FontWeight.Black);Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(5.dp)){FilterChip(expenseFilter=="ALL",{expenseFilter="ALL"},{Text("Tất cả")});ExpenseCategories.all.forEach{v->FilterChip(expenseFilter==v,{expenseFilter=v},{Text(ExpenseCategories.label(v))})}}}
-        items(monthPurchases.filter{expenseFilter=="ALL"||it.expenseCategory==expenseFilter}){p->Card(Modifier.fillMaxWidth().padding(vertical=3.dp)){Column(Modifier.padding(10.dp)){Text(ExpenseCategories.label(p.expenseCategory),fontWeight=FontWeight.Bold);Text("${time(p.purchasedAt)} · ${money(p.total)}")}}}
+      item{Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){OutlinedButton({monthOffset--}){Text("‹")};Text(SimpleDateFormat("MM / yyyy",Locale.getDefault()).format(Date(from)),Modifier.weight(1f),textAlign=TextAlign.Center,fontWeight=FontWeight.Black,fontSize=20.sp);OutlinedButton({monthOffset++}){Text("›")}}}
+      item{Text("KẾT QUẢ TIỀN THÁNG",Modifier.padding(top=12.dp,bottom=4.dp),fontWeight=FontWeight.Black,fontSize=18.sp);AccountingCard(listOf("Tiền thu bán hàng" to revenue,"Chi vận hành" to -operating,"DƯ TRƯỚC ĐẦU TƯ BỔ SUNG" to result.operatingResultBeforeAdditionalInvestment,"Đầu tư bổ sung" to -additional,"DÒNG TIỀN RÒNG THÁNG" to result.netCashResult,"Khấu hao tham khảo" to -depreciation));Text("Khấu hao chỉ để theo dõi tài sản, không trừ lần hai khỏi tiền chia.",Modifier.padding(8.dp),fontSize=12.sp,fontWeight=FontWeight.Bold)}
+      item{Text("CHIA TIỀN",Modifier.padding(top=10.dp),fontWeight=FontWeight.Black,fontSize=18.sp);if(result.netCashResult<=0)Text("Tháng này không có số dư dương để chia.",Modifier.padding(8.dp),fontWeight=FontWeight.Bold) else if(shares.isEmpty())Text("Cần cấu hình tỷ lệ người chia đủ 100%.",Modifier.padding(8.dp),color=Color(0xFF9A4B3D),fontWeight=FontWeight.Bold)}
+      items(shares){p->MetricCard("${p.name} · ${p.shareBasisPoints/100.0}%",money(p.amount))}
+      item{Text("CÔNG NỢ NGƯỜI ỨNG",Modifier.padding(top=12.dp,bottom=4.dp),fontWeight=FontWeight.Black,fontSize=18.sp)}
+      if(payerLedger.isEmpty())item{Text("Chưa có khoản người cá nhân ứng tiền.",Modifier.padding(8.dp))} else items(payerLedger){row->Card(Modifier.fillMaxWidth().padding(vertical=3.dp)){Column(Modifier.padding(12.dp)){Text(row.payer,fontWeight=FontWeight.Black);Text("Đã ứng ${money(row.advanced)} · Đã hoàn ${money(row.reimbursed)}");Text("Quán còn nợ ${money(row.outstanding)}",fontWeight=FontWeight.Bold);if(row.outstanding>0)OutlinedButton({reimbursementPayer=row.payer},Modifier.fillMaxWidth().padding(top=5.dp)){Text("GHI HOÀN ỨNG")}}}}
+      item{Text("ĐẦU TƯ & HOÀN VỐN",Modifier.padding(top=12.dp,bottom=4.dp),fontWeight=FontWeight.Black,fontSize=18.sp);AccountingCard(listOf("Đầu tư ban đầu" to initialInvestment,"Dòng tiền kinh doanh tích lũy" to cumulativeNet,"Còn để hoàn vốn" to payback.remaining));Text("Tiến độ hoàn vốn: ${payback.paybackBasisPoints/100.0}%",Modifier.padding(8.dp),fontWeight=FontWeight.Bold)}
+      item{Text("TỔNG KẾT QUÝ / NĂM",Modifier.padding(top=12.dp,bottom=4.dp),fontWeight=FontWeight.Black,fontSize=18.sp);AccountingCard(listOf("Dòng tiền quý hiện tại" to quarter.netCashResult,"Đầu tư bổ sung quý" to -quarter.additionalInvestment,"Dòng tiền năm hiện tại" to year.netCashResult,"Đầu tư bổ sung năm" to -year.additionalInvestment))}
+      item{Text("BIẾN ĐỘNG MÃ CHI PHÍ",Modifier.padding(top=12.dp,bottom=4.dp),fontWeight=FontWeight.Black,fontSize=18.sp)}
+      items(costCodes){cc->val rows=purchases.filter{it.costCodeId==cc.id}.sortedBy{it.purchasedAt};val latest=rows.lastOrNull();val prev=if(rows.size>1)rows[rows.lastIndex-1] else null;val latestItem=latest?.let{p->allItems.firstOrNull{it.purchaseId==p.id}};val prevItem=prev?.let{p->allItems.firstOrNull{it.purchaseId==p.id}};val monthSpend=monthPurchases.filter{it.costCodeId==cc.id}.sumOf{it.total};Card(Modifier.fillMaxWidth().padding(vertical=3.dp)){Column(Modifier.padding(12.dp)){Text("${cc.code} · ${cc.name}",fontWeight=FontWeight.Black);Text("Chi tháng: ${money(monthSpend)}");if(latestItem!=null)Text("Lần gần nhất: ${latestItem.qty} ${latestItem.unit} × ${money(latestItem.unitPrice)}",fontSize=12.sp);if(latestItem!=null&&prevItem!=null){val v=calculateCostVariance(CostObservation(prevItem.qty,prevItem.unitPrice),CostObservation(latestItem.qty,latestItem.unitPrice));Text("Đơn giá ${"%+.1f".format(v.unitPriceChangePct)}% · Sử dụng ${"%+.1f".format(v.quantityChangePct)}%",fontSize=12.sp,fontWeight=FontWeight.Bold)}}}}
     }
-    if(showPartners)ProfitPartnerDialog(partners,{showPartners=false}){vm.saveProfitPartners(it);showPartners=false}
-    selectedAsset?.let{asset->AssetManageDialog(asset,assetValuations.filter{it.assetId==asset.id},{selectedAsset=null},{value,note->vm.updateAssetLiquidationValue(asset,value,note);selectedAsset=null},{status,price,note->vm.updateAssetStatus(asset,status,price,note);selectedAsset=null})}
-    if(showOpeningOverride)AlertDialog(onDismissRequest={showOpeningOverride=false},title={Text("Điều chỉnh tiền đầu kỳ")},text={Column{OutlinedTextField(openingCashText,{openingCashText=it.filter{c->c.isDigit()||c=='-'}},Modifier.fillMaxWidth(),label={Text("Giá trị mới")});OutlinedTextField(openingOverrideNote,{openingOverrideNote=it},Modifier.fillMaxWidth(),label={Text("Lý do bắt buộc")})}},confirmButton={Button({val previous=config?.openingCash?:rolledOpening;vm.saveOpeningCash(MonthlyAccountingEntity(monthKey,if(source=="UNAVAILABLE")null else cogsText.toLongOrNull(),source,openingCashText.toLongOrNull()?:0,reserveBp,true,result.closingCash,result.operatingProfit,result.distributableProfit),previous,openingOverrideNote);openingOverrideNote="";showOpeningOverride=false},enabled=openingOverrideNote.isNotBlank()){Text("LƯU ĐIỀU CHỈNH")}},dismissButton={TextButton({showOpeningOverride=false}){Text("HỦY")}})
+    reimbursementPayer?.let{payer->PayerReimbursementDialog(payer,{reimbursementPayer=null}){amount,method,note->vm.reimbursePayer(payer,amount,method,note);reimbursementPayer=null}}
 }
-
-@Composable fun AssetManageDialog(asset:AssetEntity,valuations:List<AssetValuationEntity>,onDismiss:()->Unit,onValuation:(Long,String)->Unit,onStatus:(String,Long?,String)->Unit){
-    var value by remember{mutableStateOf(asset.estimatedLiquidationValue.toString())};var status by remember{mutableStateOf(asset.status)};var price by remember{mutableStateOf(asset.disposalPrice?.toString().orEmpty())};var note by remember{mutableStateOf("")}
-    val statuses=listOf("ACTIVE" to "Đang dùng","DAMAGED" to "Hỏng","SOLD" to "Đã bán","DISPOSED" to "Đã bỏ","TRANSFERRED" to "Đã chuyển")
-    AlertDialog(onDismissRequest=onDismiss,title={Text(asset.name)},text={Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(6.dp)){
-        Text("Nguyên giá ${money(asset.totalCost)} · ${asset.usefulLifeMonths} tháng",fontWeight=FontWeight.Bold)
-        OutlinedTextField(value,{value=it.filter(Char::isDigit)},Modifier.fillMaxWidth(),label={Text("Giá thanh lý ước tính hiện tại")})
-        Text("Trạng thái",fontWeight=FontWeight.Bold);statuses.forEach{row->FilterChip(status==row.first,{status=row.first},{Text(row.second)})}
-        if(status=="SOLD")OutlinedTextField(price,{price=it.filter(Char::isDigit)},Modifier.fillMaxWidth(),label={Text("Giá bán thực tế")})
-        OutlinedTextField(note,{note=it},Modifier.fillMaxWidth(),label={Text("Ghi chú / lý do bắt buộc")})
-        if(valuations.isNotEmpty()){Text("Lịch sử giá thanh lý",fontWeight=FontWeight.Bold);valuations.take(5).forEach{v->Text("${time(v.changedAt)} · ${money(v.previousValue)} → ${money(v.newValue)} · ${v.note}",fontSize=11.sp)}}
-    }},confirmButton={Column{Button({onValuation(value.toLongOrNull()?:0,note)},Modifier.fillMaxWidth(),enabled=note.isNotBlank()&&(value.toLongOrNull()?:-1)>=0){Text("CẬP NHẬT GIÁ ƯỚC TÍNH")};Button({onStatus(status,price.toLongOrNull(),note)},Modifier.fillMaxWidth(),enabled=note.isNotBlank()&&status!=asset.status&&(status!="SOLD"||(price.toLongOrNull()?:0)>0)){Text("CẬP NHẬT TRẠNG THÁI")}}},dismissButton={TextButton(onClick=onDismiss){Text("ĐÓNG")}})
-}
-
-@Composable fun AccountingCard(rows:List<Pair<String,Long?>>){Card(Modifier.fillMaxWidth().padding(vertical=4.dp)){Column(Modifier.padding(14.dp)){rows.forEach{(label,value)->Row(Modifier.fillMaxWidth().padding(vertical=3.dp)){Text(label,Modifier.weight(1f),fontWeight=if(label.uppercase()==label)FontWeight.Black else FontWeight.Normal);Text(value?.let{money(it)}?:"CHƯA CÓ GIÁ VỐN",fontWeight=FontWeight.Bold)}}}}}
-
-@Composable fun ProfitPartnerDialog(current:List<ProfitPartnerEntity>,onDismiss:()->Unit,onSave:(List<ProfitPartnerEntity>)->Unit){
-    val rows=remember(current){mutableStateListOf<Pair<String,String>>().apply{addAll(current.map{it.name to (it.shareBasisPoints/100.0).toString().removeSuffix(".0")});if(isEmpty())add("" to "")}}
-    val total=rows.sumOf{((it.second.replace(',','.').toDoubleOrNull()?:0.0)*100).toInt()}
-    AlertDialog(onDismissRequest=onDismiss,title={Text("Tỷ lệ chia lợi nhuận")},text={LazyColumn{itemsIndexed(rows){index,row->Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){OutlinedTextField(row.first,{rows[index]=it to row.second},Modifier.weight(1f),label={Text("Người nhận")});OutlinedTextField(row.second,{rows[index]=row.first to it.filter{c->c.isDigit()||c=='.'||c==','}},Modifier.width(100.dp),label={Text("%")})}};item{OutlinedButton({rows.add("" to "")},Modifier.fillMaxWidth()){Text("＋ THÊM NGƯỜI")};Text("Tổng: ${total/100.0}%",color=if(total==10000)Coffee else Color(0xFF9A4B3D),fontWeight=FontWeight.Bold)}}},confirmButton={Button({onSave(rows.mapIndexed{i,r->ProfitPartnerEntity(UUID.randomUUID().toString(),r.first.trim(),((r.second.replace(',','.').toDoubleOrNull()?:0.0)*100).toInt(),i,true)})},enabled=total==10000&&rows.all{it.first.isNotBlank()}){Text("LƯU 100%")}},dismissButton={TextButton(onClick=onDismiss){Text("HỦY")}})
-}
-
 @Composable
 fun PeakHoursChart(
     hourlyCounts: Map<Int, Int>,

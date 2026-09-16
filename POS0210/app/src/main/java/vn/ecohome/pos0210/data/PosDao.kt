@@ -53,6 +53,10 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Query("SELECT * FROM PurchaseEntity ORDER BY purchasedAt DESC") suspend fun allPurchasesSnapshot():List<PurchaseEntity>
 @Query("SELECT pi.purchaseId AS purchaseId, pi.categoryId AS categoryId, pi.amount AS amount, p.purchasedAt AS purchasedAt FROM PurchaseItemEntity pi INNER JOIN PurchaseEntity p ON p.id=pi.purchaseId WHERE p.status='ACTIVE'") fun purchaseCosts():Flow<List<PurchaseCostRow>>
 @Query("SELECT * FROM PurchaseCategoryEntity WHERE active=1 ORDER BY sortOrder,name") fun purchaseCategories():Flow<List<PurchaseCategoryEntity>>
+@Query("SELECT * FROM CostCodeEntity WHERE active=1 ORDER BY sortOrder,code") fun costCodes():Flow<List<CostCodeEntity>>
+@Query("SELECT * FROM CostCodeEntity ORDER BY sortOrder,code") suspend fun allCostCodesSnapshot():List<CostCodeEntity>
+@Query("SELECT * FROM PurchaseItemEntity") fun allPurchaseItems():Flow<List<PurchaseItemEntity>>
+@Query("SELECT * FROM PurchaseItemEntity WHERE purchaseId=:purchaseId") suspend fun purchaseItemsSnapshot(purchaseId:String):List<PurchaseItemEntity>
 @Query("SELECT * FROM PurchaseCategoryEntity ORDER BY sortOrder,name") suspend fun allPurchaseCategoriesSnapshot():List<PurchaseCategoryEntity>
 @Query("SELECT * FROM PurchaseItemEntity WHERE purchaseId=:purchaseId") fun purchaseItems(purchaseId:String):Flow<List<PurchaseItemEntity>>
 @Query("SELECT * FROM MonthlyAccountingEntity") fun monthlyAccounting():Flow<List<MonthlyAccountingEntity>>
@@ -113,6 +117,7 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveEmployee(v:EmployeeEntity)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveSupplier(v:SupplierEntity)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun savePurchaseCategory(v:PurchaseCategoryEntity)
+@Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveCostCode(v:CostCodeEntity)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveSetting(v:AppSettingEntity)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveCloudSyncState(v:CloudSyncStateEntity)
 @Query("UPDATE CloudSyncStateEntity SET dirty=1 WHERE id='firebase'") suspend fun markCloudDirty():Int
@@ -129,6 +134,8 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertBillAdjustments(v:List<BillAdjustmentEntity>)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertPurchase(v:PurchaseEntity)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertPurchaseItems(v:List<PurchaseItemEntity>)
+@Update suspend fun updatePurchase(v:PurchaseEntity):Int
+@Update suspend fun updatePurchaseItem(v:PurchaseItemEntity):Int
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveMonthlyAccounting(v:MonthlyAccountingEntity)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveProfitPartners(v:List<ProfitPartnerEntity>)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveAssetCategory(v:AssetCategoryEntity)
@@ -140,6 +147,7 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Query("UPDATE MenuItemEntity SET active=:active WHERE id=:id") suspend fun setMenuActive(id:String,active:Boolean)
 @Query("UPDATE MenuCategoryEntity SET active=:active WHERE id=:id") suspend fun setCategoryActive(id:String,active:Boolean)
 @Query("UPDATE PurchaseCategoryEntity SET active=:active WHERE id=:id") suspend fun setPurchaseCategoryActive(id:String,active:Boolean)
+@Query("UPDATE CostCodeEntity SET active=:active WHERE id=:id") suspend fun setCostCodeActive(id:String,active:Boolean)
 @Query("UPDATE AreaEntity SET active=0") suspend fun deactivateAllAreas()
 @Query("UPDATE DiningTableEntity SET active=0") suspend fun deactivateAllTables()
 @Query("UPDATE MenuCategoryEntity SET active=0") suspend fun deactivateAllMenuCategories()
