@@ -1161,7 +1161,7 @@ fun Manage(vm: PosViewModel) {
                 Rowx("Nhật ký hệ thống", "Audit thao tác · người thực hiện · thời điểm · dữ liệu thay đổi") { vm.screen.value = "SETTINGS" }
             }
             HorizontalDivider(Modifier.padding(vertical = 12.dp))
-            Text("POS0210 v1.0.0-alpha52-candidate20 · versionCode 81", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            Text("POS0210 v1.0.0-alpha52-candidate21 · versionCode 82", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Text("Tương thích Android 8.0 (API 26) trở lên · Thiết bị hiện tại: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})", fontSize = 11.sp)
             if (Build.VERSION.SDK_INT < 26) Text("Thiết bị không được hỗ trợ. Cần Android 8.0 trở lên.", color = Color.Red, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(30.dp))
@@ -3359,14 +3359,14 @@ fun MonthlyProfitReport(vm:PosViewModel){
     val initialCodes=setOf(ExpenseCategories.SETUP_COST,ExpenseCategories.INITIAL_INVESTMENT_SUNK,ExpenseCategories.CAPITAL_ASSET)
     val additional=monthPurchases.filter{it.expenseCategory==ExpenseCategories.ADDITIONAL_INVESTMENT}.sumOf{it.total}
     val operating=monthPurchases.filter{it.expenseCategory !in initialCodes&&it.expenseCategory!=ExpenseCategories.ADDITIONAL_INVESTMENT}.sumOf{it.total}
-    val activeAssets=assets.filter{it.status=="ACTIVE"||it.status=="DAMAGED"||it.status=="TRANSFERRED"}
+    val activeAssets=linkedAssetsForPurchases(assets,purchases,allItems).filter{it.status=="ACTIVE"||it.status=="DAMAGED"||it.status=="TRANSFERRED"}
     fun assetValue(a:AssetEntity):AssetValue{val p=Calendar.getInstance().apply{timeInMillis=a.purchaseDate};val used=((month.get(Calendar.YEAR)-p.get(Calendar.YEAR))*12+month.get(Calendar.MONTH)-p.get(Calendar.MONTH)+1).coerceAtLeast(0);return calculateAssetValue(a.totalCost,a.residualValue,a.usefulLifeMonths,used)}
     val depreciation=activeAssets.filter{it.purchaseDate<to}.sumOf{assetValue(it).monthlyDepreciation}
     val result=calculateFinancialPeriod(FinancialPeriodInput(revenue,operating,additional,depreciation))
     val shares=allocatePositiveCash(result.netCashResult,partners.map{ProfitShareInput(it.id,it.name,it.shareBasisPoints)})
     val reimbursements=movements.filter{it.type=="PAYER_REIMBURSEMENT"&&it.counterpartyName.isNotBlank()}.map{PayerReimbursement(it.counterpartyName,it.amount)}
     val payerLedger=calculatePayerLedger(purchases.filter{it.paidByName.isNotBlank()}.map{PayerAdvance(it.paidByName,it.total)},reimbursements)
-    val initialSunk=purchases.filter{it.expenseCategory in setOf(ExpenseCategories.SETUP_COST,ExpenseCategories.INITIAL_INVESTMENT_SUNK)}.sumOf{it.total};val initialAssets=assets.filter{it.investmentClass=="INITIAL"}.sumOf{it.totalCost};val initialInvestment=initialSunk+initialAssets
+    val initialInvestment=initialInvestmentFromPurchases(purchases)
     val allBillIds=bills.map{it.id}.toSet();val allRevenue=payments.filter{it.billId in allBillIds}.sumOf{it.amount};val allOperating=purchases.filter{it.expenseCategory !in initialCodes}.sumOf{it.total};val cumulativeNet=allRevenue-allOperating;val payback=calculateCashPayback(initialInvestment,cumulativeNet)
     fun periodResult(start:Long,end:Long):FinancialPeriodResult{val ids=bills.filter{(it.closedAt?:Long.MIN_VALUE) in start until end}.map{it.id}.toSet();val rev=payments.filter{it.billId in ids}.sumOf{it.amount};val ps=purchases.filter{it.purchasedAt in start until end};val add=ps.filter{it.expenseCategory==ExpenseCategories.ADDITIONAL_INVESTMENT}.sumOf{it.total};val op=ps.filter{it.expenseCategory !in initialCodes&&it.expenseCategory!=ExpenseCategories.ADDITIONAL_INVESTMENT}.sumOf{it.total};return calculateFinancialPeriod(FinancialPeriodInput(rev,op,add,0))}
     val quarterStart=Calendar.getInstance().apply{timeInMillis=from;set(Calendar.MONTH,(get(Calendar.MONTH)/3)*3);set(Calendar.DAY_OF_MONTH,1)}.timeInMillis;val yearStart=Calendar.getInstance().apply{timeInMillis=from;set(Calendar.MONTH,0);set(Calendar.DAY_OF_MONTH,1)}.timeInMillis

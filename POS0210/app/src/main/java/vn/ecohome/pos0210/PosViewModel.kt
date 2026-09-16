@@ -402,7 +402,7 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
    val amount=(qty*unitPrice).toLong()
    repo.savePurchase(
     PurchaseEntity(id,supplierId,e.id,at,amount,note,managed,expenseCategory=expenseCategory,paidByName=paidByName.trim(),costCodeId=costCodeId),
-    listOf(PurchaseItemEntity(UUID.randomUUID().toString(),id,categoryId,name.trim(),qty,unit.ifBlank{"lần"},unitPrice,amount)),asset
+    listOf(PurchaseItemEntity(UUID.randomUUID().toString(),id,categoryId,name.trim(),qty,unit.ifBlank{"lần"},unitPrice,amount)),asset?.copy(id=assetIdForPurchase(id))
    )
    audit("PURCHASE",id,"CREATE","${name.trim()}:$qty:$unit:$unitPrice:$amount:payer=${paidByName.trim()}");autoBackup();autoBackupMedia()
   }
@@ -416,7 +416,15 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
   viewModelScope.launch(Dispatchers.IO){
    val supplierId=if(supplierName.isBlank())null else p.supplierId?.takeIf{sid->suppliers.value.any{it.id==sid&&it.name==supplierName.trim()}}?:UUID.randomUUID().toString().also{repo.saveSupplier(SupplierEntity(it,supplierName.trim()))}
    val amount=(qty*unitPrice).toLong();val now=System.currentTimeMillis()
-   db.withTransaction{dao.updatePurchase(p.copy(supplierId=supplierId,purchasedAt=at,total=amount,note=note.trim(),expenseCategory=category,paidByName=paidByName.trim(),costCodeId=costCodeId,updatedAt=now));dao.updatePurchaseItem(line.copy(categoryId=detailCategoryId,qty=qty,unit=unit.ifBlank{"lần"},unitPrice=unitPrice,amount=amount))}
+   val linkedAsset=assets.value.firstOrNull{assetMatchesPurchaseSignature(it,p,line.name)}
+   db.withTransaction{
+    dao.updatePurchase(p.copy(supplierId=supplierId,purchasedAt=at,total=amount,note=note.trim(),expenseCategory=category,paidByName=paidByName.trim(),costCodeId=costCodeId,updatedAt=now))
+    dao.updatePurchaseItem(line.copy(categoryId=detailCategoryId,qty=qty,unit=unit.ifBlank{"lần"},unitPrice=unitPrice,amount=amount))
+    linkedAsset?.let{a->
+     val investmentClass=assetInvestmentClassForExpense(category)
+     if(investmentClass==null) dao.setAssetStatus(a.id,"DELETED") else dao.saveAsset(a.copy(purchaseDate=at,purchasePrice=unitPrice,quantity=qty.toInt().coerceAtLeast(1),totalCost=amount,supplier=supplierName.trim(),note=note.trim(),investmentClass=investmentClass))
+    }
+   }
    audit("PURCHASE",p.id,"UPDATE","amount=${p.total}->$amount,category=${p.expenseCategory}->$category,payer=${p.paidByName}->${paidByName.trim()},costCode=${p.costCodeId}->${costCodeId}");autoBackup()
   }
  }
@@ -704,7 +712,9 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
   val e=currentEmployee.value?:return
   if(e.role!="ADMIN"||reason.isBlank())return
   viewModelScope.launch{
-   if(repo.deletePurchaseAudited(p,reason,e.id)){
+   val line=dao.purchaseItemsSnapshot(p.id).firstOrNull()
+   val linkedAssetId=line?.let{l->assets.value.firstOrNull{assetMatchesPurchaseSignature(it,p,l.name)}?.id}
+   if(repo.deletePurchaseAudited(p,reason,e.id,linkedAssetId)){
     autoBackup()
    }
   }

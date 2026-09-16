@@ -140,6 +140,7 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveProfitPartners(v:List<ProfitPartnerEntity>)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveAssetCategory(v:AssetCategoryEntity)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveAsset(v:AssetEntity)
+@Query("UPDATE AssetEntity SET status=:status WHERE id=:id") suspend fun setAssetStatus(id:String,status:String):Int
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertAssetValuation(v:AssetValuationEntity)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertFinancialMovement(v:FinancialMovementEntity)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertOpeningCashAdjustment(v:OpeningCashAdjustmentEntity)

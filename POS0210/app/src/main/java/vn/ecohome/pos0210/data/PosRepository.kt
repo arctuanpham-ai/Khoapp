@@ -239,10 +239,11 @@ class PosRepository(private val db:PosDatabase){
         changed
     }
 
-    suspend fun deletePurchaseAudited(purchase:PurchaseEntity,reason:String,actorId:String):Boolean =
+    suspend fun deletePurchaseAudited(purchase:PurchaseEntity,reason:String,actorId:String,linkedAssetId:String?=null):Boolean =
         db.withTransaction {
             val changed=dao.softDeletePurchase(purchase.id)
             if(changed!=1) return@withTransaction false
+            if(linkedAssetId!=null) dao.setAssetStatus(linkedAssetId,"DELETED")
             dao.audit(AuditEventEntity(
                 UUID.randomUUID().toString(),"PURCHASE",purchase.id,"DELETE_SOFT",actorId,null,System.currentTimeMillis(),
                 "reason=${reason.trim()},total=${purchase.total}"
