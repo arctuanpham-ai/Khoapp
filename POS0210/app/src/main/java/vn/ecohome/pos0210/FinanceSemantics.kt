@@ -38,3 +38,8 @@ fun financialReportBucket(code: String): String = when (canonicalFinancialReport
     ExpenseCategories.PROFIT_WITHDRAWAL -> FinancialReportBucket.CAPITAL_FLOW
     else -> FinancialReportBucket.OPERATING
 }
+
+fun isPayrollExpense(expenseCategory: String): Boolean = expenseCategory == ExpenseCategories.PAYROLL
+
+fun validProfitPeopleShares(shares: List<Int>): Boolean =
+    shares.isNotEmpty() && shares.all { it in 0..10000 } && shares.sum() == 10000

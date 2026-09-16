@@ -470,8 +470,25 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
  }
  fun saveProfitPartners(rows:List<ProfitPartnerEntity>){
   val e=currentEmployee.value?:return;if(e.role!="ADMIN")return
-  if(rows.isEmpty()||rows.any{it.name.isBlank()||it.shareBasisPoints !in 0..10000}||rows.sumOf{it.shareBasisPoints}!=10000)return
-  viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){db.withTransaction{dao.deactivateProfitPartners();dao.saveProfitPartners(rows)};audit("ACCOUNTING","PARTNERS","SAVE","count=${rows.size},totalBp=10000");autoBackup()}
+  if(rows.any{it.name.isBlank()}||rows.map{it.name.trim().lowercase()}.distinct().size!=rows.size||!validProfitPeopleShares(rows.map{it.shareBasisPoints}))return
+  viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
+   val previous=profitPartners.value.associateBy{it.id}
+   db.withTransaction{
+    rows.forEach{row->
+     val oldName=previous[row.id]?.name?.trim().orEmpty();val newName=row.name.trim()
+     if(oldName.isNotBlank()&&!oldName.equals(newName,true)){dao.renamePurchasePayerName(oldName,newName);dao.renameReimbursementCounterparty(oldName,newName)}
+    }
+    dao.deactivateProfitPartners();dao.saveProfitPartners(rows.map{it.copy(name=it.name.trim())})
+   }
+   audit("ACCOUNTING","PARTNERS","SAVE","count=${rows.size},totalBp=10000");autoBackup()
+  }
+ }
+ fun mergePayerAlias(oldName:String,newName:String){
+  val e=currentEmployee.value?:return;if(e.role!="ADMIN"||oldName.isBlank()||newName.isBlank()||oldName.trim().equals(newName.trim(),true))return
+  viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
+   val purchasesChanged=dao.renamePurchasePayerName(oldName.trim(),newName.trim());val reimbursementsChanged=dao.renameReimbursementCounterparty(oldName.trim(),newName.trim())
+   audit("ACCOUNTING","PAYER_ALIAS","MERGE","${oldName.trim()}->${newName.trim()},purchases=$purchasesChanged,reimbursements=$reimbursementsChanged");autoBackup()
+  }
  }
  fun sendBatch(){
   val e=currentEmployee.value?:return

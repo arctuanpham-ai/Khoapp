@@ -176,4 +176,6 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Query("UPDATE PurchaseEntity SET invoiceImageUri=:uri WHERE id=:id") suspend fun updatePurchaseImage(id:String,uri:String?)
 @Query("UPDATE PurchaseEntity SET expenseCategory=:category WHERE id=:id") suspend fun updatePurchaseExpenseCategory(id:String,category:String):Int
 @Query("UPDATE ProfitPartnerEntity SET active=0") suspend fun deactivateProfitPartners()
+@Query("UPDATE PurchaseEntity SET paidByName=:newName WHERE lower(trim(paidByName))=lower(trim(:oldName))") suspend fun renamePurchasePayerName(oldName:String,newName:String):Int
+@Query("UPDATE FinancialMovementEntity SET counterpartyName=:newName WHERE lower(trim(counterpartyName))=lower(trim(:oldName))") suspend fun renameReimbursementCounterparty(oldName:String,newName:String):Int
 }

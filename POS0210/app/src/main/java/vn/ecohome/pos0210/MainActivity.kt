@@ -111,6 +111,7 @@ fun App(vm: PosViewModel = viewModel()) {
         "DELIVERY" -> DeliveryQueue(vm)
         "CUSTOMERS" -> Customers(vm)
         "LOYALTY_CONFIG" -> LoyaltyConfig(vm)
+        "FINANCE_PEOPLE" -> FinancePeopleManager(vm)
         "EMP" -> Employees(vm)
         "PURCHASE" -> Purchases(vm)
         "VIETQR" -> VietQr(vm)
@@ -2267,7 +2268,7 @@ fun Purchases(vm: PosViewModel) {
     val context = LocalContext.current
     var itemName by remember { mutableStateOf("") }
     var qtyText by remember { mutableStateOf("") }
-    var unit by remember { mutableStateOf("kg") }
+    var unit by remember { mutableStateOf("lần") }
     var unitPriceText by remember { mutableStateOf("") }
     var supplier by remember { mutableStateOf("") }
     var paidByName by remember { mutableStateOf("") }
@@ -2281,9 +2282,7 @@ fun Purchases(vm: PosViewModel) {
     var selectedAssetCategory by remember(assetCategories){mutableStateOf(assetCategories.firstOrNull())}
     var usefulLifeText by remember{mutableStateOf("")};var residualText by remember{mutableStateOf("")};var liquidationText by remember{mutableStateOf("")}
     var movementMethod by remember{mutableStateOf("CASH")};var movementPartnerId by remember{mutableStateOf<String?>(null)}
-    var selectedCategoryId by remember(purchaseCategories) {
-        mutableStateOf(purchaseCategories.firstOrNull()?.id ?: "pc_production")
-    }
+    var selectedCategoryId by remember { mutableStateOf("") }
     var showCategoryManager by remember { mutableStateOf(false) }
     var dateText by remember {
         mutableStateOf(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date()))
@@ -2336,6 +2335,11 @@ fun Purchases(vm: PosViewModel) {
                         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
+                        FilterChip(
+                            selected = selectedCategoryId.isBlank(),
+                            onClick = { selectedCategoryId = "" },
+                            label = { Text("Không phân mục") }
+                        )
                         purchaseCategories.forEach { c ->
                             FilterChip(
                                 selected = selectedCategoryId == c.id,
@@ -2378,25 +2382,34 @@ fun Purchases(vm: PosViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Nhà cung cấp (không bắt buộc)") }
                 )
-                if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) OutlinedTextField(
-                    paidByName,
-                    { paidByName = it.take(60) },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Người chi / ứng tiền (không bắt buộc)") },
-                    supportingText = { Text("Người thực tế bỏ tiền, độc lập với người nhập và cổ đông") }
-                )
+                if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) {
+                    Text("Người chi / ứng tiền", Modifier.padding(top=8.dp), fontWeight=FontWeight.Bold)
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                        FilterChip(paidByName.isBlank(), { paidByName = "" }, { Text("Chưa xác định") })
+                        profitPartners.forEach { person ->
+                            FilterChip(paidByName.equals(person.name,true), { paidByName = person.name }, { Text(person.name) })
+                        }
+                    }
+                    OutlinedTextField(
+                        paidByName,
+                        { paidByName = it.take(60) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Tên người chi khác / chỉnh tay") },
+                        supportingText = { Text("Người thực tế bỏ tiền. Có thể cấu hình tên chuẩn và tỷ lệ chia trong Báo cáo tháng.") }
+                    )
+                }
                 OutlinedTextField(
                     itemName,
                     { itemName = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text(if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) if (selectedCategory?.id == "pc_salary") "Người nhận lương / nhân sự" else "Mặt hàng / nội dung chi" else "Nội dung giao dịch") }
+                    label = { Text(if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) if (isPayrollExpense(expenseCategory)) "Người nhận lương / nhân sự" else "Mặt hàng / nội dung chi" else "Nội dung giao dịch") }
                 )
                 if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         qtyText,
                         { qtyText = it.filter { ch -> ch.isDigit() || ch == ',' || ch == '.' } },
                         modifier = Modifier.weight(1f),
-                        label = { Text(if (selectedCategory?.id == "pc_salary") "Số ngày công / SL" else "Khối lượng / SL") }
+                        label = { Text(if (isPayrollExpense(expenseCategory)) "Số ngày công / SL" else "Khối lượng / SL") }
                     )
                     OutlinedTextField(
                         unit,
@@ -2409,7 +2422,7 @@ fun Purchases(vm: PosViewModel) {
                     unitPriceText,
                     { unitPriceText = it.filter(Char::isDigit) },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text(if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) if (selectedCategory?.id == "pc_salary") "Đơn giá / ngày công" else "Đơn giá" else "Số tiền") }
+                    label = { Text(if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) if (isPayrollExpense(expenseCategory)) "Đơn giá / ngày công" else "Đơn giá" else "Số tiền") }
                 )
                 if(!FinancialTransactionTypes.usesPurchaseDocument(transactionType)){
                     Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){FilterChip(movementMethod=="CASH",{movementMethod="CASH"},{Text("Tiền mặt")});FilterChip(movementMethod=="TRANSFER",{movementMethod="TRANSFER"},{Text("Chuyển khoản")})}
@@ -2426,7 +2439,7 @@ fun Purchases(vm: PosViewModel) {
                 )
                 if(FinancialTransactionTypes.usesPurchaseDocument(transactionType)) Card(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                     Column(Modifier.padding(16.dp)) {
-                        Text(selectedCategory?.name ?: "Chưa chọn phân mục", fontWeight = FontWeight.Bold)
+                        Text(selectedCategory?.name ?: ExpenseCategories.label(expenseCategory), fontWeight = FontWeight.Bold)
                         Text("Thành tiền: ${money(total)}", fontWeight = FontWeight.Black, fontSize = 18.sp)
                     }
                 }
@@ -2469,7 +2482,8 @@ fun Purchases(vm: PosViewModel) {
                     },
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
                     enabled = itemName.isNotBlank() && (unitPrice ?: 0L) > 0 &&
-                        (!FinancialTransactionTypes.usesPurchaseDocument(transactionType)||(selectedCategoryId.isNotBlank()&&(qty?:0.0)>0)) &&
+                        (!FinancialTransactionTypes.usesPurchaseDocument(transactionType)||(qty?:0.0)>0) &&
+                        (transactionType!=FinancialTransactionTypes.OPERATING_EXPENSE||expenseCategory!=ExpenseCategories.UNCLASSIFIED) &&
                         (transactionType !in setOf(FinancialTransactionTypes.ASSET_PURCHASE,FinancialTransactionTypes.ADDITIONAL_INVESTMENT)||(selectedAssetCategory!=null&&(usefulLifeText.toIntOrNull()?:0)>0&&(residualText.toLongOrNull()?:0)<=total)) &&
                         (transactionType !in setOf(FinancialTransactionTypes.PROFIT_WITHDRAWAL,FinancialTransactionTypes.OWNER_WITHDRAWAL)||movementPartnerId!=null)
                 ) { Text("LƯU GIAO DỊCH") }
@@ -3269,6 +3283,64 @@ fun Report(vm: PosViewModel) {
     }
 }
 
+private data class FinancePersonDraft(val id:String,val name:String,val shareText:String)
+
+@Composable
+fun FinancePeopleManager(vm:PosViewModel){
+    val current by vm.currentEmployee.collectAsState()
+    val partners by vm.profitPartners.collectAsState()
+    if(current?.role!="ADMIN"){
+        Column{Header("Người & tỷ lệ chia"){vm.screen.value="REPORT"};Text("Chỉ Admin được cấu hình.",Modifier.padding(20.dp),fontWeight=FontWeight.Bold)}
+        return
+    }
+    var drafts by remember(partners){mutableStateOf(partners.map{FinancePersonDraft(it.id,it.name,(it.shareBasisPoints/100).toString())})}
+    var alias by remember{mutableStateOf("")}
+    var mergeTargetId by remember(partners){mutableStateOf(partners.firstOrNull()?.id)}
+    var message by remember{mutableStateOf("")}
+    val shares=drafts.map{((it.shareText.toIntOrNull()?:0).coerceIn(0,100))*100}
+    val totalPercent=shares.sum()/100
+    val valid=drafts.isNotEmpty()&&drafts.all{it.name.isNotBlank()}&&drafts.map{it.name.trim().lowercase()}.distinct().size==drafts.size&&validProfitPeopleShares(shares)
+    Column{
+        Header("Người & tỷ lệ chia"){vm.screen.value="REPORT"}
+        LazyColumn(Modifier.fillMaxSize().padding(16.dp)){
+            item{
+                Text("DANH SÁCH NGƯỜI",fontWeight=FontWeight.Black,fontSize=20.sp)
+                Text("Một người có thể vừa được chia tiền vừa ứng tiền cho quán. Đặt 0% nếu người đó chỉ ứng tiền. Tổng tỷ lệ người chia phải bằng 100%.",fontSize=12.sp)
+                Text("Tổng tỷ lệ hiện tại: $totalPercent%",Modifier.padding(vertical=8.dp),fontWeight=FontWeight.Bold,color=if(totalPercent==100)Color(0xFF41633A) else Color(0xFF9A4B3D))
+            }
+            itemsIndexed(drafts,key={_,d->d.id}){index,d->
+                Card(Modifier.fillMaxWidth().padding(vertical=4.dp)){
+                    Column(Modifier.padding(12.dp)){
+                        OutlinedTextField(d.name,{v->drafts=drafts.toMutableList().also{it[index]=d.copy(name=v.take(60))}},Modifier.fillMaxWidth(),label={Text("Tên người")},singleLine=true)
+                        OutlinedTextField(d.shareText,{v->drafts=drafts.toMutableList().also{it[index]=d.copy(shareText=v.filter(Char::isDigit).take(3))}},Modifier.fillMaxWidth(),label={Text("% chia · 0 = chỉ ứng tiền")},singleLine=true)
+                        TextButton(onClick={drafts=drafts.filterIndexed{i,_->i!=index}}){Text("BỎ KHỎI DANH SÁCH")}
+                    }
+                }
+            }
+            item{
+                OutlinedButton(onClick={drafts=drafts+FinancePersonDraft(UUID.randomUUID().toString(),"","0")},Modifier.fillMaxWidth().padding(top=6.dp)){Text("＋ THÊM NGƯỜI")}
+                Button(onClick={
+                    vm.saveProfitPartners(drafts.mapIndexed{i,d->ProfitPartnerEntity(d.id,d.name.trim(),((d.shareText.toIntOrNull()?:0).coerceIn(0,100))*100,i,true)})
+                    message="Đã lưu danh sách người và tỷ lệ chia."
+                },enabled=valid,modifier=Modifier.fillMaxWidth().padding(top=8.dp)){Text("LƯU CẤU HÌNH")}
+                if(!valid)Text("Cần tên không trùng và tổng tỷ lệ chia đúng 100%.",Modifier.padding(top=6.dp),fontSize=12.sp,color=Color(0xFF9A4B3D))
+                if(message.isNotBlank())Text(message,Modifier.padding(top=6.dp),fontWeight=FontWeight.Bold)
+                HorizontalDivider(Modifier.padding(vertical=14.dp))
+                Text("GỘP TÊN NGƯỜI CHI CŨ",fontWeight=FontWeight.Black)
+                Text("Dùng khi lịch sử từng nhập tên khác. Chỉ đổi tên tham chiếu người chi/hoàn ứng; không đổi số tiền hay phân loại phiếu.",fontSize=11.sp)
+                OutlinedTextField(alias,{alias=it.take(60)},Modifier.fillMaxWidth(),label={Text("Tên cũ cần gộp")})
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(6.dp)){
+                    partners.forEach{p->FilterChip(mergeTargetId==p.id,{mergeTargetId=p.id},{Text(p.name)})}
+                }
+                OutlinedButton(onClick={
+                    val target=partners.firstOrNull{it.id==mergeTargetId}
+                    if(target!=null&&alias.isNotBlank()){vm.mergePayerAlias(alias,target.name);message="Đã yêu cầu gộp ${alias.trim()} → ${target.name}";alias=""}
+                },enabled=alias.isNotBlank()&&mergeTargetId!=null,modifier=Modifier.fillMaxWidth().padding(top=8.dp)){Text("GỘP VÀO NGƯỜI ĐÃ CHỌN")}
+            }
+        }
+    }
+}
+
 @Composable
 fun MonthlyProfitReport(vm:PosViewModel){
     val bills by vm.bills.collectAsState();val payments by vm.payments.collectAsState();val purchases by vm.purchases.collectAsState();val partners by vm.profitPartners.collectAsState()
@@ -3296,7 +3368,7 @@ fun MonthlyProfitReport(vm:PosViewModel){
     LazyColumn(Modifier.fillMaxSize().padding(12.dp)){
       item{Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically){OutlinedButton({monthOffset--}){Text("‹")};Text(SimpleDateFormat("MM / yyyy",Locale.getDefault()).format(Date(from)),Modifier.weight(1f),textAlign=TextAlign.Center,fontWeight=FontWeight.Black,fontSize=20.sp);OutlinedButton({monthOffset++}){Text("›")}}}
       item{Text("KẾT QUẢ TIỀN THÁNG",Modifier.padding(top=12.dp,bottom=4.dp),fontWeight=FontWeight.Black,fontSize=18.sp);AccountingCard(listOf("Tiền thu bán hàng" to revenue,"Chi vận hành" to -operating,"DƯ TRƯỚC ĐẦU TƯ BỔ SUNG" to result.operatingResultBeforeAdditionalInvestment,"Đầu tư bổ sung" to -additional,"DÒNG TIỀN RÒNG THÁNG" to result.netCashResult,"Khấu hao tham khảo" to -depreciation));Text("Khấu hao chỉ để theo dõi tài sản, không trừ lần hai khỏi tiền chia.",Modifier.padding(8.dp),fontSize=12.sp,fontWeight=FontWeight.Bold)}
-      item{Text("CHIA TIỀN",Modifier.padding(top=10.dp),fontWeight=FontWeight.Black,fontSize=18.sp);if(result.netCashResult<=0)Text("Tháng này không có số dư dương để chia.",Modifier.padding(8.dp),fontWeight=FontWeight.Bold) else if(shares.isEmpty())Text("Cần cấu hình tỷ lệ người chia đủ 100%.",Modifier.padding(8.dp),color=Color(0xFF9A4B3D),fontWeight=FontWeight.Bold)}
+      item{Text("CHIA TIỀN",Modifier.padding(top=10.dp),fontWeight=FontWeight.Black,fontSize=18.sp);OutlinedButton({vm.screen.value="FINANCE_PEOPLE"},Modifier.fillMaxWidth().padding(vertical=6.dp)){Text("CẤU HÌNH NGƯỜI & TỶ LỆ CHIA")};if(result.netCashResult<=0)Text("Tháng này không có số dư dương để chia.",Modifier.padding(8.dp),fontWeight=FontWeight.Bold) else if(shares.isEmpty())Text("Cần cấu hình tỷ lệ người chia đủ 100%.",Modifier.padding(8.dp),color=Color(0xFF9A4B3D),fontWeight=FontWeight.Bold)}
       items(shares){p->MetricCard("${p.name} · ${p.shareBasisPoints/100.0}%",money(p.amount))}
       item{Text("CÔNG NỢ NGƯỜI ỨNG",Modifier.padding(top=12.dp,bottom=4.dp),fontWeight=FontWeight.Black,fontSize=18.sp)}
       if(payerLedger.isEmpty())item{Text("Chưa có khoản người cá nhân ứng tiền.",Modifier.padding(8.dp))} else items(payerLedger){row->Card(Modifier.fillMaxWidth().padding(vertical=3.dp)){Column(Modifier.padding(12.dp)){Text(row.payer,fontWeight=FontWeight.Black);Text("Đã ứng ${money(row.advanced)} · Đã hoàn ${money(row.reimbursed)}");Text("Quán còn nợ ${money(row.outstanding)}",fontWeight=FontWeight.Bold);if(row.outstanding>0)OutlinedButton({reimbursementPayer=row.payer},Modifier.fillMaxWidth().padding(top=5.dp)){Text("GHI HOÀN ỨNG")}}}}
