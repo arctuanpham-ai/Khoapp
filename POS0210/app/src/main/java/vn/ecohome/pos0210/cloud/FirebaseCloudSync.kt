@@ -61,6 +61,7 @@ object FirebaseCloudSync {
         dao.saveCloudSyncState(old.copy(lastAttemptAt=System.currentTimeMillis(),lastError=null))
         val c=config(context);require(c.valid){"Chưa cấu hình Firebase"};val firebaseApp=firebaseApp(context,c);val uid=FirebaseAuth.getInstance(firebaseApp).currentUser?.uid?:error("Chưa đăng nhập Firebase")
         val fs=FirebaseFirestore.getInstance(firebaseApp);val root=fs.collection("users").document(uid).collection("stores").document("0210")
+        pullCloudFinance(root,dao)
         val tables=dao.cloudTablesSnapshot();val sessions=dao.cloudSessionsSnapshot();val bills=dao.cloudBillsSnapshot();val payments=dao.cloudPaymentsSnapshot()
         val today=Calendar.getInstance().apply{set(Calendar.HOUR_OF_DAY,0);set(Calendar.MINUTE,0);set(Calendar.SECOND,0);set(Calendar.MILLISECOND,0)}.timeInMillis
         val paidToday=bills.filter{it.status=="PAID"&&(it.closedAt?:0)>=today};val open=sessions.filter{it.status=="OPEN"};val now=System.currentTimeMillis()
@@ -76,7 +77,7 @@ object FirebaseCloudSync {
         writeMaps(fs,root.collection("orderItems"),dao.cloudOrderItemsSnapshot().map{i->i.id to mapOf("id" to i.id,"batchId" to i.batchId,"menuItemId" to i.menuItemId,"itemName" to i.itemNameSnapshot,"unitPrice" to i.unitPriceSnapshot,"qty" to i.qty,"note" to i.note,"adjustmentOfItemId" to i.adjustmentOfItemId)})
         writeMaps(fs,root.collection("bills"),bills.map{b->b.id to mapOf("id" to b.id,"sessionId" to b.sessionId,"billNo" to b.billNo,"openedAt" to b.openedAt,"closedAt" to b.closedAt,"subtotal" to b.subtotal,"total" to b.total,"status" to b.status)})
         writeMaps(fs,root.collection("payments"),payments.map{p->p.id to mapOf("id" to p.id,"billId" to p.billId,"method" to p.method,"amount" to p.amount,"cashierId" to p.cashierId,"paidAt" to p.paidAt,"reference" to p.reference)})
-        writeMaps(fs,root.collection("purchases"),dao.cloudPurchasesSnapshot().map{p->p.id to mapOf("id" to p.id,"purchasedAt" to p.purchasedAt,"total" to p.total,"note" to p.note,"status" to p.status,"expenseCategory" to p.expenseCategory,"paidByName" to p.paidByName,"costCodeId" to p.costCodeId,"updatedAt" to p.updatedAt)})
+        writeMaps(fs,root.collection("purchases"),dao.cloudPurchasesSnapshot().map{p->p.id to mapOf("id" to p.id,"supplierId" to p.supplierId,"enteredBy" to p.enteredBy,"purchasedAt" to p.purchasedAt,"total" to p.total,"note" to p.note,"status" to p.status,"expenseCategory" to p.expenseCategory,"paidByName" to p.paidByName,"costCodeId" to p.costCodeId,"updatedAt" to p.updatedAt)})
         writeMaps(fs,root.collection("costCodes"),dao.allCostCodesSnapshot().map{c0->c0.id to mapOf("id" to c0.id,"code" to c0.code,"name" to c0.name,"parentExpenseCategory" to c0.parentExpenseCategory,"defaultUnit" to c0.defaultUnit,"defaultSupplier" to c0.defaultSupplier,"referenceUnitPrice" to c0.referenceUnitPrice,"sortOrder" to c0.sortOrder,"active" to c0.active)})
         writeMaps(fs,root.collection("monthlyAccounting"),dao.cloudAccountingSnapshot().map{a->a.monthKey to mapOf("monthKey" to a.monthKey,"cogs" to a.cogs,"openingCash" to a.openingCash,"closingCash" to a.closingCashSnapshot,"operatingProfit" to a.operatingProfitSnapshot,"distributableProfit" to a.distributableProfitSnapshot)})
         writeMaps(fs,root.collection("assets"),dao.cloudAssetsSnapshot().map{a->a.id to mapOf("id" to a.id,"name" to a.name,"categoryId" to a.categoryId,"purchaseDate" to a.purchaseDate,"totalCost" to a.totalCost,"usefulLifeMonths" to a.usefulLifeMonths,"residualValue" to a.residualValue,"estimatedLiquidationValue" to a.estimatedLiquidationValue,"status" to a.status,"disposalDate" to a.disposalDate,"disposalPrice" to a.disposalPrice,"investmentClass" to a.investmentClass)})
@@ -91,6 +92,7 @@ object FirebaseCloudSync {
     suspend fun syncDashboardNow(context:Context):Result<Unit> = runCatching{
         val db=PosDatabase.get(context);val dao=db.dao();val c=config(context);require(c.valid){"Chưa cấu hình Firebase"};val firebaseApp=firebaseApp(context,c);val uid=FirebaseAuth.getInstance(firebaseApp).currentUser?.uid?:error("Chưa đăng nhập Firebase")
         val fs=FirebaseFirestore.getInstance(firebaseApp);val root=fs.collection("users").document(uid).collection("stores").document("0210")
+        pullCloudFinance(root,dao)
         val tables=dao.cloudTablesSnapshot();val sessions=dao.cloudSessionsSnapshot();val batches=dao.cloudOrderBatchesSnapshot();val items=dao.cloudOrderItemsSnapshot();val bills=dao.cloudBillsSnapshot();val open=sessions.filter{it.status=="OPEN"};val openByTable=open.associateBy{it.tableId}
         val today=Calendar.getInstance().apply{set(Calendar.HOUR_OF_DAY,0);set(Calendar.MINUTE,0);set(Calendar.SECOND,0);set(Calendar.MILLISECOND,0)}.timeInMillis;val paidToday=bills.filter{it.status=="PAID"&&(it.closedAt?:0)>=today};val now=System.currentTimeMillis()
         root.collection("dashboard").document("current").set(financialDashboard(dao,bills,dao.cloudPaymentsSnapshot(),now)+mapOf("openTables" to open.size,"openTableNames" to tables.filter{openByTable.containsKey(it.id)}.map{it.name},"revenueToday" to paidToday.sumOf{it.total},"paidBillsToday" to paidToday.size,"lastUpdatedAt" to now)).await()
@@ -100,6 +102,51 @@ object FirebaseCloudSync {
         writeMaps(fs,root.collection("sessions"),sessions.map{s->s.id to mapOf("id" to s.id,"tableId" to s.tableId,"openedAt" to s.openedAt,"openedBy" to s.openedBy,"status" to s.status,"version" to s.version)})
         writeMaps(fs,root.collection("orderBatches"),batches.map{b->b.id to mapOf("id" to b.id,"sessionId" to b.sessionId,"sequence" to b.sequence,"ordererId" to b.ordererId,"createdAt" to b.createdAt,"sentAt" to b.sentAt,"status" to b.status,"serviceNo" to b.serviceNo,"deliveredAt" to b.deliveredAt,"deliveredBy" to b.deliveredBy)})
         writeMaps(fs,root.collection("orderItems"),items.map{i->i.id to mapOf("id" to i.id,"batchId" to i.batchId,"menuItemId" to i.menuItemId,"itemName" to i.itemNameSnapshot,"unitPrice" to i.unitPriceSnapshot,"qty" to i.qty,"note" to i.note,"adjustmentOfItemId" to i.adjustmentOfItemId)})
+    }
+
+    private suspend fun pullCloudFinance(root:com.google.firebase.firestore.DocumentReference,dao:PosDao){
+        val remotePurchases=root.collection("purchases").get().await().documents
+        remotePurchases.forEach{doc->
+            val id=doc.getString("id")?.ifBlank{doc.id}?:doc.id
+            val purchasedAt=doc.getLong("purchasedAt")?:return@forEach
+            val total=doc.getLong("total")?:return@forEach
+            if(total<=0)return@forEach
+            dao.insertCloudPurchase(
+                vn.ecohome.pos0210.data.PurchaseEntity(
+                    id=id,
+                    supplierId=doc.getString("supplierId"),
+                    enteredBy=doc.getString("enteredBy").orEmpty().ifBlank{"WEB_MANAGER"},
+                    purchasedAt=purchasedAt,
+                    total=total,
+                    note=doc.getString("note").orEmpty(),
+                    status=doc.getString("status").orEmpty().ifBlank{"ACTIVE"},
+                    expenseCategory=doc.getString("expenseCategory").orEmpty().ifBlank{"OTHER_EXPENSE"},
+                    paidByName=doc.getString("paidByName").orEmpty(),
+                    costCodeId=doc.getString("costCodeId"),
+                    updatedAt=doc.getLong("updatedAt")
+                )
+            )
+        }
+        val remoteMovements=root.collection("financialMovements").get().await().documents
+        remoteMovements.forEach{doc->
+            val id=doc.getString("id")?.ifBlank{doc.id}?:doc.id
+            val type=doc.getString("type")?:return@forEach
+            val amount=doc.getLong("amount")?:return@forEach
+            val occurredAt=doc.getLong("occurredAt")?:return@forEach
+            if(amount<=0)return@forEach
+            dao.insertCloudFinancialMovement(
+                vn.ecohome.pos0210.data.FinancialMovementEntity(
+                    id=id,
+                    type=type,
+                    amount=amount,
+                    occurredAt=occurredAt,
+                    partnerId=doc.getString("partnerId"),
+                    method=doc.getString("method").orEmpty().ifBlank{"CASH"},
+                    note=doc.getString("note").orEmpty(),
+                    counterpartyName=doc.getString("counterpartyName").orEmpty()
+                )
+            )
+        }
     }
 
     private suspend fun writeMaps(fs:FirebaseFirestore,collection:com.google.firebase.firestore.CollectionReference,rows:List<Pair<String,Map<String,Any?>>>){
