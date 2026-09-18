@@ -11,6 +11,7 @@ import {
   getFirestore,
   onSnapshot,
   setDoc,
+  writeBatch,
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -30,9 +31,10 @@ const root = ["users", STORE_OWNER_UID, "stores", STORE_ID];
 
 const state = {
   dashboard: {}, tables: [], sessions: [], batches: [], items: [],
-  bills: [], purchases: [], movements: [], costCodes: [],
+  bills: [], purchases: [], purchaseItems: [], movements: [], costCodes: [],
+  purchaseCategories: [], profitPartners: [], assetCategories: [], suppliers: [],
   unsubs: [], period: "today", customFrom: null, customTo: null,
-  transactionKind: "ALL", user: null,
+  transactionKind: "ALL", payerFilter: "ALL", user: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -71,6 +73,18 @@ const MOVEMENT_LABELS = {
   WORKING_CAPITAL: "Vốn lưu động", OWNER_WITHDRAWAL: "Rút vốn",
   PROFIT_WITHDRAWAL: "Rút lợi nhuận", RECOVERED_CAPITAL: "Thu hồi vốn",
   ASSET_DISPOSAL_IN: "Thanh lý tài sản",
+};
+const TRANSACTION_TYPES = {
+  OPERATING_EXPENSE: { label: "Chi phí vận hành", purchase: true },
+  ADDITIONAL_INVESTMENT: { label: "Đầu tư bổ sung", purchase: true, expenseCategory: "ADDITIONAL_INVESTMENT", asset: true, investmentClass: "ADDITIONAL" },
+  INITIAL_INVESTMENT: { label: "Đầu tư ban đầu không thu hồi", purchase: true, expenseCategory: "INITIAL_INVESTMENT_SUNK" },
+  ASSET_PURCHASE: { label: "Mua tài sản đầu tư ban đầu", purchase: true, expenseCategory: "CAPITAL_ASSET", asset: true, investmentClass: "INITIAL" },
+  CAPITAL_INJECTION: { label: "Góp vốn đầu tư", movement: "CAPITAL_CONTRIBUTION" },
+  WORKING_CAPITAL: { label: "Bổ sung vốn lưu động", movement: "WORKING_CAPITAL" },
+  PROFIT_WITHDRAWAL: { label: "Rút lợi nhuận", movement: "PROFIT_WITHDRAWAL", partner: true },
+  OWNER_WITHDRAWAL: { label: "Rút vốn", movement: "OWNER_WITHDRAWAL", partner: true },
+  CAPITAL_RECOVERY: { label: "Ghi nhận hoàn vốn", movement: "RECOVERED_CAPITAL" },
+  OTHER_ADJUSTMENT: { label: "Thu/điều chỉnh khác", movement: "OTHER_CASH_ADJUSTMENT" },
 };
 const MOVEMENT_OUT_TYPES = new Set(["PAYER_REIMBURSEMENT", "OWNER_WITHDRAWAL", "PROFIT_WITHDRAWAL"]);
 const INVESTMENT_CATEGORIES = new Set(["ADDITIONAL_INVESTMENT", "CAPITAL_ASSET", "SETUP_COST", "INITIAL_INVESTMENT_SUNK"]);
@@ -123,11 +137,15 @@ function renderCumulativeSummary() {
 function renderPeriodSummary() {
   const range = rangeForPeriod();
   const bills = state.bills.filter((b) => b.status === "PAID" && inRange(b.closedAt, range));
-  const purchases = state.purchases.filter((p) => p.status !== "DELETED" && inRange(p.purchasedAt, range));
+  const allPurchases = state.purchases.filter((p) => p.status !== "DELETED" && inRange(p.purchasedAt, range));
+  const purchases = state.payerFilter === "ALL"
+    ? allPurchases
+    : allPurchases.filter((p) => state.payerFilter === "UNKNOWN" ? !String(p.paidByName || "").trim() : String(p.paidByName || "").trim() === state.payerFilter);
   const movements = state.movements.filter((m) => inRange(m.occurredAt, range));
   const revenue = bills.reduce((s, b) => s + Number(b.total || 0), 0);
-  const expense = purchases.reduce((s, p) => s + Number(p.total || 0), 0);
-  const additionalInvestment = purchases.filter((p) => INVESTMENT_CATEGORIES.has(p.expenseCategory)).reduce((s, p) => s + Number(p.total || 0), 0);
+  const expense = allPurchases.reduce((s, p) => s + Number(p.total || 0), 0);
+  const selectedPayerExpense = purchases.reduce((s, p) => s + Number(p.total || 0), 0);
+  const additionalInvestment = allPurchases.filter((p) => INVESTMENT_CATEGORIES.has(p.expenseCategory)).reduce((s, p) => s + Number(p.total || 0), 0);
   const operatingExpense = expense - additionalInvestment;
   const movementNet = movements.reduce((s, m) => s + (MOVEMENT_OUT_TYPES.has(m.type) ? -Number(m.amount || 0) : Number(m.amount || 0)), 0);
   const cards = [
@@ -138,7 +156,7 @@ function renderPeriodSummary() {
     ["Đầu tư trong kỳ", money(additionalInvestment)],
     ["Chênh lệch DT - chi vận hành", money(revenue - operatingExpense)],
     ["Dòng tiền khác / vốn", money(movementNet)],
-    ["Tổng phiếu chi", purchases.length],
+    ["Tổng phiếu chi", allPurchases.length],
   ];
   const host = $("#period-summary");
   host.replaceChildren(...cards.map(([label, value]) => {
@@ -147,6 +165,8 @@ function renderPeriodSummary() {
     node.querySelector("strong").textContent = value;
     return node;
   }));
+  const payerLabel = state.payerFilter === "ALL" ? "Tất cả người chi" : state.payerFilter === "UNKNOWN" ? "Chưa xác định" : state.payerFilter;
+  $("#payer-total").textContent = `${payerLabel} · ${range.label}: ${money(selectedPayerExpense)} · ${purchases.length} phiếu`;
 }
 
 function renderTables() {
@@ -170,17 +190,36 @@ function renderTables() {
   }));
 }
 
-function renderCostCodes() {
-  const select = $("#entry-cost-code");
-  const current = select.value;
-  select.replaceChildren(new Option("Không mã", ""), ...state.costCodes.filter((c) => c.active !== false).map((c) => new Option(`${c.code} · ${c.name}`, c.id)));
-  select.value = [...select.options].some((o) => o.value === current) ? current : "";
+function renderFinanceMetadata() {
+  const keep = (select, options, fallback = "") => {
+    const current = select.value;
+    select.replaceChildren(...options);
+    select.value = [...select.options].some((o) => o.value === current) ? current : fallback;
+  };
+  keep($("#entry-cost-code"), [new Option("Không mã", ""), ...state.costCodes.filter((x) => x.active !== false).map((x) => new Option(`${x.code} · ${x.name}`, x.id))]);
+  keep($("#entry-purchase-category"), [new Option("Không phân mục", ""), ...state.purchaseCategories.filter((x) => x.active !== false).map((x) => new Option(x.name, x.id))]);
+  keep($("#entry-asset-category"), [new Option("Chọn nhóm tài sản", ""), ...state.assetCategories.filter((x) => x.active !== false).map((x) => new Option(x.name, x.id))]);
+  const people = state.profitPartners.filter((x) => x.active !== false);
+  keep($("#entry-payer"), [new Option("Chưa xác định", ""), ...people.map((x) => new Option(x.name, x.name))]);
+  keep($("#entry-partner"), [new Option("Chọn người", ""), ...people.map((x) => new Option(x.name, x.id))]);
+
+  const payerNames = [...new Set([
+    ...people.map((p) => p.name.trim()),
+    ...state.purchases.map((p) => String(p.paidByName || "").trim()).filter(Boolean),
+  ])].sort((a,b)=>a.localeCompare(b,"vi"));
+  const payerSelect = $("#payer-filter");
+  const currentFilter = state.payerFilter;
+  payerSelect.replaceChildren(new Option("Tất cả người chi", "ALL"), ...payerNames.map((name)=>new Option(name,name)));
+  if (state.purchases.some((p)=>!String(p.paidByName||"").trim())) payerSelect.append(new Option("Chưa xác định","UNKNOWN"));
+  payerSelect.value = [...payerSelect.options].some((o)=>o.value===currentFilter) ? currentFilter : "ALL";
+  state.payerFilter = payerSelect.value;
 }
 
 function renderTransactions() {
   const range = rangeForPeriod();
   const purchases = state.purchases
     .filter((p) => p.status !== "DELETED" && inRange(p.purchasedAt, range))
+    .filter((p) => state.payerFilter === "ALL" || (state.payerFilter === "UNKNOWN" ? !String(p.paidByName || "").trim() : String(p.paidByName || "").trim() === state.payerFilter))
     .map((p) => ({ kind: "EXPENSE", at: Number(p.purchasedAt || 0), id: p.id, amount: Number(p.total || 0), title: EXPENSE_LABELS[p.expenseCategory] || "Phiếu chi", person: p.paidByName || "", note: p.note || "" }));
   const movements = state.movements
     .filter((m) => inRange(m.occurredAt, range))
@@ -223,17 +262,30 @@ function escapeHtml(value) {
 
 function renderEntryType() {
   const type = $("#entry-type").value;
-  const expense = type === "CHI" || type === "DAU_TU_BO_SUNG";
-  $("#expense-category-wrap").hidden = !expense || type === "DAU_TU_BO_SUNG";
-  $("#entry-cost-code").closest("label").hidden = !expense;
-  if (type === "DAU_TU_BO_SUNG") $("#entry-category").value = "ADDITIONAL_INVESTMENT";
+  const cfg = TRANSACTION_TYPES[type] || TRANSACTION_TYPES.OPERATING_EXPENSE;
+  $("#purchase-fields").hidden = !cfg.purchase;
+  $("#movement-fields").hidden = Boolean(cfg.purchase);
+  $("#expense-category-wrap").hidden = type !== "OPERATING_EXPENSE";
+  $("#purchase-category-wrap").hidden = type !== "OPERATING_EXPENSE";
+  $("#asset-fields").hidden = !cfg.asset;
+  $("#movement-partner-wrap").hidden = !cfg.partner;
+  if (cfg.expenseCategory) $("#entry-category").value = cfg.expenseCategory;
+  const payroll = $("#entry-category").value === "PAYROLL";
+  $("#entry-item-label").firstChild.textContent = payroll ? "Người nhận lương / nhân sự" : "Mặt hàng / nội dung chi";
+  $("#entry-price-label").firstChild.textContent = payroll ? "Đơn giá / ngày công" : "Đơn giá";
+  recalcEntryTotal();
+}
+function recalcEntryTotal() {
+  const qty = Number($("#entry-qty").value || 0);
+  const price = Number($("#entry-unit-price").value || 0);
+  $("#entry-total").textContent = money(Math.round(qty * price));
 }
 
 function render() {
   renderCumulativeSummary();
   renderPeriodSummary();
   renderTables();
-  renderCostCodes();
+  renderFinanceMetadata();
   renderTransactions();
 }
 function clearListeners() { state.unsubs.splice(0).forEach((unsubscribe) => unsubscribe()); }
@@ -247,53 +299,108 @@ function subscribe() {
   watch(collection(db, ...root, "orderItems"), "items");
   watch(collection(db, ...root, "bills"), "bills");
   watch(collection(db, ...root, "purchases"), "purchases");
+  watch(collection(db, ...root, "purchaseItems"), "purchaseItems");
   watch(collection(db, ...root, "financialMovements"), "movements");
   watch(collection(db, ...root, "costCodes"), "costCodes");
+  watch(collection(db, ...root, "purchaseCategories"), "purchaseCategories");
+  watch(collection(db, ...root, "profitPartners"), "profitPartners");
+  watch(collection(db, ...root, "assetCategories"), "assetCategories");
+  watch(collection(db, ...root, "suppliers"), "suppliers");
 }
 
 async function saveEntry(event) {
   event.preventDefault();
   const type = $("#entry-type").value;
-  const amount = Number($("#entry-amount").value || 0);
+  const cfg = TRANSACTION_TYPES[type] || TRANSACTION_TYPES.OPERATING_EXPENSE;
   const occurredAt = new Date($("#entry-datetime").value).getTime();
-  const person = $("#entry-person").value.trim();
   const note = $("#entry-note").value.trim();
-  const method = $("#entry-method").value;
-  const costCodeId = $("#entry-cost-code").value || null;
   const error = $("#entry-error");
   error.textContent = "";
-  if (!Number.isFinite(amount) || amount <= 0) { error.textContent = "Số tiền phải lớn hơn 0."; return; }
   if (!Number.isFinite(occurredAt)) { error.textContent = "Ngày giờ không hợp lệ."; return; }
   if (!state.user) { error.textContent = "Phiên đăng nhập đã hết."; return; }
-  const id = uuid();
+
   const now = Date.now();
+  const id = uuid();
   try {
-    if (type === "CHI" || type === "DAU_TU_BO_SUNG") {
-      const category = type === "DAU_TU_BO_SUNG" ? "ADDITIONAL_INVESTMENT" : $("#entry-category").value;
-      await setDoc(doc(db, ...root, "purchases", id), {
-        id, supplierId: null, enteredBy: state.user.uid, purchasedAt: occurredAt, total: amount,
-        note, status: "ACTIVE", expenseCategory: category, paidByName: person,
-        costCodeId, updatedAt: now, source: "WEB_MANAGER", createdAt: now, createdBy: state.user.uid,
+    if (cfg.purchase) {
+      const itemName = $("#entry-item-name").value.trim();
+      const qty = Number($("#entry-qty").value || 0);
+      const unitPrice = Number($("#entry-unit-price").value || 0);
+      const total = Math.round(qty * unitPrice);
+      if (!itemName || !(qty > 0) || !(unitPrice > 0) || !(total > 0)) { error.textContent = "Cần nhập nội dung, số lượng và đơn giá hợp lệ."; return; }
+
+      let expenseCategory = type === "OPERATING_EXPENSE" ? $("#entry-category").value : cfg.expenseCategory;
+      const costCodeId = $("#entry-cost-code").value || null;
+      const purchaseCategoryId = $("#entry-purchase-category").value || "";
+      const unit = $("#entry-unit").value.trim() || "lần";
+      const selectedPayer = $("#entry-payer").value.trim();
+      const customPayer = $("#entry-payer-custom").value.trim();
+      const paidByName = customPayer || selectedPayer;
+      const supplierName = $("#entry-supplier").value.trim();
+      let supplierId = null;
+      const batch = writeBatch(db);
+
+      if (supplierName) {
+        const existing = state.suppliers.find((s) => String(s.name || "").trim().toLowerCase() === supplierName.toLowerCase());
+        supplierId = existing?.id || uuid();
+        if (!existing) batch.set(doc(db, ...root, "suppliers", supplierId), { id: supplierId, name: supplierName, phone: "", note: "", active: true });
+      }
+
+      batch.set(doc(db, ...root, "purchases", id), {
+        id, supplierId, supplierName, enteredBy: state.user.uid, purchasedAt: occurredAt, total,
+        note, status: "ACTIVE", expenseCategory, paidByName, costCodeId, updatedAt: now,
+        source: "WEB_MANAGER", createdAt: now, createdBy: state.user.uid,
       });
+      const itemId = uuid();
+      batch.set(doc(db, ...root, "purchaseItems", itemId), {
+        id: itemId, purchaseId: id, categoryId: purchaseCategoryId, name: itemName,
+        qty, unit, unitPrice: Math.round(unitPrice), amount: total,
+      });
+
+      if (cfg.asset) {
+        const assetCategoryId = $("#entry-asset-category").value;
+        const usefulLifeMonths = Number($("#entry-useful-life").value || 0);
+        const residualValue = Number($("#entry-residual").value || 0);
+        const estimatedLiquidationValue = Number($("#entry-liquidation").value || 0);
+        if (!assetCategoryId || !(usefulLifeMonths > 0) || residualValue < 0 || residualValue > total) {
+          error.textContent = "Tài sản cần nhóm tài sản, thời gian khấu hao hợp lệ và giá trị còn lại không vượt thành tiền.";
+          return;
+        }
+        const assetId = uuid();
+        batch.set(doc(db, ...root, "assets", assetId), {
+          id: assetId, name: itemName, categoryId: assetCategoryId, purchaseDate: occurredAt,
+          purchasePrice: Math.round(unitPrice), quantity: Math.max(1, Math.round(qty)), totalCost: total,
+          supplier: supplierName, usefulLifeMonths: Math.round(usefulLifeMonths), residualValue: Math.round(residualValue),
+          estimatedLiquidationValue: Math.round(estimatedLiquidationValue), status: "ACTIVE",
+          disposalDate: null, disposalPrice: null, note, investmentClass: cfg.investmentClass || "INITIAL",
+        });
+      }
+      await batch.commit();
     } else {
-      const movementType = {
-        GOP_VON: "CAPITAL_CONTRIBUTION",
-        HOAN_UNG: "PAYER_REIMBURSEMENT",
-        THU: "OTHER_CASH_IN",
-        DIEU_CHINH: "OTHER_CASH_ADJUSTMENT",
-      }[type];
+      const amount = Number($("#entry-amount").value || 0);
+      if (!(amount > 0)) { error.textContent = "Số tiền phải lớn hơn 0."; return; }
+      const partnerId = cfg.partner ? ($("#entry-partner").value || null) : null;
+      if (cfg.partner && !partnerId) { error.textContent = "Cần chọn người rút."; return; }
+      const partner = state.profitPartners.find((p) => p.id === partnerId);
+      const movementNote = [$("#entry-movement-note").value.trim(), note].filter(Boolean).join(" · ");
       await setDoc(doc(db, ...root, "financialMovements", id), {
-        id, type: movementType, amount, occurredAt, partnerId: null, method, note,
-        counterpartyName: person, source: "WEB_MANAGER", createdAt: now, createdBy: state.user.uid,
+        id, type: cfg.movement, amount: Math.round(amount), occurredAt, partnerId,
+        method: $("#entry-method").value, note: movementNote, counterpartyName: partner?.name || "",
+        source: "WEB_MANAGER", createdAt: now, createdBy: state.user.uid,
       });
     }
+
     $("#entry-form").reset();
     $("#entry-datetime").value = localDateTimeInput(new Date());
-    $("#entry-type").value = "CHI";
+    $("#entry-type").value = "OPERATING_EXPENSE";
+    $("#entry-qty").value = "1";
+    $("#entry-unit").value = "lần";
+    $("#entry-residual").value = "0";
+    $("#entry-liquidation").value = "0";
     renderEntryType();
     $("#entry-dialog").close();
   } catch (e) {
-    error.textContent = `Không lưu được phiếu: ${e.message || e}`;
+    error.textContent = `Không lưu được giao dịch: ${e.message || e}`;
   }
 }
 
@@ -310,16 +417,40 @@ $("#close-detail").addEventListener("click", () => $("#table-detail").close());
 $("#open-entry").addEventListener("click", () => {
   $("#entry-error").textContent = "";
   $("#entry-datetime").value = localDateTimeInput(new Date());
+  $("#entry-qty").value = $("#entry-qty").value || "1";
+  $("#entry-unit").value = $("#entry-unit").value || "lần";
+  renderFinanceMetadata();
   renderEntryType();
   $("#entry-dialog").showModal();
 });
 $("#close-entry").addEventListener("click", () => $("#entry-dialog").close());
 $("#entry-type").addEventListener("change", renderEntryType);
+$("#entry-category").addEventListener("change", renderEntryType);
+$("#entry-qty").addEventListener("input", recalcEntryTotal);
+$("#entry-unit-price").addEventListener("input", recalcEntryTotal);
+$("#entry-payer").addEventListener("change", () => { if ($("#entry-payer").value) $("#entry-payer-custom").value = ""; });
+$("#entry-asset-category").addEventListener("change", () => {
+  const category = state.assetCategories.find((x) => x.id === $("#entry-asset-category").value);
+  if (category && !$("#entry-useful-life").value) $("#entry-useful-life").value = category.defaultUsefulLifeMonths || "";
+});
 $("#entry-cost-code").addEventListener("change", () => {
   const code = state.costCodes.find((c) => c.id === $("#entry-cost-code").value);
   if (code?.parentExpenseCategory) $("#entry-category").value = code.parentExpenseCategory;
+  if (code?.defaultUnit) $("#entry-unit").value = code.defaultUnit;
+  if (code?.name && !$("#entry-item-name").value) $("#entry-item-name").value = code.name;
+  if (code?.defaultSupplier && !$("#entry-supplier").value) $("#entry-supplier").value = code.defaultSupplier;
+  renderEntryType();
+});
+$("#entry-purchase-category").addEventListener("change", () => {
+  const category = state.purchaseCategories.find((x) => x.id === $("#entry-purchase-category").value);
+  if (category?.defaultUnit) $("#entry-unit").value = category.defaultUnit;
 });
 $("#entry-form").addEventListener("submit", saveEntry);
+$("#payer-filter").addEventListener("change", () => {
+  state.payerFilter = $("#payer-filter").value;
+  renderPeriodSummary();
+  renderTransactions();
+});
 
 $("#period-filters").addEventListener("click", (event) => {
   const button = event.target.closest("[data-period]");
@@ -349,6 +480,8 @@ const todayInput = localDateInput(new Date());
 $("#from-date").value = todayInput;
 $("#to-date").value = todayInput;
 $("#entry-datetime").value = localDateTimeInput(new Date());
+$("#entry-type").value = "OPERATING_EXPENSE";
+renderEntryType();
 
 onAuthStateChanged(auth, (user) => {
   state.user = user || null;
