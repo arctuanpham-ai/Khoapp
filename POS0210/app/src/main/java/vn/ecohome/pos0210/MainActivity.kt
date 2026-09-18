@@ -3059,7 +3059,7 @@ fun Report(vm: PosViewModel) {
         ) {
             FilterChip(section == "OVERVIEW", { section = "OVERVIEW" }, { Text("TỔNG QUAN") })
             FilterChip(section == "BILLS", { section = "BILLS" }, { Text("LỊCH SỬ BILL") })
-            FilterChip(section == "PURCHASES", { section = "PURCHASES" }, { Text("NHẬP HÀNG") })
+            FilterChip(section == "PURCHASES", { section = "PURCHASES" }, { Text("CHI / NGƯỜI CHI") })
             FilterChip(section == "MONTHLY", { section = "MONTHLY" }, { Text("BÁO CÁO THÁNG") })
         }
 
