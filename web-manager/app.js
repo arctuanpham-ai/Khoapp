@@ -90,11 +90,14 @@ const MOVEMENT_OUT_TYPES = new Set(["PAYER_REIMBURSEMENT", "OWNER_WITHDRAWAL", "
 const INVESTMENT_CATEGORIES = new Set(["ADDITIONAL_INVESTMENT", "CAPITAL_ASSET", "SETUP_COST", "INITIAL_INVESTMENT_SUNK"]);
 
 function currentTable(table) {
-  const session = state.sessions.find((row) => row.tableId === table.id && row.status === "OPEN");
+  // tableStatus is the canonical realtime occupancy signal from the POS.
+  // Historical/stale session documents must never reopen a table on the web.
+  const occupied = table.occupied === true;
+  const session = occupied ? state.sessions.find((row) => row.tableId === table.id && row.status === "OPEN") : null;
   const batches = session ? state.batches.filter((row) => row.sessionId === session.id && row.status !== "CANCELLED") : [];
   const batchIds = new Set(batches.map((row) => row.id));
   const items = state.items.filter((row) => batchIds.has(row.batchId));
-  return { table, session, batches, items, total: items.reduce((sum, item) => sum + Number(item.unitPrice || 0) * Number(item.qty || 0), 0) };
+  return { table, occupied, session, batches, items, total: items.reduce((sum, item) => sum + Number(item.unitPrice || 0) * Number(item.qty || 0), 0) };
 }
 
 function rangeForPeriod() {
@@ -173,12 +176,12 @@ function renderTables() {
   const host = $("#tables");
   const records = state.tables.filter((table) => table.active !== false).map(currentTable);
   records.sort((a, b) => String(a.table.name).localeCompare(String(b.table.name), "vi"));
-  const activeRecords = records.filter((r) => Boolean(r.session || r.table.occupied));
+  const activeRecords = records.filter((r) => r.occupied);
   $("#live-open-tables").textContent = activeRecords.length;
   $("#live-open-total").textContent = money(activeRecords.reduce((s, r) => s + r.total, 0));
   host.replaceChildren(...records.map((record) => {
     const node = $("#table-template").content.firstElementChild.cloneNode(true);
-    const occupied = Boolean(record.session || record.table.occupied);
+    const occupied = record.occupied;
     node.classList.toggle("occupied", occupied);
     node.querySelector(".table-state").textContent = occupied ? "ĐANG PHỤC VỤ" : "TRỐNG";
     node.querySelector("strong").textContent = record.table.name || "Bàn";
