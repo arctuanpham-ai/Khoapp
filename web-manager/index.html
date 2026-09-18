@@ -16,7 +16,7 @@
       <section id="login-view" class="login-card" aria-labelledby="login-title">
         <p class="eyebrow">0210 · BREAKFAST · COFFEE · DRINKS</p>
         <h1 id="login-title">Manager realtime</h1>
-        <p class="muted">Chỉ xem tình trạng quán. Không thể tạo hoặc sửa dữ liệu bán hàng.</p>
+        <p class="muted">Theo dõi quán realtime và nhập phiếu tài chính từ xa.</p>
         <label>Email Firebase<input id="email" type="email" autocomplete="username" inputmode="email" /></label>
         <label>Mật khẩu<input id="password" type="password" autocomplete="current-password" /></label>
         <button id="login-button" class="primary">Đăng nhập</button>
@@ -27,15 +27,57 @@
         <header class="topbar">
           <div>
             <p class="eyebrow">0210 · MANAGER</p>
-            <h1>Tình hình quán</h1>
+            <h1>Quản lý realtime</h1>
           </div>
           <button id="logout-button" class="text-button">Đăng xuất</button>
         </header>
 
         <p id="sync-status" class="sync-status">Đang kết nối realtime…</p>
-        <section id="summary" class="summary-grid" aria-label="Tổng quan realtime"></section>
-        <section class="section-heading"><div><p class="eyebrow">SƠ ĐỒ BÀN</p><h2>Trạng thái phục vụ</h2></div></section>
+
+        <section class="section-heading first-section">
+          <div><p class="eyebrow">SƠ ĐỒ BÀN</p><h2>Trạng thái phục vụ realtime</h2></div>
+        </section>
+        <section class="live-strip" aria-label="Tình trạng bàn realtime">
+          <article><span>Bàn đang phục vụ</span><strong id="live-open-tables">0</strong></article>
+          <article><span>Tổng tạm tính</span><strong id="live-open-total">0đ</strong></article>
+        </section>
         <section id="tables" class="table-grid" aria-live="polite"></section>
+
+        <section class="section-heading report-heading">
+          <div><p class="eyebrow">TÀI CHÍNH</p><h2>Tình hình quán</h2></div>
+          <button id="open-entry" class="secondary">+ NHẬP PHIẾU</button>
+        </section>
+
+        <div class="filter-row" id="period-filters">
+          <button data-period="today" class="filter active">Hôm nay</button>
+          <button data-period="yesterday" class="filter">Hôm qua</button>
+          <button data-period="7d" class="filter">7 ngày</button>
+          <button data-period="month" class="filter">Tháng này</button>
+          <button data-period="all" class="filter">Tất cả</button>
+          <button data-period="custom" class="filter">Tùy chọn</button>
+        </div>
+        <div id="custom-range" class="custom-range" hidden>
+          <label>Từ ngày<input id="from-date" type="date" /></label>
+          <label>Đến ngày<input id="to-date" type="date" /></label>
+          <button id="apply-range" class="secondary">Áp dụng</button>
+        </div>
+
+        <section id="period-summary" class="summary-grid" aria-label="Tổng quan theo kỳ"></section>
+
+        <section class="section-heading compact">
+          <div><p class="eyebrow">TÍCH LŨY</p><h2>Chỉ số toàn thời gian</h2></div>
+        </section>
+        <section id="summary" class="summary-grid cumulative-grid" aria-label="Chỉ số tích lũy"></section>
+
+        <section class="section-heading compact">
+          <div><p class="eyebrow">PHIẾU TÀI CHÍNH</p><h2>Lịch sử gần đây</h2></div>
+        </section>
+        <div class="filter-row" id="transaction-filters">
+          <button data-kind="ALL" class="filter active">Tất cả</button>
+          <button data-kind="EXPENSE" class="filter">Chi</button>
+          <button data-kind="MOVEMENT" class="filter">Thu / vốn / hoàn ứng</button>
+        </div>
+        <section id="transactions" class="transaction-list"></section>
       </section>
     </main>
 
@@ -45,6 +87,57 @@
         <p id="detail-meta" class="muted"></p>
         <ul id="detail-items" class="order-list"></ul>
         <footer id="detail-total" class="detail-total"></footer>
+      </article>
+    </dialog>
+
+    <dialog id="entry-dialog">
+      <article>
+        <div class="dialog-header">
+          <div><p class="eyebrow">NHẬP TRỰC TIẾP TRÊN WEB</p><h2>Phiếu tài chính</h2></div>
+          <button id="close-entry" class="text-button">Đóng</button>
+        </div>
+        <form id="entry-form" class="entry-form">
+          <label>Loại giao dịch
+            <select id="entry-type">
+              <option value="CHI">Chi</option>
+              <option value="GOP_VON">Góp vốn</option>
+              <option value="HOAN_UNG">Hoàn ứng</option>
+              <option value="DAU_TU_BO_SUNG">Đầu tư bổ sung</option>
+              <option value="THU">Thu khác</option>
+              <option value="DIEU_CHINH">Điều chỉnh tiền</option>
+            </select>
+          </label>
+          <label>Ngày giờ<input id="entry-datetime" type="datetime-local" required /></label>
+          <label>Số tiền<input id="entry-amount" type="number" min="1" step="1000" inputmode="numeric" required /></label>
+          <label id="expense-category-wrap">Nhóm chi phí
+            <select id="entry-category">
+              <option value="OTHER_EXPENSE">Chi phí khác</option>
+              <option value="INVENTORY_PURCHASE">Nhập nguyên liệu / hàng hóa</option>
+              <option value="PAYROLL">Lương</option>
+              <option value="ELECTRICITY">Điện</option>
+              <option value="WATER">Nước</option>
+              <option value="RENT">Thuê mặt bằng</option>
+              <option value="MARKETING">Marketing</option>
+              <option value="CONSUMABLES">Vật tư tiêu hao</option>
+              <option value="MAINTENANCE">Bảo trì</option>
+              <option value="SERVICES">Dịch vụ</option>
+              <option value="BANK_FEES">Phí ngân hàng</option>
+            </select>
+          </label>
+          <label>Mã chi phí
+            <select id="entry-cost-code"><option value="">Không mã</option></select>
+          </label>
+          <label>Phương thức
+            <select id="entry-method">
+              <option value="CASH">Tiền mặt</option>
+              <option value="TRANSFER">Chuyển khoản</option>
+            </select>
+          </label>
+          <label>Người chi / đối tượng liên quan<input id="entry-person" type="text" maxlength="80" placeholder="Ví dụ: Tuấn" /></label>
+          <label>Nội dung<input id="entry-note" type="text" maxlength="180" placeholder="Nội dung giao dịch" /></label>
+          <p id="entry-error" class="error"></p>
+          <button type="submit" class="primary">LƯU PHIẾU</button>
+        </form>
       </article>
     </dialog>
 
