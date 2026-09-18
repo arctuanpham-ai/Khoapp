@@ -124,6 +124,12 @@ object FirebaseCloudSync {
                 )
             )
         }
+        val remoteSuppliers=root.collection("suppliers").get().await().documents
+        remoteSuppliers.forEach{doc->
+            val id=doc.getString("id")?.ifBlank{doc.id}?:doc.id
+            val name=doc.getString("name")?:return@forEach
+            if(name.isNotBlank()) dao.saveSupplier(vn.ecohome.pos0210.data.SupplierEntity(id,name,doc.getString("phone").orEmpty(),doc.getString("note").orEmpty(),doc.getBoolean("active")?:true))
+        }
         val remotePurchaseItems=root.collection("purchaseItems").get().await().documents.mapNotNull{doc->
             val purchaseId=doc.getString("purchaseId")?:return@mapNotNull null
             val name=doc.getString("name")?:return@mapNotNull null
@@ -189,6 +195,7 @@ object FirebaseCloudSync {
         val purchaseItems=dao.allPurchasesSnapshot().flatMap{p->dao.purchaseItemsSnapshot(p.id)}
         writeMaps(fs,root.collection("purchaseItems"),purchaseItems.map{i->i.id to mapOf("id" to i.id,"purchaseId" to i.purchaseId,"categoryId" to i.categoryId,"name" to i.name,"qty" to i.qty,"unit" to i.unit,"unitPrice" to i.unitPrice,"amount" to i.amount)})
         writeMaps(fs,root.collection("purchaseCategories"),dao.allPurchaseCategoriesSnapshot().map{p->p.id to mapOf("id" to p.id,"name" to p.name,"defaultUnit" to p.defaultUnit,"sortOrder" to p.sortOrder,"active" to p.active)})
+        writeMaps(fs,root.collection("suppliers"),dao.allSuppliersSnapshot().map{s->s.id to mapOf("id" to s.id,"name" to s.name,"phone" to s.phone,"note" to s.note,"active" to s.active)})
         writeMaps(fs,root.collection("costCodes"),dao.allCostCodesSnapshot().map{c0->c0.id to mapOf("id" to c0.id,"code" to c0.code,"name" to c0.name,"parentExpenseCategory" to c0.parentExpenseCategory,"defaultUnit" to c0.defaultUnit,"defaultSupplier" to c0.defaultSupplier,"referenceUnitPrice" to c0.referenceUnitPrice,"sortOrder" to c0.sortOrder,"active" to c0.active)})
         writeMaps(fs,root.collection("profitPartners"),dao.allProfitPartnersSnapshot().map{p->p.id to mapOf("id" to p.id,"name" to p.name,"shareBasisPoints" to p.shareBasisPoints,"sortOrder" to p.sortOrder,"active" to p.active)})
         writeMaps(fs,root.collection("assetCategories"),dao.allAssetCategoriesSnapshot().map{a->a.id to mapOf("id" to a.id,"name" to a.name,"defaultUsefulLifeMonths" to a.defaultUsefulLifeMonths,"minUsefulLifeMonths" to a.minUsefulLifeMonths,"maxUsefulLifeMonths" to a.maxUsefulLifeMonths,"sortOrder" to a.sortOrder,"active" to a.active)})
