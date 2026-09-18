@@ -61,7 +61,9 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Query("SELECT * FROM PurchaseItemEntity WHERE purchaseId=:purchaseId") fun purchaseItems(purchaseId:String):Flow<List<PurchaseItemEntity>>
 @Query("SELECT * FROM MonthlyAccountingEntity") fun monthlyAccounting():Flow<List<MonthlyAccountingEntity>>
 @Query("SELECT * FROM ProfitPartnerEntity WHERE active=1 ORDER BY sortOrder,name") fun profitPartners():Flow<List<ProfitPartnerEntity>>
+@Query("SELECT * FROM ProfitPartnerEntity ORDER BY sortOrder,name") suspend fun allProfitPartnersSnapshot():List<ProfitPartnerEntity>
 @Query("SELECT * FROM AssetCategoryEntity WHERE active=1 ORDER BY sortOrder,name") fun assetCategories():Flow<List<AssetCategoryEntity>>
+@Query("SELECT * FROM AssetCategoryEntity ORDER BY sortOrder,name") suspend fun allAssetCategoriesSnapshot():List<AssetCategoryEntity>
 @Query("SELECT * FROM AssetEntity ORDER BY purchaseDate DESC,name") fun assets():Flow<List<AssetEntity>>
 @Query("SELECT * FROM AssetValuationEntity ORDER BY changedAt DESC") fun assetValuations():Flow<List<AssetValuationEntity>>
 @Query("SELECT * FROM FinancialMovementEntity ORDER BY occurredAt DESC") fun financialMovements():Flow<List<FinancialMovementEntity>>
@@ -135,12 +137,14 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertPurchase(v:PurchaseEntity)
 @Insert(onConflict=OnConflictStrategy.IGNORE) suspend fun insertCloudPurchase(v:PurchaseEntity):Long
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertPurchaseItems(v:List<PurchaseItemEntity>)
+@Insert(onConflict=OnConflictStrategy.IGNORE) suspend fun insertCloudPurchaseItems(v:List<PurchaseItemEntity>):List<Long>
 @Update suspend fun updatePurchase(v:PurchaseEntity):Int
 @Update suspend fun updatePurchaseItem(v:PurchaseItemEntity):Int
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveMonthlyAccounting(v:MonthlyAccountingEntity)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveProfitPartners(v:List<ProfitPartnerEntity>)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveAssetCategory(v:AssetCategoryEntity)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveAsset(v:AssetEntity)
+@Insert(onConflict=OnConflictStrategy.IGNORE) suspend fun insertCloudAsset(v:AssetEntity):Long
 @Query("UPDATE AssetEntity SET status=:status WHERE id=:id") suspend fun setAssetStatus(id:String,status:String):Int
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertAssetValuation(v:AssetValuationEntity)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertFinancialMovement(v:FinancialMovementEntity)
