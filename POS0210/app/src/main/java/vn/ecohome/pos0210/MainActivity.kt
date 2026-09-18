@@ -625,6 +625,7 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
     val qrInfo = "${setting("qr_prefix").ifBlank { "0210" }} $shortTable ${validPaymentSession?.paymentCode.orEmpty()}".trim()
     val checkoutKey="${s.id}:${preview.total}:$qrInfo"
     val billPrinted=printedCheckoutKey==checkoutKey
+    val checkoutPrintTestMode = setting("checkout_print_test_mode")=="true" && e?.role=="ADMIN"
     val qrConfigured = setting("bank_name").isNotBlank() && setting("bank_account").isNotBlank()
     val ambiguousEvent=bankEvents.firstOrNull{it.matchStatus=="AMBIGUOUS"&&it.amount==preview.total&&it.receivedAt>=s.openedAt}
 
@@ -748,11 +749,26 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
         Column(Modifier.fillMaxWidth().padding(18.dp)) {
             if(!billPrinted){
                 Button(
-                    onClick={vm.printCheckoutBill(preview,qrInfo,matchedCustomer?.name?:customerName)},
+                    onClick={
+                        if(checkoutPrintTestMode) vm.confirmCheckoutBillTest(preview,qrInfo)
+                        else vm.printCheckoutBill(preview,qrInfo,matchedCustomer?.name?:customerName)
+                    },
                     modifier=Modifier.fillMaxWidth(),
-                    enabled=preview.total>0&&pendingDelivery.isEmpty()&&qrConfigured&&validPaymentSession!=null
-                ){Text(if(pendingDelivery.isNotEmpty())"CHƯA GIAO ĐỦ · CHƯA THỂ IN BILL" else "IN BILL TRƯỚC")}
-                Text("Phải in bill để khách kiểm tra trước khi xác nhận thanh toán.",Modifier.padding(top=6.dp),fontSize=11.sp)
+                    enabled=preview.total>0&&pendingDelivery.isEmpty()&&validPaymentSession!=null&&(checkoutPrintTestMode||qrConfigured)
+                ){
+                    Text(
+                        if(pendingDelivery.isNotEmpty())"CHƯA GIAO ĐỦ · CHƯA THỂ IN BILL"
+                        else if(checkoutPrintTestMode)"QA · XÁC NHẬN BILL TEST (KHÔNG IN)"
+                        else "IN BILL TRƯỚC"
+                    )
+                }
+                Text(
+                    if(checkoutPrintTestMode)"Chế độ QA: chỉ giả lập bước đã in bill để kiểm thử thanh toán; không gửi lệnh tới máy in."
+                    else "Phải in bill để khách kiểm tra trước khi xác nhận thanh toán.",
+                    Modifier.padding(top=6.dp),fontSize=11.sp,
+                    color=if(checkoutPrintTestMode)Color(0xFF9A4B3D) else Color.Unspecified,
+                    fontWeight=if(checkoutPrintTestMode)FontWeight.Bold else FontWeight.Normal
+                )
             }else{
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)){
                     OutlinedButton(onClick={vm.close("CASH",preview,customerPhone,customerName)},modifier=Modifier.weight(1f)){Text("XÁC NHẬN\nTIỀN MẶT",textAlign=TextAlign.Center)}
@@ -2657,6 +2673,8 @@ fun Printer(vm: PosViewModel) {
     val selectedMac = settings.firstOrNull { it.key == "printer_mac" }?.value ?: ""
     val selectedName = settings.firstOrNull { it.key == "printer_name" }?.value ?: ""
     val paperMm = settings.firstOrNull { it.key == "printer_paper_mm" }?.value ?: "58"
+    val checkoutTestMode = settings.firstOrNull { it.key == "checkout_print_test_mode" }?.value == "true"
+    val current by vm.currentEmployee.collectAsState()
     val hasPermission = remember(permissionTick) { BluetoothPrinter.hasPermission(context) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -2690,6 +2708,21 @@ fun Printer(vm: PosViewModel) {
                         onClick = { vm.saveSetting("printer_mode","BLUETOOTH") },
                         label = { Text("BLUETOOTH") }
                     )
+                }
+
+                if(current?.role=="ADMIN"){
+                    Card(Modifier.fillMaxWidth().padding(vertical=8.dp),colors=CardDefaults.cardColors(containerColor=if(checkoutTestMode) Color(0xFFFFE8D6) else Tint)){
+                        Column(Modifier.padding(14.dp)){
+                            Row(verticalAlignment=Alignment.CenterVertically){
+                                Column(Modifier.weight(1f)){
+                                    Text("QA · BILL TEST KHÔNG IN THẬT",fontWeight=FontWeight.Black)
+                                    Text("Chỉ dùng khi kiểm thử luồng thanh toán. Khi bật, Admin có thể xác nhận bước 'đã in bill' mà không cần máy in vật lý.",fontSize=11.sp)
+                                }
+                                Switch(checked=checkoutTestMode,onCheckedChange={vm.saveSetting("checkout_print_test_mode",it.toString())})
+                            }
+                            if(checkoutTestMode)Text("⚠ ĐANG BẬT CHẾ ĐỘ TEST · Tắt trước khi vận hành thật.",fontSize=12.sp,fontWeight=FontWeight.Black,color=Color(0xFF9A4B3D))
+                        }
+                    }
                 }
 
                 if (mode == "BLUETOOTH") {
@@ -2902,6 +2935,7 @@ fun Report(vm: PosViewModel) {
     val purchases by vm.purchases.collectAsState()
     val purchaseCosts by vm.purchaseCosts.collectAsState()
     val purchaseCategories by vm.purchaseCategories.collectAsState()
+    val profitPartners by vm.profitPartners.collectAsState()
     val itemSales by vm.itemSales.collectAsState()
     val current by vm.currentEmployee.collectAsState()
     var section by remember { mutableStateOf("OVERVIEW") }
@@ -2939,8 +2973,11 @@ fun Report(vm: PosViewModel) {
     }
     val purchasePeriodLabel = when(purchasePeriod){"TODAY"->"Hôm nay";"WEEK"->"7 ngày";"MONTH"->"Tháng này";else->"Tất cả"}
     val periodPurchases = if (purchaseFrom == null) purchases else purchases.filter { it.purchasedAt >= purchaseFrom }
-    val payerNames = periodPurchases.map { it.paidByName.trim() }.filter { it.isNotBlank() }.distinct().sorted()
-    val hasUnknownPayer = periodPurchases.any { it.paidByName.isBlank() }
+    val payerNames = (
+        profitPartners.filter { it.active }.map { it.name.trim() } +
+        purchases.map { it.paidByName.trim() }.filter { it.isNotBlank() }
+    ).filter { it.isNotBlank() }.distinct().sorted()
+    val hasUnknownPayer = purchases.any { it.paidByName.isBlank() }
     val filteredPurchases = periodPurchases.filter { p ->
         when (payerFilter) {
             "ALL" -> true
@@ -2949,6 +2986,12 @@ fun Report(vm: PosViewModel) {
         }
     }
     val filteredPurchaseIds = filteredPurchases.map { it.id }.toSet()
+    val payerTotalsForPeriod = buildList {
+        payerNames.forEach { name ->
+            add(name to periodPurchases.filter { it.paidByName.trim() == name }.sumOf { it.total })
+        }
+        if(hasUnknownPayer) add("Chưa xác định" to periodPurchases.filter { it.paidByName.isBlank() }.sumOf { it.total })
+    }.sortedByDescending { it.second }
     val billIds = filteredBills.map { it.id }.toSet()
     val filteredPayments = payments.filter { it.billId in billIds }
     val revenue = filteredBills.sumOf { it.total }
@@ -3214,12 +3257,11 @@ fun Report(vm: PosViewModel) {
                     LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
                         item { val who=when(payerFilter){"ALL"->"Tất cả người chi";"UNKNOWN"->"Chưa xác định";else->payerFilter};Text("Tổng chi · $who · $purchasePeriodLabel: ${money(purchaseTotal)}", fontSize = 22.sp, fontWeight = FontWeight.Bold) }
                         item {
-                            val summary = filteredPurchases.groupBy { it.paidByName.trim().ifBlank { "Chưa xác định" } }
-                                .mapValues { (_, rows) -> rows.sumOf { it.total } }
-                                .toList().sortedByDescending { it.second }
-                            if(summary.isNotEmpty()) {
-                                Text("Theo người chi / ứng tiền", Modifier.padding(top = 8.dp, bottom = 3.dp), fontWeight = FontWeight.Bold)
-                                summary.forEach { (name, amount) -> Text("$name · ${money(amount)}", fontSize = 12.sp) }
+                            if(payerTotalsForPeriod.isNotEmpty()) {
+                                Text("Tổng chi theo người · $purchasePeriodLabel", Modifier.padding(top = 8.dp, bottom = 3.dp), fontWeight = FontWeight.Bold)
+                                payerTotalsForPeriod.forEach { (name, amount) ->
+                                    Text("$name · ${money(amount)}", fontSize = 12.sp, fontWeight = if(name==payerFilter) FontWeight.Black else FontWeight.Normal)
+                                }
                             }
                         }
                         if (categorizedCosts.isNotEmpty()) {
