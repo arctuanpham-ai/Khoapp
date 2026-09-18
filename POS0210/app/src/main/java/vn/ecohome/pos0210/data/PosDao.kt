@@ -133,6 +133,7 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Query("UPDATE PricingRuleEntity SET active=:active WHERE id=:id") suspend fun setPricingRuleActive(id:String,active:Boolean)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertBillAdjustments(v:List<BillAdjustmentEntity>)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertPurchase(v:PurchaseEntity)
+@Insert(onConflict=OnConflictStrategy.IGNORE) suspend fun insertCloudPurchase(v:PurchaseEntity):Long
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertPurchaseItems(v:List<PurchaseItemEntity>)
 @Update suspend fun updatePurchase(v:PurchaseEntity):Int
 @Update suspend fun updatePurchaseItem(v:PurchaseItemEntity):Int
@@ -143,6 +144,7 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Query("UPDATE AssetEntity SET status=:status WHERE id=:id") suspend fun setAssetStatus(id:String,status:String):Int
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertAssetValuation(v:AssetValuationEntity)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertFinancialMovement(v:FinancialMovementEntity)
+@Insert(onConflict=OnConflictStrategy.IGNORE) suspend fun insertCloudFinancialMovement(v:FinancialMovementEntity):Long
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertOpeningCashAdjustment(v:OpeningCashAdjustmentEntity)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun audit(v:AuditEventEntity)
 @Query("UPDATE MenuItemEntity SET active=:active WHERE id=:id") suspend fun setMenuActive(id:String,active:Boolean)
