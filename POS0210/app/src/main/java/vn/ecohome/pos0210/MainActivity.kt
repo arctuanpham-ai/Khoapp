@@ -1194,11 +1194,15 @@ fun CloudSyncSettings(vm:PosViewModel){
             OutlinedTextField(password,{password=it},Modifier.fillMaxWidth(),label={Text("Mật khẩu")},visualTransformation=PasswordVisualTransformation(),singleLine=true)
             if(state?.syncedUid==null)Button({vm.firebaseSignIn(email,password);password=""},Modifier.fillMaxWidth(),enabled=email.isNotBlank()&&password.length>=6){Text("ĐĂNG NHẬP & BẬT ĐỒNG BỘ")}
             else OutlinedButton({vm.firebaseSignOut()},Modifier.fillMaxWidth()){Text("ĐĂNG XUẤT FIREBASE")}
-            Button({vm.syncFirebase()},Modifier.fillMaxWidth(),enabled=state?.syncedUid!=null){Text("ĐỒNG BỘ NGAY")}
+            Button({vm.syncFirebase()},Modifier.fillMaxWidth(),enabled=state?.syncedUid!=null){Text("ĐỒNG BỘ REALTIME NGAY")}
+            OutlinedButton({vm.createFirebaseBackup()},Modifier.fillMaxWidth(),enabled=state?.syncedUid!=null){Text("TẠO CLOUD BACKUP NGAY")}
             OutlinedButton({confirmRestore=true},Modifier.fillMaxWidth(),enabled=state?.syncedUid!=null){Text("KHÔI PHỤC CLOUD BACKUP")}
             if(message.isNotBlank())Text(message,fontWeight=FontWeight.Bold)
-            Text("Trạng thái: "+when{state?.syncedUid==null->"Chưa đăng nhập";state?.lastError!=null->"Có lỗi";state?.dirty==true->"Có dữ liệu đang chờ";else->"Đã đồng bộ"},fontWeight=FontWeight.Bold)
-            state?.lastSuccessAt?.let{Text("Lần thành công: ${time(it)}",fontSize=12.sp)};state?.lastError?.let{Text(it,color=Color(0xFF9A4B3D),fontSize=12.sp)}
+            val backupOnlyError=state?.lastError?.takeIf{it.startsWith("PRIVATE_BACKUP_ONLY:")}
+            Text("Realtime sync: "+when{state?.syncedUid==null->"Chưa đăng nhập";state?.lastSuccessAt!=null->"Thành công";else->"Chưa có lần thành công"},fontWeight=FontWeight.Bold)
+            state?.lastSuccessAt?.let{Text("Lần realtime thành công: ${time(it)}",fontSize=12.sp)}
+            Text("Cloud backup: "+if(backupOnlyError==null)"Sẵn sàng" else "Có lỗi",fontWeight=FontWeight.Bold)
+            backupOnlyError?.let{Text(it.removePrefix("PRIVATE_BACKUP_ONLY:").trim(),color=Color(0xFF9A4B3D),fontSize=12.sp)}
             HorizontalDivider()
             Text("MANAGER REALTIME",fontWeight=FontWeight.Black,fontSize=18.sp)
             MetricCard("Bàn đang có khách","${dashboard.openTables}");MetricCard("Doanh thu hôm nay",money(dashboard.revenueToday));MetricCard("Bill hôm nay","${dashboard.paidBillsToday}")
