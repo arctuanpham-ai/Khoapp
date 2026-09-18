@@ -2902,6 +2902,7 @@ fun Report(vm: PosViewModel) {
     var selectedPurchase by remember { mutableStateOf<PurchaseEntity?>(null) }
     var paymentFilter by remember { mutableStateOf("ALL") }
     var payerFilter by remember { mutableStateOf("ALL") }
+    var purchasePeriod by remember { mutableStateOf("TODAY") }
     var historyDateText by remember { mutableStateOf("") }
     var selectedBillIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showBulkDelete by remember { mutableStateOf(false) }
@@ -2920,7 +2921,16 @@ fun Report(vm: PosViewModel) {
 
     val from = if (periodDays == 0) null else periodStart(periodDays)
     val filteredBills = if (from == null) bills else bills.filter { (it.closedAt ?: 0L) >= from }
-    val periodPurchases = if (from == null) purchases else purchases.filter { it.purchasedAt >= from }
+    val purchaseFrom = when(purchasePeriod){
+        "TODAY" -> periodStart(1)
+        "WEEK" -> periodStart(7)
+        "MONTH" -> Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_MONTH,1);set(Calendar.HOUR_OF_DAY,0);set(Calendar.MINUTE,0);set(Calendar.SECOND,0);set(Calendar.MILLISECOND,0)
+        }.timeInMillis
+        else -> null
+    }
+    val purchasePeriodLabel = when(purchasePeriod){"TODAY"->"Hôm nay";"WEEK"->"7 ngày";"MONTH"->"Tháng này";else->"Tất cả"}
+    val periodPurchases = if (purchaseFrom == null) purchases else purchases.filter { it.purchasedAt >= purchaseFrom }
     val payerNames = periodPurchases.map { it.paidByName.trim() }.filter { it.isNotBlank() }.distinct().sorted()
     val hasUnknownPayer = periodPurchases.any { it.paidByName.isBlank() }
     val filteredPurchases = periodPurchases.filter { p ->
@@ -3003,6 +3013,15 @@ fun Report(vm: PosViewModel) {
         }
 
         if(section == "PURCHASES") {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                FilterChip(purchasePeriod == "TODAY", { purchasePeriod = "TODAY" }, { Text("Hôm nay") })
+                FilterChip(purchasePeriod == "WEEK", { purchasePeriod = "WEEK" }, { Text("7 ngày") })
+                FilterChip(purchasePeriod == "MONTH", { purchasePeriod = "MONTH" }, { Text("Tháng này") })
+                FilterChip(purchasePeriod == "ALL", { purchasePeriod = "ALL" }, { Text("Tất cả") })
+            }
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp).horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(5.dp)
@@ -3185,7 +3204,7 @@ fun Report(vm: PosViewModel) {
                     Text("Chưa có phiếu nhập trong kỳ đã chọn", Modifier.padding(20.dp))
                 } else {
                     LazyColumn(Modifier.fillMaxSize().padding(12.dp)) {
-                        item { Text("Tổng tiền chi trong kỳ: ${money(purchaseTotal)}", fontSize = 22.sp, fontWeight = FontWeight.Bold) }
+                        item { val who=when(payerFilter){"ALL"->"Tất cả người chi";"UNKNOWN"->"Chưa xác định";else->payerFilter};Text("Tổng chi · $who · $purchasePeriodLabel: ${money(purchaseTotal)}", fontSize = 22.sp, fontWeight = FontWeight.Bold) }
                         item {
                             val summary = filteredPurchases.groupBy { it.paidByName.trim().ifBlank { "Chưa xác định" } }
                                 .mapValues { (_, rows) -> rows.sumOf { it.total } }
