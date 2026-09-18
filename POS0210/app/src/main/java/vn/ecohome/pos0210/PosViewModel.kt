@@ -771,6 +771,18 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
    if(changed>0) autoBackup()
   }
  }
+ fun confirmCheckoutBillTest(preview:PricingPreview,qrInfo:String){
+  val session=currentSession.value?:return
+  val employee=currentEmployee.value?:return
+  if(employee.role!="ADMIN"){printerMessage.value="CHỈ ADMIN ĐƯỢC DÙNG BILL TEST";return}
+  if(setting("checkout_print_test_mode")!="true"){printerMessage.value="CHẾ ĐỘ BILL TEST CHƯA BẬT";return}
+  printedCheckoutKey.value="${session.id}:${preview.total}:$qrInfo"
+  viewModelScope.launch(Dispatchers.IO){
+   audit("PRINT",session.id,"PREPAY_BILL_TEST_BYPASS","operator=${employee.name},amount=${preview.total}")
+  }
+  printerMessage.value="BILL TEST · KHÔNG IN THẬT · Có thể kiểm thử bước xác nhận thanh toán"
+ }
+
  fun printCheckoutBill(preview:PricingPreview,qrInfo:String,customerName:String=""){
   val session=currentSession.value?:return
   val table=currentTable.value?:return
