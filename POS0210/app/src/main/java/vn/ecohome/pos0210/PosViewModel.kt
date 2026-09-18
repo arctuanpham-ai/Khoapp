@@ -371,6 +371,25 @@ fun reconcileFirebaseSession(){
   }
  }
 }
+fun createFirebaseBackup(){
+ val e=currentEmployee.value?:return;if(e.role!="ADMIN")return
+ viewModelScope.launch(Dispatchers.IO){
+  cloudMessage.value="Đang tạo cloud backup…"
+  runCatching{
+   val config=FirebaseCloudSync.config(getApplication())
+   require(config.valid){"Chưa cấu hình Firebase"}
+   val app=FirebaseCloudSync.firebaseApp(getApplication(),config)
+   val uid=com.google.firebase.auth.FirebaseAuth.getInstance(app).currentUser?.uid?:error("Chưa đăng nhập Firebase")
+   FirestorePrivateBackup.upload(getApplication(),com.google.firebase.firestore.FirebaseFirestore.getInstance(app),uid,System.currentTimeMillis())
+  }.onSuccess{info->
+   val old=dao.cloudSyncStateSnapshot()?:CloudSyncStateEntity()
+   dao.saveCloudSyncState(old.copy(lastError=null))
+   cloudMessage.value="Cloud backup thành công · ${info.chunks} mảnh · ${info.bytes/1024} KB"
+  }.onFailure{err->
+   cloudMessage.value="Cloud backup lỗi: ${err.message}"
+  }
+ }
+}
 fun restoreFirebaseBackup(){
  val e=currentEmployee.value?:return;if(e.role!="ADMIN")return
  viewModelScope.launch(Dispatchers.IO){
