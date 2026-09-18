@@ -42,13 +42,6 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Set rollout version
-        if: github.ref == 'refs/heads/sol/web-manager-finance-v1'
-        shell: bash
-        run: |
-          sed -i 's/versionCode = 86/versionCode = 88/' app/build.gradle.kts
-          sed -i 's/versionName = "1.0.0-alpha56-candidate25"/versionName = "1.0.0-alpha58-candidate27"/' app/build.gradle.kts
-
       - name: Test and build full installable APK
         run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
 
