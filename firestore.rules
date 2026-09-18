@@ -24,6 +24,13 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/managerAccess/$(request.auth.uid)).data.canWriteFinance == true;
     }
 
+    // The store root document itself is written by Android sync (name/updatedAt/schemaVersion).
+    // A recursive child match does NOT cover /users/{uid}/stores/{storeId} itself.
+    match /users/{ownerUid}/stores/{storeId} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+      allow write: if isStoreOwner(ownerUid);
+    }
+
     match /users/{ownerUid}/stores/{storeId}/{document=**} {
       allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
       allow write: if isStoreOwner(ownerUid);
