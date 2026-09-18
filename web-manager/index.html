@@ -61,6 +61,11 @@
           <label>Đến ngày<input id="to-date" type="date" /></label>
           <button id="apply-range" class="secondary">Áp dụng</button>
         </div>
+        <div class="payer-filter-block">
+          <span>Người chi</span>
+          <select id="payer-filter"><option value="ALL">Tất cả người chi</option></select>
+          <strong id="payer-total"></strong>
+        </div>
 
         <section id="period-summary" class="summary-grid" aria-label="Tổng quan theo kỳ"></section>
 
@@ -93,50 +98,89 @@
     <dialog id="entry-dialog">
       <article>
         <div class="dialog-header">
-          <div><p class="eyebrow">NHẬP TRỰC TIẾP TRÊN WEB</p><h2>Phiếu tài chính</h2></div>
+          <div><p class="eyebrow">NHẬP TRỰC TIẾP TRÊN WEB</p><h2>Giao dịch tài chính</h2></div>
           <button id="close-entry" class="text-button">Đóng</button>
         </div>
         <form id="entry-form" class="entry-form">
-          <label>Loại giao dịch
+          <label>1. Loại giao dịch
             <select id="entry-type">
-              <option value="CHI">Chi</option>
-              <option value="GOP_VON">Góp vốn</option>
-              <option value="HOAN_UNG">Hoàn ứng</option>
-              <option value="DAU_TU_BO_SUNG">Đầu tư bổ sung</option>
-              <option value="THU">Thu khác</option>
-              <option value="DIEU_CHINH">Điều chỉnh tiền</option>
+              <option value="OPERATING_EXPENSE">Chi phí vận hành</option>
+              <option value="ADDITIONAL_INVESTMENT">Đầu tư bổ sung</option>
+              <option value="INITIAL_INVESTMENT">Đầu tư ban đầu không thu hồi</option>
+              <option value="ASSET_PURCHASE">Mua tài sản đầu tư ban đầu</option>
+              <option value="CAPITAL_INJECTION">Góp vốn đầu tư</option>
+              <option value="WORKING_CAPITAL">Bổ sung vốn lưu động</option>
+              <option value="PROFIT_WITHDRAWAL">Rút lợi nhuận</option>
+              <option value="OWNER_WITHDRAWAL">Rút vốn</option>
+              <option value="CAPITAL_RECOVERY">Ghi nhận hoàn vốn</option>
+              <option value="OTHER_ADJUSTMENT">Thu/điều chỉnh khác</option>
             </select>
           </label>
+
+          <div id="purchase-fields">
+            <label id="expense-category-wrap">Nhóm chi phí
+              <select id="entry-category">
+                <option value="INVENTORY_PURCHASE">Nhập nguyên liệu / hàng hóa</option>
+                <option value="PAYROLL">Lương / nhân công</option>
+                <option value="ELECTRICITY">Điện</option>
+                <option value="WATER">Nước</option>
+                <option value="RENT">Thuê mặt bằng</option>
+                <option value="MARKETING">Marketing</option>
+                <option value="CONSUMABLES">Vật tư tiêu hao</option>
+                <option value="MAINTENANCE">Bảo trì</option>
+                <option value="SERVICES">Phần mềm / dịch vụ</option>
+                <option value="BANK_FEES">Phí ngân hàng / giao dịch</option>
+                <option value="OTHER_EXPENSE">Chi phí khác</option>
+              </select>
+            </label>
+            <label id="purchase-category-wrap">2. Phân mục chi tiết
+              <select id="entry-purchase-category"><option value="">Không phân mục</option></select>
+            </label>
+            <label>Mã chi phí theo dõi
+              <select id="entry-cost-code"><option value="">Không mã</option></select>
+            </label>
+
+            <div id="asset-fields" hidden>
+              <label>2. Nhóm tài sản
+                <select id="entry-asset-category"><option value="">Chọn nhóm tài sản</option></select>
+              </label>
+              <label>Thời gian khấu hao (tháng)<input id="entry-useful-life" type="number" min="1" step="1" /></label>
+              <label>Giá trị còn lại tối thiểu<input id="entry-residual" type="number" min="0" step="1" inputmode="numeric" value="0" /></label>
+              <label>Giá trị thanh lý dự kiến<input id="entry-liquidation" type="number" min="0" step="1" inputmode="numeric" value="0" /></label>
+            </div>
+
+            <label>Nhà cung cấp (không bắt buộc)<input id="entry-supplier" type="text" maxlength="100" /></label>
+            <label>Người chi / ứng tiền
+              <select id="entry-payer"><option value="">Chưa xác định</option></select>
+            </label>
+            <label>Tên người chi khác / chỉnh tay<input id="entry-payer-custom" type="text" maxlength="60" /></label>
+            <label id="entry-item-label">Mặt hàng / nội dung chi<input id="entry-item-name" type="text" maxlength="180" required /></label>
+            <div class="two-col">
+              <label>Khối lượng / SL<input id="entry-qty" type="number" min="0.001" step="0.001" inputmode="decimal" value="1" /></label>
+              <label>Đơn vị<input id="entry-unit" type="text" maxlength="20" value="lần" /></label>
+            </div>
+            <label id="entry-price-label">Đơn giá<input id="entry-unit-price" type="number" min="1" step="1" inputmode="numeric" /></label>
+            <p class="entry-total">Thành tiền: <strong id="entry-total">0đ</strong></p>
+          </div>
+
+          <div id="movement-fields" hidden>
+            <label>Nội dung giao dịch<input id="entry-movement-note" type="text" maxlength="180" /></label>
+            <label>Số tiền<input id="entry-amount" type="number" min="1" step="1" inputmode="numeric" /></label>
+            <label>Phương thức
+              <select id="entry-method">
+                <option value="CASH">Tiền mặt</option>
+                <option value="TRANSFER">Chuyển khoản</option>
+              </select>
+            </label>
+            <label id="movement-partner-wrap" hidden>Người rút
+              <select id="entry-partner"><option value="">Chọn người</option></select>
+            </label>
+          </div>
+
           <label>Ngày giờ<input id="entry-datetime" type="datetime-local" required /></label>
-          <label>Số tiền<input id="entry-amount" type="number" min="1" step="1000" inputmode="numeric" required /></label>
-          <label id="expense-category-wrap">Nhóm chi phí
-            <select id="entry-category">
-              <option value="OTHER_EXPENSE">Chi phí khác</option>
-              <option value="INVENTORY_PURCHASE">Nhập nguyên liệu / hàng hóa</option>
-              <option value="PAYROLL">Lương</option>
-              <option value="ELECTRICITY">Điện</option>
-              <option value="WATER">Nước</option>
-              <option value="RENT">Thuê mặt bằng</option>
-              <option value="MARKETING">Marketing</option>
-              <option value="CONSUMABLES">Vật tư tiêu hao</option>
-              <option value="MAINTENANCE">Bảo trì</option>
-              <option value="SERVICES">Dịch vụ</option>
-              <option value="BANK_FEES">Phí ngân hàng</option>
-            </select>
-          </label>
-          <label>Mã chi phí
-            <select id="entry-cost-code"><option value="">Không mã</option></select>
-          </label>
-          <label>Phương thức
-            <select id="entry-method">
-              <option value="CASH">Tiền mặt</option>
-              <option value="TRANSFER">Chuyển khoản</option>
-            </select>
-          </label>
-          <label>Người chi / đối tượng liên quan<input id="entry-person" type="text" maxlength="80" placeholder="Ví dụ: Tuấn" /></label>
-          <label>Nội dung<input id="entry-note" type="text" maxlength="180" placeholder="Nội dung giao dịch" /></label>
+          <label>Ghi chú<input id="entry-note" type="text" maxlength="240" /></label>
           <p id="entry-error" class="error"></p>
-          <button type="submit" class="primary">LƯU PHIẾU</button>
+          <button type="submit" class="primary">LƯU GIAO DỊCH</button>
         </form>
       </article>
     </dialog>
