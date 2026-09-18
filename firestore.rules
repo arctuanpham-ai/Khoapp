@@ -19,9 +19,26 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/managerAccess/$(request.auth.uid)).data.active == true;
     }
 
+    function hasManagerFinanceWriteAccess(ownerUid) {
+      return hasManagerReadAccess(ownerUid)
+        && get(/databases/$(database)/documents/managerAccess/$(request.auth.uid)).data.canWriteFinance == true;
+    }
+
     match /users/{ownerUid}/stores/{storeId}/{document=**} {
       allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
       allow write: if isStoreOwner(ownerUid);
+    }
+
+    // Finance entry from Web Manager is deliberately limited to canonical
+    // purchase / financial-movement collections. Managers need explicit grant.
+    match /users/{ownerUid}/stores/{storeId}/purchases/{purchaseId} {
+      allow create, update: if isStoreOwner(ownerUid) || hasManagerFinanceWriteAccess(ownerUid);
+      allow delete: if isStoreOwner(ownerUid);
+    }
+
+    match /users/{ownerUid}/stores/{storeId}/financialMovements/{movementId} {
+      allow create, update: if isStoreOwner(ownerUid) || hasManagerFinanceWriteAccess(ownerUid);
+      allow delete: if isStoreOwner(ownerUid);
     }
 
     // Raw Room snapshots can contain staff PINs and other restore-only data.
