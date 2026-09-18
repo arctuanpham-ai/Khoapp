@@ -62,6 +62,7 @@ object FirebaseCloudSync {
         val c=config(context);require(c.valid){"Chưa cấu hình Firebase"};val firebaseApp=firebaseApp(context,c);val uid=FirebaseAuth.getInstance(firebaseApp).currentUser?.uid?:error("Chưa đăng nhập Firebase")
         val fs=FirebaseFirestore.getInstance(firebaseApp);val root=fs.collection("users").document(uid).collection("stores").document("0210")
         pullCloudFinance(root,dao)
+        writeFinanceMirror(fs,root,dao)
         val tables=dao.cloudTablesSnapshot();val sessions=dao.cloudSessionsSnapshot();val bills=dao.cloudBillsSnapshot();val payments=dao.cloudPaymentsSnapshot()
         val today=Calendar.getInstance().apply{set(Calendar.HOUR_OF_DAY,0);set(Calendar.MINUTE,0);set(Calendar.SECOND,0);set(Calendar.MILLISECOND,0)}.timeInMillis
         val paidToday=bills.filter{it.status=="PAID"&&(it.closedAt?:0)>=today};val open=sessions.filter{it.status=="OPEN"};val now=System.currentTimeMillis()
@@ -77,11 +78,6 @@ object FirebaseCloudSync {
         writeMaps(fs,root.collection("orderItems"),dao.cloudOrderItemsSnapshot().map{i->i.id to mapOf("id" to i.id,"batchId" to i.batchId,"menuItemId" to i.menuItemId,"itemName" to i.itemNameSnapshot,"unitPrice" to i.unitPriceSnapshot,"qty" to i.qty,"note" to i.note,"adjustmentOfItemId" to i.adjustmentOfItemId)})
         writeMaps(fs,root.collection("bills"),bills.map{b->b.id to mapOf("id" to b.id,"sessionId" to b.sessionId,"billNo" to b.billNo,"openedAt" to b.openedAt,"closedAt" to b.closedAt,"subtotal" to b.subtotal,"total" to b.total,"status" to b.status)})
         writeMaps(fs,root.collection("payments"),payments.map{p->p.id to mapOf("id" to p.id,"billId" to p.billId,"method" to p.method,"amount" to p.amount,"cashierId" to p.cashierId,"paidAt" to p.paidAt,"reference" to p.reference)})
-        writeMaps(fs,root.collection("purchases"),dao.cloudPurchasesSnapshot().map{p->p.id to mapOf("id" to p.id,"supplierId" to p.supplierId,"enteredBy" to p.enteredBy,"purchasedAt" to p.purchasedAt,"total" to p.total,"note" to p.note,"status" to p.status,"expenseCategory" to p.expenseCategory,"paidByName" to p.paidByName,"costCodeId" to p.costCodeId,"updatedAt" to p.updatedAt)})
-        writeMaps(fs,root.collection("costCodes"),dao.allCostCodesSnapshot().map{c0->c0.id to mapOf("id" to c0.id,"code" to c0.code,"name" to c0.name,"parentExpenseCategory" to c0.parentExpenseCategory,"defaultUnit" to c0.defaultUnit,"defaultSupplier" to c0.defaultSupplier,"referenceUnitPrice" to c0.referenceUnitPrice,"sortOrder" to c0.sortOrder,"active" to c0.active)})
-        writeMaps(fs,root.collection("monthlyAccounting"),dao.cloudAccountingSnapshot().map{a->a.monthKey to mapOf("monthKey" to a.monthKey,"cogs" to a.cogs,"openingCash" to a.openingCash,"closingCash" to a.closingCashSnapshot,"operatingProfit" to a.operatingProfitSnapshot,"distributableProfit" to a.distributableProfitSnapshot)})
-        writeMaps(fs,root.collection("assets"),dao.cloudAssetsSnapshot().map{a->a.id to mapOf("id" to a.id,"name" to a.name,"categoryId" to a.categoryId,"purchaseDate" to a.purchaseDate,"totalCost" to a.totalCost,"usefulLifeMonths" to a.usefulLifeMonths,"residualValue" to a.residualValue,"estimatedLiquidationValue" to a.estimatedLiquidationValue,"status" to a.status,"disposalDate" to a.disposalDate,"disposalPrice" to a.disposalPrice,"investmentClass" to a.investmentClass)})
-        writeMaps(fs,root.collection("financialMovements"),dao.cloudMovementsSnapshot().map{m->m.id to mapOf("id" to m.id,"type" to m.type,"amount" to m.amount,"occurredAt" to m.occurredAt,"partnerId" to m.partnerId,"method" to m.method,"note" to m.note,"counterpartyName" to m.counterpartyName)})
         val settings=dao.allSettingsSnapshot().filter{CloudSyncPolicy.shouldUploadSetting(it.key)}.associate{it.key to it.value};root.collection("config").document("safe").set(settings+mapOf("updatedAt" to now)).await()
         FirestorePrivateBackup.upload(context,fs,uid,now)
         dao.saveCloudSyncState(old.copy(enabled=true,dirty=false,lastAttemptAt=now,lastSuccessAt=now,lastError=null,syncedUid=uid))
@@ -93,6 +89,7 @@ object FirebaseCloudSync {
         val db=PosDatabase.get(context);val dao=db.dao();val c=config(context);require(c.valid){"Chưa cấu hình Firebase"};val firebaseApp=firebaseApp(context,c);val uid=FirebaseAuth.getInstance(firebaseApp).currentUser?.uid?:error("Chưa đăng nhập Firebase")
         val fs=FirebaseFirestore.getInstance(firebaseApp);val root=fs.collection("users").document(uid).collection("stores").document("0210")
         pullCloudFinance(root,dao)
+        writeFinanceMirror(fs,root,dao)
         val tables=dao.cloudTablesSnapshot();val sessions=dao.cloudSessionsSnapshot();val batches=dao.cloudOrderBatchesSnapshot();val items=dao.cloudOrderItemsSnapshot();val bills=dao.cloudBillsSnapshot();val open=sessions.filter{it.status=="OPEN"};val openByTable=open.associateBy{it.tableId}
         val today=Calendar.getInstance().apply{set(Calendar.HOUR_OF_DAY,0);set(Calendar.MINUTE,0);set(Calendar.SECOND,0);set(Calendar.MILLISECOND,0)}.timeInMillis;val paidToday=bills.filter{it.status=="PAID"&&(it.closedAt?:0)>=today};val now=System.currentTimeMillis()
         root.collection("dashboard").document("current").set(financialDashboard(dao,bills,dao.cloudPaymentsSnapshot(),now)+mapOf("openTables" to open.size,"openTableNames" to tables.filter{openByTable.containsKey(it.id)}.map{it.name},"revenueToday" to paidToday.sumOf{it.total},"paidBillsToday" to paidToday.size,"lastUpdatedAt" to now)).await()
@@ -127,6 +124,44 @@ object FirebaseCloudSync {
                 )
             )
         }
+        val remotePurchaseItems=root.collection("purchaseItems").get().await().documents.mapNotNull{doc->
+            val purchaseId=doc.getString("purchaseId")?:return@mapNotNull null
+            val name=doc.getString("name")?:return@mapNotNull null
+            val qty=doc.getDouble("qty")?:doc.getLong("qty")?.toDouble()?:return@mapNotNull null
+            val unitPrice=doc.getLong("unitPrice")?:return@mapNotNull null
+            val amount=doc.getLong("amount")?:return@mapNotNull null
+            vn.ecohome.pos0210.data.PurchaseItemEntity(
+                id=doc.getString("id")?.ifBlank{doc.id}?:doc.id,
+                purchaseId=purchaseId,
+                categoryId=doc.getString("categoryId").orEmpty(),
+                name=name,
+                qty=qty,
+                unit=doc.getString("unit").orEmpty().ifBlank{"lần"},
+                unitPrice=unitPrice,
+                amount=amount
+            )
+        }
+        if(remotePurchaseItems.isNotEmpty()) dao.insertCloudPurchaseItems(remotePurchaseItems)
+        val remoteAssets=root.collection("assets").get().await().documents
+        remoteAssets.forEach{doc->
+            val id=doc.getString("id")?.ifBlank{doc.id}?:doc.id
+            val name=doc.getString("name")?:return@forEach
+            val categoryId=doc.getString("categoryId")?:return@forEach
+            val purchaseDate=doc.getLong("purchaseDate")?:return@forEach
+            val purchasePrice=doc.getLong("purchasePrice")?:0L
+            val quantity=(doc.getLong("quantity")?:1L).toInt().coerceAtLeast(1)
+            val totalCost=doc.getLong("totalCost")?:return@forEach
+            val usefulLifeMonths=(doc.getLong("usefulLifeMonths")?:1L).toInt().coerceAtLeast(1)
+            dao.insertCloudAsset(vn.ecohome.pos0210.data.AssetEntity(
+                id=id,name=name,categoryId=categoryId,purchaseDate=purchaseDate,purchasePrice=purchasePrice,
+                quantity=quantity,totalCost=totalCost,supplier=doc.getString("supplier").orEmpty(),
+                usefulLifeMonths=usefulLifeMonths,residualValue=doc.getLong("residualValue")?:0L,
+                estimatedLiquidationValue=doc.getLong("estimatedLiquidationValue")?:0L,
+                status=doc.getString("status").orEmpty().ifBlank{"ACTIVE"},disposalDate=doc.getLong("disposalDate"),
+                disposalPrice=doc.getLong("disposalPrice"),note=doc.getString("note").orEmpty(),
+                investmentClass=doc.getString("investmentClass").orEmpty().ifBlank{"INITIAL"}
+            ))
+        }
         val remoteMovements=root.collection("financialMovements").get().await().documents
         remoteMovements.forEach{doc->
             val id=doc.getString("id")?.ifBlank{doc.id}?:doc.id
@@ -147,6 +182,19 @@ object FirebaseCloudSync {
                 )
             )
         }
+    }
+
+    private suspend fun writeFinanceMirror(fs:FirebaseFirestore,root:com.google.firebase.firestore.DocumentReference,dao:PosDao){
+        writeMaps(fs,root.collection("purchases"),dao.cloudPurchasesSnapshot().map{p->p.id to mapOf("id" to p.id,"supplierId" to p.supplierId,"enteredBy" to p.enteredBy,"purchasedAt" to p.purchasedAt,"total" to p.total,"note" to p.note,"status" to p.status,"expenseCategory" to p.expenseCategory,"paidByName" to p.paidByName,"costCodeId" to p.costCodeId,"updatedAt" to p.updatedAt)})
+        val purchaseItems=dao.allPurchasesSnapshot().flatMap{p->dao.purchaseItemsSnapshot(p.id)}
+        writeMaps(fs,root.collection("purchaseItems"),purchaseItems.map{i->i.id to mapOf("id" to i.id,"purchaseId" to i.purchaseId,"categoryId" to i.categoryId,"name" to i.name,"qty" to i.qty,"unit" to i.unit,"unitPrice" to i.unitPrice,"amount" to i.amount)})
+        writeMaps(fs,root.collection("purchaseCategories"),dao.allPurchaseCategoriesSnapshot().map{p->p.id to mapOf("id" to p.id,"name" to p.name,"defaultUnit" to p.defaultUnit,"sortOrder" to p.sortOrder,"active" to p.active)})
+        writeMaps(fs,root.collection("costCodes"),dao.allCostCodesSnapshot().map{c0->c0.id to mapOf("id" to c0.id,"code" to c0.code,"name" to c0.name,"parentExpenseCategory" to c0.parentExpenseCategory,"defaultUnit" to c0.defaultUnit,"defaultSupplier" to c0.defaultSupplier,"referenceUnitPrice" to c0.referenceUnitPrice,"sortOrder" to c0.sortOrder,"active" to c0.active)})
+        writeMaps(fs,root.collection("profitPartners"),dao.allProfitPartnersSnapshot().map{p->p.id to mapOf("id" to p.id,"name" to p.name,"shareBasisPoints" to p.shareBasisPoints,"sortOrder" to p.sortOrder,"active" to p.active)})
+        writeMaps(fs,root.collection("assetCategories"),dao.allAssetCategoriesSnapshot().map{a->a.id to mapOf("id" to a.id,"name" to a.name,"defaultUsefulLifeMonths" to a.defaultUsefulLifeMonths,"minUsefulLifeMonths" to a.minUsefulLifeMonths,"maxUsefulLifeMonths" to a.maxUsefulLifeMonths,"sortOrder" to a.sortOrder,"active" to a.active)})
+        writeMaps(fs,root.collection("monthlyAccounting"),dao.cloudAccountingSnapshot().map{a->a.monthKey to mapOf("monthKey" to a.monthKey,"cogs" to a.cogs,"openingCash" to a.openingCash,"closingCash" to a.closingCashSnapshot,"operatingProfit" to a.operatingProfitSnapshot,"distributableProfit" to a.distributableProfitSnapshot)})
+        writeMaps(fs,root.collection("assets"),dao.cloudAssetsSnapshot().map{a->a.id to mapOf("id" to a.id,"name" to a.name,"categoryId" to a.categoryId,"purchaseDate" to a.purchaseDate,"purchasePrice" to a.purchasePrice,"quantity" to a.quantity,"totalCost" to a.totalCost,"supplier" to a.supplier,"usefulLifeMonths" to a.usefulLifeMonths,"residualValue" to a.residualValue,"estimatedLiquidationValue" to a.estimatedLiquidationValue,"status" to a.status,"disposalDate" to a.disposalDate,"disposalPrice" to a.disposalPrice,"note" to a.note,"investmentClass" to a.investmentClass)})
+        writeMaps(fs,root.collection("financialMovements"),dao.cloudMovementsSnapshot().map{m->m.id to mapOf("id" to m.id,"type" to m.type,"amount" to m.amount,"occurredAt" to m.occurredAt,"partnerId" to m.partnerId,"method" to m.method,"note" to m.note,"counterpartyName" to m.counterpartyName)})
     }
 
     private suspend fun writeMaps(fs:FirebaseFirestore,collection:com.google.firebase.firestore.CollectionReference,rows:List<Pair<String,Map<String,Any?>>>){
