@@ -21,7 +21,7 @@ object FirestorePrivateBackup {
     private const val CHUNK_SIZE=480_000
     private const val MAX_CHUNKS=200
 
-    private fun root(fs:FirebaseFirestore,uid:String)=fs.collection("users").document(uid).collection("privateBackups").document(STORE_ID)
+    private fun root(fs:FirebaseFirestore,uid:String)=fs.collection("users").document(uid).collection("stores").document(STORE_ID).collection("privateBackup").document("room")
     private suspend fun <T> stage(name:String,block:suspend()->T):T =
         try{block()}catch(e:Throwable){throw IllegalStateException("$name: ${e.message}",e)}
 
