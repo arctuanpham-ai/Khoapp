@@ -73,3 +73,12 @@ dialog article { padding: 6px; }
   .custom-range { grid-template-columns: 1fr 1fr auto; }
   .custom-range .secondary { grid-column: auto; }
 }
+
+.payer-filter-block { display: grid; grid-template-columns: auto minmax(180px, 1fr); gap: 8px 12px; align-items: center; margin: 2px 0 14px; padding: 12px; border: 1px solid #dfcfb8; border-radius: 14px; background: #fff9f0; }
+.payer-filter-block span { font-size: 12px; font-weight: 800; color: #6c5849; }
+.payer-filter-block select { margin: 0; }
+.payer-filter-block strong { grid-column: 1 / -1; font-size: 15px; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.entry-total { margin: 8px 0 2px; padding: 11px 12px; border-radius: 12px; background: #f3e6d6; }
+.entry-total strong { font-size: 18px; }
+#purchase-fields[hidden], #movement-fields[hidden], #asset-fields[hidden], #movement-partner-wrap[hidden], #expense-category-wrap[hidden], #purchase-category-wrap[hidden] { display: none !important; }
