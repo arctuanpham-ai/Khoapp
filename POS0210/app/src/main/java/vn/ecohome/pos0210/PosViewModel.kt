@@ -337,17 +337,40 @@ fun saveSetting(key:String,value:String){
 fun configureFirebase(projectId:String,applicationId:String,apiKey:String){
  val e=currentEmployee.value?:return;if(e.role!="ADMIN"||projectId.isBlank()||applicationId.isBlank()||apiKey.isBlank())return
  viewModelScope.launch(Dispatchers.IO){
-  db.withTransaction{dao.saveSetting(AppSettingEntity("firebase_project_id",projectId.trim()));dao.saveSetting(AppSettingEntity("firebase_application_id",applicationId.trim()));dao.saveSetting(AppSettingEntity("firebase_api_key",apiKey.trim()));dao.saveCloudSyncState((dao.cloudSyncStateSnapshot()?:CloudSyncStateEntity()).copy(enabled=false,dirty=true,lastError=null,syncedUid=null))}
+  val pid=projectId.trim();val aid=applicationId.trim();val key=apiKey.trim()
+  val currentSettings=dao.allSettingsSnapshot().associate{it.key to it.value}
+  val unchanged=currentSettings["firebase_project_id"]==pid&&currentSettings["firebase_application_id"]==aid&&currentSettings["firebase_api_key"]==key
+  if(unchanged){
+   cloudMessage.value="Cấu hình Firebase không đổi · giữ nguyên phiên đăng nhập"
+   return@launch
+  }
+  db.withTransaction{
+   dao.saveSetting(AppSettingEntity("firebase_project_id",pid))
+   dao.saveSetting(AppSettingEntity("firebase_application_id",aid))
+   dao.saveSetting(AppSettingEntity("firebase_api_key",key))
+   dao.saveCloudSyncState((dao.cloudSyncStateSnapshot()?:CloudSyncStateEntity()).copy(enabled=false,dirty=true,lastError=null,syncedUid=null))
+  }
   FirebaseCloudSync.reset(getApplication())
-  cloudMessage.value="Đã lưu cấu hình Firebase · cần đăng nhập";audit("CLOUD","FIREBASE","CONFIGURE","project=$projectId")
+  cloudMessage.value="Đã đổi cấu hình Firebase · cần đăng nhập lại"
+  audit("CLOUD","FIREBASE","CONFIGURE","project=$pid")
  }
 }
 fun firebaseSignIn(email:String,password:String){
  val e=currentEmployee.value?:return;if(e.role!="ADMIN"||email.isBlank()||password.isBlank())return
- viewModelScope.launch(Dispatchers.IO){runCatching{FirebaseCloudSync.signIn(getApplication(),email,password)}.onSuccess{uid->dao.saveCloudSyncState((dao.cloudSyncStateSnapshot()?:CloudSyncStateEntity()).copy(enabled=true,dirty=true,lastError=null,syncedUid=uid));FirebaseCloudSync.schedule(getApplication());cloudMessage.value="Đăng nhập Firebase thành công";syncFirebase();observeCloudDashboard()}.onFailure{cloudMessage.value="Đăng nhập lỗi: ${it.message}"}}
+ viewModelScope.launch(Dispatchers.IO){runCatching{FirebaseCloudSync.signIn(getApplication(),email,password)}.onSuccess{uid->dao.saveSetting(AppSettingEntity("firebase_email",email.trim()));dao.saveCloudSyncState((dao.cloudSyncStateSnapshot()?:CloudSyncStateEntity()).copy(enabled=true,dirty=true,lastError=null,syncedUid=uid));FirebaseCloudSync.schedule(getApplication());cloudMessage.value="Đăng nhập Firebase thành công";syncFirebase();observeCloudDashboard()}.onFailure{cloudMessage.value="Đăng nhập lỗi: ${it.message}"}}
 }
 fun firebaseSignOut(){FirebaseCloudSync.signOut(getApplication());viewModelScope.launch(Dispatchers.IO){dao.saveCloudSyncState((dao.cloudSyncStateSnapshot()?:CloudSyncStateEntity()).copy(enabled=false,syncedUid=null));cloudMessage.value="Đã đăng xuất Firebase"};cloudDashboardJob?.cancel()}
-fun syncFirebase(){viewModelScope.launch(Dispatchers.IO){cloudMessage.value="Đang đồng bộ…";FirebaseCloudSync.syncNow(getApplication()).onSuccess{cloudMessage.value="Đồng bộ Firebase thành công"}.onFailure{cloudMessage.value="Đồng bộ lỗi: ${it.message}"}}}
+fun syncFirebase(){viewModelScope.launch(Dispatchers.IO){cloudMessage.value="Đang đồng bộ…";FirebaseCloudSync.syncNow(getApplication()).onSuccess{cloudMessage.value="Đồng bộ Firebase thành công"}.onFailure{e->if(FirebaseCloudSync.currentUid(getApplication())==null){dao.saveCloudSyncState((dao.cloudSyncStateSnapshot()?:CloudSyncStateEntity()).copy(enabled=false,syncedUid=null,lastError="Chưa đăng nhập Firebase"))};cloudMessage.value="Đồng bộ lỗi: ${e.message}"}}}
+fun reconcileFirebaseSession(){
+ viewModelScope.launch(Dispatchers.IO){
+  val actualUid=FirebaseCloudSync.currentUid(getApplication())
+  val saved=dao.cloudSyncStateSnapshot()?:CloudSyncStateEntity()
+  when{
+   actualUid==null&&saved.syncedUid!=null->dao.saveCloudSyncState(saved.copy(enabled=false,syncedUid=null,lastError="Phiên Firebase đã hết · cần đăng nhập lại"))
+   actualUid!=null&&saved.syncedUid!=actualUid->dao.saveCloudSyncState(saved.copy(enabled=true,syncedUid=actualUid,lastError=null))
+  }
+ }
+}
 fun restoreFirebaseBackup(){
  val e=currentEmployee.value?:return;if(e.role!="ADMIN")return
  viewModelScope.launch(Dispatchers.IO){
