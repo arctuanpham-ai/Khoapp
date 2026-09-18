@@ -1197,6 +1197,7 @@ fun CloudSyncSettings(vm:PosViewModel){
             Button({vm.syncFirebase()},Modifier.fillMaxWidth(),enabled=state?.syncedUid!=null){Text("ĐỒNG BỘ REALTIME NGAY")}
             OutlinedButton({vm.createFirebaseBackup()},Modifier.fillMaxWidth(),enabled=state?.syncedUid!=null){Text("TẠO CLOUD BACKUP NGAY")}
             OutlinedButton({confirmRestore=true},Modifier.fillMaxWidth(),enabled=state?.syncedUid!=null){Text("KHÔI PHỤC CLOUD BACKUP")}
+            Text("Tự động backup mỗi 1 giờ khi có mạng · giữ 2 bản A/B luân phiên. Restore ưu tiên bản mới nhất hợp lệ và tự fallback sang bản còn lại nếu checksum lỗi.",fontSize=11.sp)
             if(message.isNotBlank())Text(message,fontWeight=FontWeight.Bold)
             val backupOnlyError=state?.lastError?.takeIf{it.startsWith("PRIVATE_BACKUP_ONLY:")}
             Text("Realtime sync: "+when{state?.syncedUid==null->"Chưa đăng nhập";state?.lastSuccessAt!=null->"Thành công";else->"Chưa có lần thành công"},fontWeight=FontWeight.Bold)
