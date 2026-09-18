@@ -38,6 +38,7 @@ object CloudSyncPolicy{
 object FirebaseCloudSync {
     private const val APP_NAME="pos0210-cloud"
     private const val WORK_NAME="pos0210-firebase-periodic"
+    private const val BACKUP_WORK_NAME="pos0210-firebase-hourly-backup"
 
     suspend fun config(context:Context):FirebaseConfig{
         val settings=PosDatabase.get(context).dao().allSettingsSnapshot().associate{it.key to it.value}
@@ -58,6 +59,13 @@ object FirebaseCloudSync {
 
     private suspend fun <T> stage(name:String,block:suspend()->T):T =
         try{ block() }catch(e:Throwable){ throw IllegalStateException("$name: ${e.message}",e) }
+
+    suspend fun backupNow(context:Context):Result<CloudBackupInfo> = runCatching{
+        val c=config(context);require(c.valid){"Chưa cấu hình Firebase"}
+        val app=firebaseApp(context,c)
+        val uid=FirebaseAuth.getInstance(app).currentUser?.uid?:error("Chưa đăng nhập Firebase")
+        FirestorePrivateBackup.upload(context,FirebaseFirestore.getInstance(app),uid,System.currentTimeMillis())
+    }
 
     suspend fun syncNow(context:Context):Result<Unit> = runCatching{
         val db=PosDatabase.get(context);val dao=db.dao();val old=dao.cloudSyncStateSnapshot()?:CloudSyncStateEntity()
@@ -233,16 +241,30 @@ object FirebaseCloudSync {
         awaitClose{registration.remove()}
     }
     fun schedule(context:Context){
-        val request=PeriodicWorkRequestBuilder<FirebaseSyncWorker>(24,TimeUnit.HOURS).setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(WORK_NAME,ExistingPeriodicWorkPolicy.UPDATE,request)
+        val network=Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
+        val syncRequest=PeriodicWorkRequestBuilder<FirebaseSyncWorker>(24,TimeUnit.HOURS)
+            .setConstraints(network).build()
+        val backupRequest=PeriodicWorkRequestBuilder<FirebaseBackupWorker>(1,TimeUnit.HOURS)
+            .setConstraints(network).build()
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            WORK_NAME,ExistingPeriodicWorkPolicy.UPDATE,syncRequest
+        )
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            BACKUP_WORK_NAME,ExistingPeriodicWorkPolicy.UPDATE,backupRequest
+        )
     }
     fun enqueueImmediate(context:Context){
         val request=OneTimeWorkRequestBuilder<FirebaseRealtimeWorker>().setInitialDelay(3,TimeUnit.SECONDS).setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
         WorkManager.getInstance(context).enqueueUniqueWork("pos0210-firebase-immediate",ExistingWorkPolicy.REPLACE,request)
     }
     fun enqueueBackup(context:Context){
-        val request=OneTimeWorkRequestBuilder<FirebaseSyncWorker>().setInitialDelay(5,TimeUnit.MINUTES).setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()).build()
-        WorkManager.getInstance(context).enqueueUniqueWork("pos0210-firebase-backup",ExistingWorkPolicy.REPLACE,request)
+        val request=OneTimeWorkRequestBuilder<FirebaseBackupWorker>()
+            .setInitialDelay(5,TimeUnit.MINUTES)
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .build()
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "pos0210-firebase-backup",ExistingWorkPolicy.REPLACE,request
+        )
     }
 }
 
@@ -258,5 +280,13 @@ class FirebaseRealtimeWorker(context:Context,params:WorkerParameters):CoroutineW
         val state=PosDatabase.get(applicationContext).dao().cloudSyncStateSnapshot()
         if(state?.enabled!=true)return Result.success()
         return if(FirebaseCloudSync.syncDashboardNow(applicationContext).isSuccess)Result.success() else Result.retry()
+    }
+}
+
+class FirebaseBackupWorker(context:Context,params:WorkerParameters):CoroutineWorker(context,params){
+    override suspend fun doWork():Result{
+        val state=PosDatabase.get(applicationContext).dao().cloudSyncStateSnapshot()
+        if(state?.enabled!=true)return Result.success()
+        return if(FirebaseCloudSync.backupNow(applicationContext).isSuccess)Result.success() else Result.retry()
     }
 }
