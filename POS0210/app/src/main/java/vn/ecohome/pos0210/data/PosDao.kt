@@ -13,6 +13,7 @@ data class TableServiceTimingRow(val sessionId:String,val firstOrderAt:Long?,val
 @Query("SELECT * FROM ComboEntity") suspend fun allCombosSnapshot():List<ComboEntity>
 @Query("SELECT * FROM EmployeeEntity ORDER BY name") fun employees():Flow<List<EmployeeEntity>>
 @Query("SELECT * FROM SupplierEntity ORDER BY name") fun suppliers():Flow<List<SupplierEntity>>
+@Query("SELECT * FROM SupplierEntity ORDER BY name") suspend fun allSuppliersSnapshot():List<SupplierEntity>
 @Query("SELECT * FROM TableSessionEntity WHERE status='OPEN'") fun openSessions():Flow<List<TableSessionEntity>>
 @Query("""SELECT s.id AS sessionId,
 MIN(CASE WHEN ob.status NOT IN ('DRAFT','CANCELLED') THEN COALESCE(ob.sentAt,ob.createdAt) END) AS firstOrderAt,
