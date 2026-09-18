@@ -36,6 +36,21 @@ service cloud.firestore {
       allow delete: if isStoreOwner(ownerUid);
     }
 
+    match /users/{ownerUid}/stores/{storeId}/purchaseItems/{itemId} {
+      allow create, update: if isStoreOwner(ownerUid) || hasManagerFinanceWriteAccess(ownerUid);
+      allow delete: if isStoreOwner(ownerUid);
+    }
+
+    match /users/{ownerUid}/stores/{storeId}/assets/{assetId} {
+      allow create, update: if isStoreOwner(ownerUid) || hasManagerFinanceWriteAccess(ownerUid);
+      allow delete: if isStoreOwner(ownerUid);
+    }
+
+    match /users/{ownerUid}/stores/{storeId}/suppliers/{supplierId} {
+      allow create, update: if isStoreOwner(ownerUid) || hasManagerFinanceWriteAccess(ownerUid);
+      allow delete: if isStoreOwner(ownerUid);
+    }
+
     match /users/{ownerUid}/stores/{storeId}/financialMovements/{movementId} {
       allow create, update: if isStoreOwner(ownerUid) || hasManagerFinanceWriteAccess(ownerUid);
       allow delete: if isStoreOwner(ownerUid);
