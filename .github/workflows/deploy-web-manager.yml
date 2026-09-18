@@ -2,7 +2,7 @@ name: Deploy POS0210 Web Manager
 
 on:
   push:
-    branches: [builder/web-manager-readonly]
+    branches: [builder/web-manager-readonly, sol/web-manager-finance-v1]
     paths:
       - 'web-manager/**'
       - 'firebase.json'
