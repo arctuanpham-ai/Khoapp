@@ -22,6 +22,8 @@ object FirestorePrivateBackup {
     private const val MAX_CHUNKS=200
 
     private fun root(fs:FirebaseFirestore,uid:String)=fs.collection("users").document(uid).collection("privateBackups").document(STORE_ID)
+    private suspend fun <T> stage(name:String,block:suspend()->T):T =
+        try{block()}catch(e:Throwable){throw IllegalStateException("$name: ${e.message}",e)}
 
     suspend fun upload(context:Context,fs:FirebaseFirestore,uid:String,now:Long):CloudBackupInfo {
         val staged=makeScrubbedCopy(context)
@@ -30,16 +32,16 @@ object FirestorePrivateBackup {
             val encoded=Base64.encodeToString(zipped,Base64.NO_WRAP)
             val chunks=encoded.chunked(CHUNK_SIZE)
             require(chunks.size<=MAX_CHUNKS){"Cloud backup quá lớn; hãy lưu archive SAF và liên hệ hỗ trợ"}
-            val privateRoot=root(fs,uid);val latest=privateRoot.collection("meta").document("latest");val old=latest.get().await().getString("generation")
+            val privateRoot=root(fs,uid);val latest=privateRoot.collection("meta").document("latest");val old=stage("BACKUP_READ_META"){latest.get().await()}.getString("generation")
             val generation=now.toString();val chunkRoot=privateRoot.collection("generations").document(generation).collection("chunks")
             chunks.chunked(350).forEachIndexed { groupIndex,group ->
                 val batch=fs.batch();group.forEachIndexed { offset,data ->
                     val index=groupIndex*350+offset
                     batch.set(chunkRoot.document(index.toString().padStart(4,'0')),mapOf("index" to index,"data" to data))
-                };batch.commit().await()
+                };stage("BACKUP_WRITE_CHUNKS"){batch.commit().await()}
             }
-            latest.set(mapOf("generation" to generation,"createdAt" to now,"bytes" to zipped.size,"chunks" to chunks.size,"sha256" to sha256(zipped),"format" to "POS0210_ROOM_GZIP_V1")).await()
-            if(!old.isNullOrBlank()&&old!=generation) deleteGeneration(fs,privateRoot,old)
+            stage("BACKUP_WRITE_META"){latest.set(mapOf("generation" to generation,"createdAt" to now,"bytes" to zipped.size,"chunks" to chunks.size,"sha256" to sha256(zipped),"format" to "POS0210_ROOM_GZIP_V1")).await()}
+            if(!old.isNullOrBlank()&&old!=generation) stage("BACKUP_DELETE_OLD"){deleteGeneration(fs,privateRoot,old)}
             return CloudBackupInfo(now,zipped.size,chunks.size)
         } finally { staged.delete() }
     }
