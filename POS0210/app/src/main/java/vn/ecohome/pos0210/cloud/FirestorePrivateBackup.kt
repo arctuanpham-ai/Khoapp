@@ -255,11 +255,32 @@ object FirestorePrivateBackup {
         )
     }
 
+    private fun validateDatabaseFile(file:File):Int {
+        return SQLiteDatabase.openDatabase(file.absolutePath,null,SQLiteDatabase.OPEN_READONLY).use { db ->
+            val integrity=db.rawQuery("PRAGMA integrity_check",null).use{cursor->
+                if(cursor.moveToFirst())cursor.getString(0) else ""
+            }
+            require(integrity.equals("ok",ignoreCase=true)){"Cloud backup DB integrity_check lỗi: $integrity"}
+            val version=db.rawQuery("PRAGMA user_version",null).use{cursor->
+                if(cursor.moveToFirst())cursor.getInt(0) else 0
+            }
+            require(version in 3..19){"Cloud backup DB schema không được hỗ trợ: v$version"}
+            val required=setOf("BillEntity","PaymentEntity","OrderBatchEntity","PurchaseEntity","EmployeeEntity","AppSettingEntity")
+            val found=mutableSetOf<String>()
+            db.rawQuery("SELECT name FROM sqlite_master WHERE type='table'",null).use{cursor->
+                while(cursor.moveToNext())found+=cursor.getString(0)
+            }
+            val missing=required.filter{it !in found}
+            require(missing.isEmpty()){"Cloud backup DB thiếu bảng lõi: ${missing.joinToString()}"}
+            version
+        }
+    }
+
     private fun validateAndReplace(context:Context,restored:ByteArray){
         val staged=File(context.cacheDir,"pos0210-cloud-restore.db")
         staged.outputStream().use{it.write(restored)}
         try{
-            SQLiteDatabase.openDatabase(staged.absolutePath,null,SQLiteDatabase.OPEN_READONLY).close()
+            validateDatabaseFile(staged)
             replaceDatabase(context,staged)
         }finally{
             staged.delete()
@@ -297,10 +318,33 @@ object FirestorePrivateBackup {
     private fun replaceDatabase(context:Context,staged:File){
         val target=context.getDatabasePath("pos0210.db")
         val safety=File(target.parentFile,"pos0210-before-cloud-restore.db")
+        val hadTarget=target.exists()
         PosDatabase.closeForRestore()
-        if(target.exists())target.copyTo(safety,true)
+        if(safety.exists())safety.delete()
+        if(hadTarget)target.copyTo(safety,true)
         File(target.path+"-wal").delete()
         File(target.path+"-shm").delete()
-        staged.copyTo(target,true)
+        try{
+            staged.copyTo(target,true)
+            // Opening Room validates the identity hash and applies only supported migrations.
+            val live=PosDatabase.get(context).openHelper.writableDatabase
+            val integrity=live.query("PRAGMA integrity_check").use{cursor->
+                if(cursor.moveToFirst())cursor.getString(0) else ""
+            }
+            require(integrity.equals("ok",ignoreCase=true)){"DB sau restore integrity_check lỗi: $integrity"}
+            require(live.version==19){"DB sau restore sai schema: v${live.version}"}
+        }catch(e:Throwable){
+            PosDatabase.closeForRestore()
+            File(target.path+"-wal").delete()
+            File(target.path+"-shm").delete()
+            if(hadTarget&&safety.exists())safety.copyTo(target,true) else target.delete()
+            runCatching{
+                val rolledBack=PosDatabase.get(context).openHelper.writableDatabase
+                rolledBack.query("PRAGMA integrity_check").use{cursor->
+                    require(cursor.moveToFirst()&&cursor.getString(0).equals("ok",ignoreCase=true))
+                }
+            }
+            throw IllegalStateException("Cloud restore bị từ chối; dữ liệu cũ đã được phục hồi: ${e.message}",e)
+        }
     }
 }
