@@ -2,7 +2,7 @@ name: Build POS0210 APK
 
 on:
   push:
-    branches: [ pos0210-v1-rebuild, builder/issue-3-offline-qr ]
+    branches: [ pos0210-v1-rebuild, builder/issue-3-offline-qr, sol/web-manager-finance-v1 ]
     paths:
       - 'POS0210/**'
       - '.github/workflows/pos0210-apk.yml'
@@ -42,8 +42,15 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Test and build full installable APK
-        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - name: Verify web-manager and Firestore policy helpers
+        working-directory: .
+        run: |
+          node --check web-manager/app.js
+          node web-manager/payer-filter.test.mjs
+          bash scripts/verify-firestore-private-backup-rules.sh
+
+      - name: Lint, test and build full installable APK
+        run: gradle --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
 
       - name: Read app version
         id: app_version

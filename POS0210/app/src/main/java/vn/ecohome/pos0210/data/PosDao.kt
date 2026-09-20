@@ -13,6 +13,7 @@ data class TableServiceTimingRow(val sessionId:String,val firstOrderAt:Long?,val
 @Query("SELECT * FROM ComboEntity") suspend fun allCombosSnapshot():List<ComboEntity>
 @Query("SELECT * FROM EmployeeEntity ORDER BY name") fun employees():Flow<List<EmployeeEntity>>
 @Query("SELECT * FROM SupplierEntity ORDER BY name") fun suppliers():Flow<List<SupplierEntity>>
+@Query("SELECT * FROM SupplierEntity ORDER BY name") suspend fun allSuppliersSnapshot():List<SupplierEntity>
 @Query("SELECT * FROM TableSessionEntity WHERE status='OPEN'") fun openSessions():Flow<List<TableSessionEntity>>
 @Query("""SELECT s.id AS sessionId,
 MIN(CASE WHEN ob.status NOT IN ('DRAFT','CANCELLED') THEN COALESCE(ob.sentAt,ob.createdAt) END) AS firstOrderAt,
@@ -61,7 +62,9 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Query("SELECT * FROM PurchaseItemEntity WHERE purchaseId=:purchaseId") fun purchaseItems(purchaseId:String):Flow<List<PurchaseItemEntity>>
 @Query("SELECT * FROM MonthlyAccountingEntity") fun monthlyAccounting():Flow<List<MonthlyAccountingEntity>>
 @Query("SELECT * FROM ProfitPartnerEntity WHERE active=1 ORDER BY sortOrder,name") fun profitPartners():Flow<List<ProfitPartnerEntity>>
+@Query("SELECT * FROM ProfitPartnerEntity ORDER BY sortOrder,name") suspend fun allProfitPartnersSnapshot():List<ProfitPartnerEntity>
 @Query("SELECT * FROM AssetCategoryEntity WHERE active=1 ORDER BY sortOrder,name") fun assetCategories():Flow<List<AssetCategoryEntity>>
+@Query("SELECT * FROM AssetCategoryEntity ORDER BY sortOrder,name") suspend fun allAssetCategoriesSnapshot():List<AssetCategoryEntity>
 @Query("SELECT * FROM AssetEntity ORDER BY purchaseDate DESC,name") fun assets():Flow<List<AssetEntity>>
 @Query("SELECT * FROM AssetValuationEntity ORDER BY changedAt DESC") fun assetValuations():Flow<List<AssetValuationEntity>>
 @Query("SELECT * FROM FinancialMovementEntity ORDER BY occurredAt DESC") fun financialMovements():Flow<List<FinancialMovementEntity>>
@@ -133,16 +136,20 @@ WHERE s.status='OPEN' GROUP BY s.id""") fun tableServiceTimings():Flow<List<Tabl
 @Query("UPDATE PricingRuleEntity SET active=:active WHERE id=:id") suspend fun setPricingRuleActive(id:String,active:Boolean)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertBillAdjustments(v:List<BillAdjustmentEntity>)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertPurchase(v:PurchaseEntity)
+@Insert(onConflict=OnConflictStrategy.IGNORE) suspend fun insertCloudPurchase(v:PurchaseEntity):Long
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertPurchaseItems(v:List<PurchaseItemEntity>)
+@Insert(onConflict=OnConflictStrategy.IGNORE) suspend fun insertCloudPurchaseItems(v:List<PurchaseItemEntity>):List<Long>
 @Update suspend fun updatePurchase(v:PurchaseEntity):Int
 @Update suspend fun updatePurchaseItem(v:PurchaseItemEntity):Int
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveMonthlyAccounting(v:MonthlyAccountingEntity)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveProfitPartners(v:List<ProfitPartnerEntity>)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveAssetCategory(v:AssetCategoryEntity)
 @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveAsset(v:AssetEntity)
+@Insert(onConflict=OnConflictStrategy.IGNORE) suspend fun insertCloudAsset(v:AssetEntity):Long
 @Query("UPDATE AssetEntity SET status=:status WHERE id=:id") suspend fun setAssetStatus(id:String,status:String):Int
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertAssetValuation(v:AssetValuationEntity)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertFinancialMovement(v:FinancialMovementEntity)
+@Insert(onConflict=OnConflictStrategy.IGNORE) suspend fun insertCloudFinancialMovement(v:FinancialMovementEntity):Long
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun insertOpeningCashAdjustment(v:OpeningCashAdjustmentEntity)
 @Insert(onConflict=OnConflictStrategy.ABORT) suspend fun audit(v:AuditEventEntity)
 @Query("UPDATE MenuItemEntity SET active=:active WHERE id=:id") suspend fun setMenuActive(id:String,active:Boolean)

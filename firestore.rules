@@ -19,16 +19,78 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/managerAccess/$(request.auth.uid)).data.active == true;
     }
 
-    match /users/{ownerUid}/stores/{storeId}/{document=**} {
+    function hasManagerFinanceWriteAccess(ownerUid) {
+      return hasManagerReadAccess(ownerUid)
+        && get(/databases/$(database)/documents/managerAccess/$(request.auth.uid)).data.canWriteFinance == true;
+    }
+
+    // The store root document itself is written by Android sync (name/updatedAt/schemaVersion).
+    // A recursive child match does NOT cover /users/{uid}/stores/{storeId} itself.
+    match /users/{ownerUid}/stores/{storeId} {
       allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
       allow write: if isStoreOwner(ownerUid);
     }
 
-    // Raw Room snapshots can contain staff PINs and other restore-only data.
-    // They are deliberately invisible to manager/shareholder accounts.
-    match /users/{ownerUid}/privateBackups/{backupId}/{document=**} {
+    // Owner retains full access. Manager access is whitelisted below: Firestore
+    // combines overlapping allow rules with OR, so a broad manager rule here
+    // would leak the private Room backup collection.
+    match /users/{ownerUid}/stores/{storeId}/{document=**} {
       allow read, write: if isStoreOwner(ownerUid);
     }
+
+    match /users/{ownerUid}/stores/{storeId}/privateBackup/{document=**} {
+      allow read, write: if isStoreOwner(ownerUid);
+    }
+
+    match /users/{ownerUid}/stores/{storeId}/privateBackup/{backupId} {
+      allow read, write: if isStoreOwner(ownerUid);
+    }
+
+    // Collections rendered by the manager web dashboard. There is no catch-all
+    // manager read rule, by design.
+    match /users/{ownerUid}/stores/{storeId}/dashboard/{document=**} { allow read: if hasManagerReadAccess(ownerUid); }
+    match /users/{ownerUid}/stores/{storeId}/tableStatus/{document=**} { allow read: if hasManagerReadAccess(ownerUid); }
+    match /users/{ownerUid}/stores/{storeId}/sessions/{document=**} { allow read: if hasManagerReadAccess(ownerUid); }
+    match /users/{ownerUid}/stores/{storeId}/orderBatches/{document=**} { allow read: if hasManagerReadAccess(ownerUid); }
+    match /users/{ownerUid}/stores/{storeId}/orderItems/{document=**} { allow read: if hasManagerReadAccess(ownerUid); }
+    match /users/{ownerUid}/stores/{storeId}/bills/{document=**} { allow read: if hasManagerReadAccess(ownerUid); }
+    match /users/{ownerUid}/stores/{storeId}/purchases/{document=**} { allow read: if hasManagerReadAccess(ownerUid); }
+    match /users/{ownerUid}/stores/{storeId}/purchaseItems/{document=**} { allow read: if hasManagerReadAccess(ownerUid); }
+    match /users/{ownerUid}/stores/{storeId}/assets/{document=**} { allow read: if hasManagerReadAccess(ownerUid); }
+    match /users/{ownerUid}/stores/{storeId}/suppliers/{document=**} { allow read: if hasManagerReadAccess(ownerUid); }
+    match /users/{ownerUid}/stores/{storeId}/financialMovements/{document=**} { allow read: if hasManagerReadAccess(ownerUid); }
+    match /users/{ownerUid}/stores/{storeId}/costCodes/{document=**} { allow read: if hasManagerReadAccess(ownerUid); }
+    match /users/{ownerUid}/stores/{storeId}/purchaseCategories/{document=**} { allow read: if hasManagerReadAccess(ownerUid); }
+    match /users/{ownerUid}/stores/{storeId}/profitPartners/{document=**} { allow read: if hasManagerReadAccess(ownerUid); }
+    match /users/{ownerUid}/stores/{storeId}/assetCategories/{document=**} { allow read: if hasManagerReadAccess(ownerUid); }
+
+    // Finance entry from Web Manager is deliberately limited to canonical
+    // purchase / financial-movement collections. Managers need explicit grant.
+    match /users/{ownerUid}/stores/{storeId}/purchases/{purchaseId} {
+      allow create, update: if isStoreOwner(ownerUid) || hasManagerFinanceWriteAccess(ownerUid);
+      allow delete: if isStoreOwner(ownerUid);
+    }
+
+    match /users/{ownerUid}/stores/{storeId}/purchaseItems/{itemId} {
+      allow create, update: if isStoreOwner(ownerUid) || hasManagerFinanceWriteAccess(ownerUid);
+      allow delete: if isStoreOwner(ownerUid);
+    }
+
+    match /users/{ownerUid}/stores/{storeId}/assets/{assetId} {
+      allow create, update: if isStoreOwner(ownerUid) || hasManagerFinanceWriteAccess(ownerUid);
+      allow delete: if isStoreOwner(ownerUid);
+    }
+
+    match /users/{ownerUid}/stores/{storeId}/suppliers/{supplierId} {
+      allow create, update: if isStoreOwner(ownerUid) || hasManagerFinanceWriteAccess(ownerUid);
+      allow delete: if isStoreOwner(ownerUid);
+    }
+
+    match /users/{ownerUid}/stores/{storeId}/financialMovements/{movementId} {
+      allow create, update: if isStoreOwner(ownerUid) || hasManagerFinanceWriteAccess(ownerUid);
+      allow delete: if isStoreOwner(ownerUid);
+    }
+
 
     match /managerAccess/{managerUid} {
       allow read: if signedIn() && request.auth.uid == managerUid;
