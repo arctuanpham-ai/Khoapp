@@ -1,0 +1,177 @@
+name: POS0210 Candidate30 Hardening Verification
+
+on:
+  push:
+    branches: [ qa/candidate30-hardening ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pos0210-candidate30-hardening
+  cancel-in-progress: true
+
+env:
+  TARGET_SHA: 00e6164d14cee0f0814d8067ab869b2365946893
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+jobs:
+  hardening-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Candidate identity and hardening invariants
+        shell: python
+        run: |
+          from pathlib import Path
+          gradle=Path("POS0210/app/build.gradle.kts").read_text()
+          main=Path("POS0210/app/src/main/java/vn/ecohome/pos0210/MainActivity.kt").read_text()
+          vm=Path("POS0210/app/src/main/java/vn/ecohome/pos0210/PosViewModel.kt").read_text()
+          backup=Path("POS0210/app/src/main/java/vn/ecohome/pos0210/cloud/FirestorePrivateBackup.kt").read_text()
+          rules=Path("firestore.rules").read_text()
+          web=Path("web-manager/app.js").read_text()
+          assert "versionCode = 91" in gradle
+          assert 'versionName = "1.0.0-alpha61-candidate30"' in gradle
+          assert 'match /users/{ownerUid}/stores/{storeId}/privateBackup/{document=**}' in rules
+          generic=rules[rules.index("match /users/{ownerUid}/stores/{storeId}/{document=**}"):rules.index("match /users/{ownerUid}/stores/{storeId}/{document=**}")+220]
+          assert "hasManagerReadAccess" not in generic
+          assert "PRAGMA integrity_check" in backup
+          assert "live.version==19" in backup
+          assert "dữ liệu cũ đã được phục hồi" in backup
+          assert 'state.payerFilter === "ALL"' in web[web.index("function renderTransactions()"):web.index("function showDetail")]
+          assert 'String(m.counterpartyName || "").trim() === state.payerFilter' in web
+          assert 'setting("checkout_print_test_mode")' not in main
+          assert 'saveSetting("checkout_print_test_mode"' not in main
+          assert "val checkoutPrintTestMode=MutableStateFlow(false)" in vm
+          assert "checkoutPrintTestMode.value=false" in vm
+          assert 'enabled=preview.total>0&&pendingDelivery.isEmpty()&&validPaymentSession!=null' in main
+          assert 'if(qrConfigured)qrBitmap(preview.total,qrInfo) else null' in vm
+          print("candidate30 hardening invariants PASS")
+      - name: Web syntax
+        run: node --check web-manager/app.js
+
+  build-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+      - name: Full unit regression
+        working-directory: POS0210
+        run: gradle --no-daemon :app:testDebugUnitTest --stacktrace
+      - name: Build app and android tests
+        working-directory: POS0210
+        run: gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - name: Android lint
+        working-directory: POS0210
+        run: gradle --no-daemon :app:lintDebug --stacktrace
+      - name: Verify APK identity and SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=POS0210/app/build/outputs/apk/debug/app-debug.apk
+          BADGING=$($ANDROID_HOME/build-tools/35.0.0/aapt dump badging "$APK" | head -n1)
+          echo "$BADGING"
+          echo "$BADGING" | grep -q "versionCode=\'91\'"
+          echo "$BADGING" | grep -q "versionName=\'1.0.0-alpha61-candidate30\'"
+          $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose --print-certs "$APK" | tee /tmp/signing.txt
+          sha256sum "$APK" | tee /tmp/apk.sha256
+          mkdir -p dist
+          cp "$APK" dist/POS0210_v1.0.0-alpha61-candidate30.apk
+          cp /tmp/apk.sha256 /tmp/signing.txt dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: POS0210-v1.0.0-alpha61-candidate30-vc91-independent
+          path: dist/*
+          retention-days: 30
+
+  upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 28
+            target: google_apis
+          - api: 35
+            target: aosp_atd
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 9ae84b456b25aeb67ea51a2f3b3e8e6dc1e8c105
+          path: alpha50
+      - uses: actions/checkout@v4
+        with:
+          ref: qa/candidate30-hardening
+          path: alpha51
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+      - name: Build alpha50 and candidate30
+        run: |
+          (cd alpha50/POS0210 && gradle --no-daemon :app:assembleDebug)
+          (cd alpha51/POS0210 && gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest)
+          cp alpha50/POS0210/app/build/outputs/apk/debug/app-debug.apk /tmp/alpha50.apk
+          cp alpha51/POS0210/app/build/outputs/apk/debug/app-debug.apk /tmp/alpha51.apk
+          cp alpha51/POS0210/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk /tmp/alpha51-androidTest.apk
+      - name: Enable KVM/sqlite
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          sudo apt-get update -qq && sudo apt-get install -y sqlite3
+      - name: Real in-place upgrade/data survival
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
+          arch: x86_64
+          profile: pixel_2
+          cores: 2
+          ram-size: 2048
+          heap-size: 512
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash alpha51/.github/scripts/pos0210-upgrade-gate.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate30-upgrade-api${{ matrix.api }}
+          path: |
+            /tmp/install50.txt
+            /tmp/install51.txt
+            /tmp/pre_integrity.txt
+            /tmp/post_integrity.txt
+            /tmp/before.json
+            /tmp/after.json
+            /tmp/logcat.txt
+            /tmp/table_card_tests.txt
+          if-no-files-found: warn
+          retention-days: 30
