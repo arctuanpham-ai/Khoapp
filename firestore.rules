@@ -31,9 +31,74 @@ service cloud.firestore {
       allow write: if isStoreOwner(ownerUid);
     }
 
+    // Generic descendants are owner-only. Manager access is explicitly
+    // whitelisted below so private restore data never inherits manager read access.
     match /users/{ownerUid}/stores/{storeId}/{document=**} {
+      allow read, write: if isStoreOwner(ownerUid);
+    }
+
+    // Read-only collections required by the browser manager.
+    match /users/{ownerUid}/stores/{storeId}/dashboard/{document=**} {
       allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
-      allow write: if isStoreOwner(ownerUid);
+    }
+    match /users/{ownerUid}/stores/{storeId}/tableStatus/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+    }
+    match /users/{ownerUid}/stores/{storeId}/sessions/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+    }
+    match /users/{ownerUid}/stores/{storeId}/orderBatches/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+    }
+    match /users/{ownerUid}/stores/{storeId}/orderItems/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+    }
+    match /users/{ownerUid}/stores/{storeId}/bills/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+    }
+    match /users/{ownerUid}/stores/{storeId}/payments/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+    }
+    match /users/{ownerUid}/stores/{storeId}/menu/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+    }
+    match /users/{ownerUid}/stores/{storeId}/areas/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+    }
+    match /users/{ownerUid}/stores/{storeId}/menuCategories/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+    }
+    match /users/{ownerUid}/stores/{storeId}/purchases/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+    }
+    match /users/{ownerUid}/stores/{storeId}/purchaseItems/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+    }
+    match /users/{ownerUid}/stores/{storeId}/financialMovements/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+    }
+    match /users/{ownerUid}/stores/{storeId}/costCodes/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+    }
+    match /users/{ownerUid}/stores/{storeId}/purchaseCategories/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+    }
+    match /users/{ownerUid}/stores/{storeId}/profitPartners/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+    }
+    match /users/{ownerUid}/stores/{storeId}/assetCategories/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+    }
+    match /users/{ownerUid}/stores/{storeId}/assets/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+    }
+    match /users/{ownerUid}/stores/{storeId}/suppliers/{document=**} {
+      allow read: if isStoreOwner(ownerUid) || hasManagerReadAccess(ownerUid);
+    }
+
+    // Actual Android cloud-backup location. Raw Room snapshots are owner-only.
+    match /users/{ownerUid}/stores/{storeId}/privateBackup/{document=**} {
+      allow read, write: if isStoreOwner(ownerUid);
     }
 
     // Finance entry from Web Manager is deliberately limited to canonical
