@@ -1,4 +1,3 @@
-350 POS0210/app/src/main/java/vn/ecohome/pos0210/printing/BluetoothPrinter.kt
 package vn.ecohome.pos0210.printing
 
 import android.Manifest
