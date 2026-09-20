@@ -226,6 +226,7 @@ function renderTransactions() {
     .map((p) => ({ kind: "EXPENSE", at: Number(p.purchasedAt || 0), id: p.id, amount: Number(p.total || 0), title: EXPENSE_LABELS[p.expenseCategory] || "Phiếu chi", person: p.paidByName || "", note: p.note || "" }));
   const movements = state.movements
     .filter((m) => inRange(m.occurredAt, range))
+    .filter((m) => state.payerFilter === "ALL" || (state.payerFilter === "UNKNOWN"\n      ? !String(m.counterpartyName || "").trim()\n      : String(m.counterpartyName || "").trim() === state.payerFilter))
     .map((m) => ({ kind: "MOVEMENT", at: Number(m.occurredAt || 0), id: m.id, amount: Number(m.amount || 0), title: MOVEMENT_LABELS[m.type] || m.type || "Dòng tiền", person: m.counterpartyName || "", note: m.note || "" }));
   let rows0 = [...purchases, ...movements].sort((a, b) => b.at - a.at);
   if (state.transactionKind !== "ALL") rows0 = rows0.filter((r) => r.kind === state.transactionKind);
