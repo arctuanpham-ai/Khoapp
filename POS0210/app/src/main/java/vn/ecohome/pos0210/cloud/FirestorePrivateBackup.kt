@@ -6,6 +6,7 @@ import android.util.Base64
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.sync.withLock
 import vn.ecohome.pos0210.data.PosDatabase
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -134,7 +135,9 @@ object FirestorePrivateBackup {
         return legacyLatestInfo(privateRoot)
     }
 
-    suspend fun restoreLatest(context:Context):CloudBackupInfo {
+    suspend fun restoreLatest(context:Context):CloudBackupInfo = CloudOperationGuard.mutex.withLock { restoreLatestUnlocked(context) }
+
+    private suspend fun restoreLatestUnlocked(context:Context):CloudBackupInfo {
         val config=FirebaseCloudSync.config(context)
         require(config.valid){"Chưa cấu hình Firebase"}
         val app=FirebaseCloudSync.firebaseApp(context,config)
