@@ -1,0 +1,266 @@
+name: POS0210 Candidate29 Independent Hardening
+
+on:
+  push:
+    branches: [ pos0210-factory ]
+    paths:
+      - '.github/workflows/pos0210-candidate29-hardening.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pos0210-candidate29-hardening
+  cancel-in-progress: true
+
+env:
+  TARGET_SHA: 704ff03c15b22c793800423f891303249e8887fa
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+jobs:
+  build-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          path: candidate
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Identity and source sanity
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd candidate/POS0210
+          test "$(head -n1 app/build.gradle.kts)" = 'plugins {'
+          grep -q 'versionCode = 90' app/build.gradle.kts
+          grep -q 'versionName = "1.0.0-alpha60-candidate29"' app/build.gradle.kts
+          grep -q 'version=19' app/src/main/java/vn/ecohome/pos0210/data/PosDatabase.kt
+          ! grep -Eq '^\[detached HEAD|^[[:space:]]*Date:|files changed' app/build.gradle.kts
+      - name: Full existing unit regression
+        working-directory: candidate/POS0210
+        run: gradle --no-daemon :app:testDebugUnitTest --stacktrace
+      - name: Build APK and androidTest
+        working-directory: candidate/POS0210
+        run: gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - name: Android lint
+        working-directory: candidate/POS0210
+        run: gradle --no-daemon :app:lintDebug --stacktrace
+      - name: Web manager syntax
+        run: node --check candidate/web-manager/app.js
+      - name: Verify APK identity signer hash
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=candidate/POS0210/app/build/outputs/apk/debug/app-debug.apk
+          BADGING=$($ANDROID_HOME/build-tools/35.0.0/aapt dump badging "$APK" | head -n1)
+          echo "$BADGING"
+          echo "$BADGING" | grep -q "name='vn.ecohome.pos0210'"
+          echo "$BADGING" | grep -q "versionCode='90'"
+          echo "$BADGING" | grep -q "versionName='1.0.0-alpha60-candidate29'"
+          $ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose --print-certs "$APK" | tee /tmp/signing.txt
+          sha256sum "$APK" | tee /tmp/apk.sha256
+          mkdir -p candidate29-artifact
+          cp "$APK" candidate29-artifact/POS0210_v1.0.0-alpha60-candidate29.apk
+          cp /tmp/apk.sha256 candidate29-artifact/
+          cp /tmp/signing.txt candidate29-artifact/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: POS0210-candidate29-independent-build
+          path: candidate29-artifact/*
+          retention-days: 30
+
+  cloud-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          path: candidate
+      - name: Firestore private-backup isolation
+        shell: python
+        run: |
+          from pathlib import Path
+          import re, sys
+          rules=Path("candidate/firestore.rules").read_text()
+          src=Path("candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/cloud/FirestorePrivateBackup.kt").read_text()
+          assert '.collection("stores").document(STORE_ID)' in src
+          assert '.collection("privateBackup").document("room")' in src
+          correct = re.search(r'match /users/\{ownerUid\}/stores/\{storeId\}/privateBackup/\{document=\*\*\}', rules)
+          if not correct:
+              print("P0: Firestore rules do not isolate actual /stores/{storeId}/privateBackup/** path")
+              sys.exit(10)
+          block=correct.group(0)
+          print("Private-backup rule path present:", block)
+      - name: ManagerAccess cannot be self-provisioned
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'match /managerAccess/{managerUid}' candidate/firestore.rules
+          grep -A4 'match /managerAccess/{managerUid}' candidate/firestore.rules | grep -q 'allow write: if false'
+      - name: Cloud safe settings whitelist
+        shell: bash
+        run: |
+          set -euo pipefail
+          f=candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/cloud/FirebaseCloudSync.kt
+          grep -q 'safeSettingKeys=setOf' "$f"
+          ! grep -A3 'safeSettingKeys=setOf' "$f" | grep -E 'firebase_api_key|firebase_project_id|firebase_application_id|autoback_tree_uri|storage_root_uri'
+
+  backup-fault-model:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          path: candidate
+      - name: A/B backup fault invariants
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path("candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/cloud/FirestorePrivateBackup.kt")
+          s=p.read_text()
+          checks={
+            "two slots": 'listOf("A","B")' in s,
+            "mark writing": '"status" to "WRITING"' in s,
+            "mark valid after chunks": s.find('"status" to "VALID"') > s.find('BACKUP_WRITE_CHUNKS'),
+            "checksum": 'sha256(compressed)==manifest.getString("sha256")' in s,
+            "fallback candidates": 'sortedByDescending' in s and 'for((slot,manifest) in candidates)' in s,
+            "chunk count": 'parts.size==count' in s,
+            "old-slot preserved": 'deleteSlotChunks(targetDoc)' in s,
+            "size guard": 'MAX_CHUNKS=200' in s,
+          }
+          bad=[k for k,v in checks.items() if not v]
+          print(checks)
+          if bad: raise SystemExit("Backup invariant missing: "+", ".join(bad))
+      - name: Restore validation hardening
+        shell: python
+        run: |
+          from pathlib import Path
+          s=Path("candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/cloud/FirestorePrivateBackup.kt").read_text()
+          issues=[]
+          if 'PRAGMA integrity_check' not in s: issues.append('restored DB is not integrity_check validated')
+          if 'user_version' not in s and 'PosDatabase' not in s[s.find('validateAndReplace'):s.find('makeScrubbedCopy')]: issues.append('restored DB schema/version is not validated before replacement')
+          if issues:
+            print("HARDENING WARN:", " | ".join(issues))
+            raise SystemExit(11)
+
+  finance-web-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          path: candidate
+      - name: Finance/payer invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'paidByName' candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDao.kt
+          grep -q 'counterpartyName' candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/data/PosDao.kt
+          grep -q 'payer-filter' candidate/web-manager/app.js
+          grep -q 'selectedPayerExpense' candidate/web-manager/app.js
+          grep -q 'status !== "DELETED"' candidate/web-manager/app.js
+      - name: Check payer filter transaction semantics
+        shell: python
+        run: |
+          from pathlib import Path
+          s=Path("candidate/web-manager/app.js").read_text()
+          a=s.index("function renderTransactions()")
+          b=s.index("function showDetail",a)
+          f=s[a:b]
+          # When a payer is selected, movement rows must not silently bypass that person filter.
+          movement=f[f.index("const movements"):]
+          if 'state.payerFilter' not in movement.split('let rows0')[0]:
+            print("P1: payer filter is applied to purchases but not financial movements in transaction list")
+            raise SystemExit(12)
+
+  upgrade:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 28
+            target: google_apis
+          - api: 35
+            target: aosp_atd
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 9ae84b456b25aeb67ea51a2f3b3e8e6dc1e8c105
+          path: alpha50
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          path: alpha51
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build old and exact target
+        run: |
+          (cd alpha50/POS0210 && gradle --no-daemon :app:assembleDebug)
+          (cd alpha51/POS0210 && gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest)
+          cp alpha50/POS0210/app/build/outputs/apk/debug/app-debug.apk /tmp/alpha50.apk
+          cp alpha51/POS0210/app/build/outputs/apk/debug/app-debug.apk /tmp/alpha51.apk
+          cp alpha51/POS0210/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk /tmp/alpha51-androidTest.apk
+      - name: Enable KVM/sqlite
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          sudo apt-get update -qq && sudo apt-get install -y sqlite3
+      - name: Real in-place upgrade and survival
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
+          arch: x86_64
+          profile: pixel_2
+          cores: 2
+          ram-size: 2048
+          heap-size: 512
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash alpha51/.github/scripts/pos0210-upgrade-gate.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate29-upgrade-api${{ matrix.api }}
+          path: |
+            /tmp/install50.txt
+            /tmp/install51.txt
+            /tmp/pre_integrity.txt
+            /tmp/post_integrity.txt
+            /tmp/before.json
+            /tmp/after.json
+            /tmp/logcat.txt
+            /tmp/table_card_tests.txt
+          if-no-files-found: warn
+          retention-days: 30
