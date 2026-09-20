@@ -1,0 +1,231 @@
+name: POS0210 Candidate29 Hardening v2
+
+on:
+  push:
+    branches: [ pos0210-factory ]
+    paths:
+      - '.github/workflows/pos0210-candidate29-hardening-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pos0210-candidate29-hardening-v2
+  cancel-in-progress: true
+
+env:
+  TARGET_SHA: 704ff03c15b22c793800423f891303249e8887fa
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+jobs:
+  lint-capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          path: candidate
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Run lint and capture all findings
+        id: lint
+        working-directory: candidate/POS0210
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon :app:lintDebug --stacktrace
+          rc=$?
+          mkdir -p /tmp/c29lint
+          find app/build -name 'lint-results-debug.txt' -exec cp {} /tmp/c29lint/ \; || true
+          find app/build -name 'lint-results-debug.html' -exec cp {} /tmp/c29lint/ \; || true
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate29-lint-full
+          path: /tmp/c29lint/*
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Web JS syntax
+        run: node --check candidate/web-manager/app.js
+      - name: Preserve lint failure signal
+        shell: bash
+        run: |
+          test "${{ steps.lint.outputs.rc }}" = "0" || {
+            echo "Lint defects captured in artifact candidate29-lint-full"
+            exit 2
+          }
+
+  upgrade-v2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 28
+            target: google_apis
+          - api: 35
+            target: aosp_atd
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 9ae84b456b25aeb67ea51a2f3b3e8e6dc1e8c105
+          path: alpha50
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          path: alpha51
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build baseline and immutable candidate29
+        run: |
+          (cd alpha50/POS0210 && gradle --no-daemon :app:assembleDebug)
+          (cd alpha51/POS0210 && gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest)
+          cp alpha50/POS0210/app/build/outputs/apk/debug/app-debug.apk /tmp/alpha50.apk
+          cp alpha51/POS0210/app/build/outputs/apk/debug/app-debug.apk /tmp/alpha51.apk
+          cp alpha51/POS0210/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk /tmp/alpha51-androidTest.apk
+      - name: Prepare QA-only candidate29 upgrade verifier
+        shell: bash
+        run: |
+          cp alpha51/.github/scripts/pos0210-upgrade-gate.sh alpha51/.github/scripts/pos0210-upgrade-gate-c29-qa.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path("alpha51/.github/scripts/pos0210-upgrade-gate-c29-qa.sh")
+          s=p.read_text()
+          s=s.replace("versionName=1.0.0-alpha52-candidate13|versionCode=74","versionName=1.0.0-alpha60-candidate29|versionCode=90")
+          s=s.replace("execute Room migration to 17","execute Room migration to 19")
+          s=s.replace("if uv != 17: errors.append(f'user_version expected 17 got {uv}')","if uv != 19: errors.append(f'user_version expected 19 got {uv}')")
+          # candidate29 adds CostCodeEntity and migration 17->19 fields.
+          s=s.replace("'OpeningCashAdjustmentEntity'):","'OpeningCashAdjustmentEntity','CostCodeEntity'):")
+          s=s.replace("if 'CloudSyncStateEntity' not in tables: errors.append('missing additive table CloudSyncStateEntity')",
+                      "if 'CloudSyncStateEntity' not in tables: errors.append('missing additive table CloudSyncStateEntity')\n"
+                      "purchase_cols2={r[1] for r in db.execute('pragma table_info(PurchaseEntity)')}\n"
+                      "for col in ('paidByName','costCodeId','updatedAt'):\n"
+                      "    if col not in purchase_cols2: errors.append(f'missing PurchaseEntity.{col}')\n"
+                      "asset_cols={r[1] for r in db.execute('pragma table_info(AssetEntity)')}\n"
+                      "if 'investmentClass' not in asset_cols: errors.append('missing AssetEntity.investmentClass')\n"
+                      "movement_cols={r[1] for r in db.execute('pragma table_info(FinancialMovementEntity)')}\n"
+                      "if 'counterpartyName' not in movement_cols: errors.append('missing FinancialMovementEntity.counterpartyName')")
+          p.write_text(s)
+          PY
+          chmod +x alpha51/.github/scripts/pos0210-upgrade-gate-c29-qa.sh
+          grep -q 'candidate29|versionCode=90' alpha51/.github/scripts/pos0210-upgrade-gate-c29-qa.sh
+          grep -q 'expected 19' alpha51/.github/scripts/pos0210-upgrade-gate-c29-qa.sh
+      - name: Enable KVM/sqlite
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          sudo apt-get update -qq && sudo apt-get install -y sqlite3
+      - name: Real in-place upgrade alpha50 to candidate29
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
+          arch: x86_64
+          profile: pixel_2
+          cores: 2
+          ram-size: 2048
+          heap-size: 512
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: bash alpha51/.github/scripts/pos0210-upgrade-gate-c29-qa.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: candidate29-upgrade-v2-api${{ matrix.api }}
+          path: |
+            /tmp/install50.txt
+            /tmp/install51.txt
+            /tmp/pre_integrity.txt
+            /tmp/post_integrity.txt
+            /tmp/before.json
+            /tmp/after.json
+            /tmp/logcat.txt
+            /tmp/table_card_tests.txt
+          if-no-files-found: warn
+          retention-days: 30
+
+  scenario-static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          path: candidate
+      - name: Cloud backup confidentiality and restore safety
+        shell: python
+        run: |
+          from pathlib import Path
+          rules=Path("candidate/firestore.rules").read_text()
+          backup=Path("candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/cloud/FirestorePrivateBackup.kt").read_text()
+          failures=[]
+          actual='match /users/{ownerUid}/stores/{storeId}/privateBackup/{document=**}'
+          if actual not in rules:
+              failures.append("P0 PRIVATE_BACKUP_RULE_PATH_MISMATCH")
+          recursive='match /users/{ownerUid}/stores/{storeId}/{document=**}'
+          if recursive in rules and 'hasManagerReadAccess(ownerUid)' in rules[rules.index(recursive):rules.index(recursive)+300]:
+              failures.append("P0 MANAGER_CAN_READ_PRIVATE_BACKUP_VIA_RECURSIVE_RULE")
+          vr=backup[backup.find('private fun validateAndReplace'):backup.find('private fun makeScrubbedCopy')]
+          if 'integrity_check' not in vr:
+              failures.append("P0 RESTORE_NO_SQLITE_INTEGRITY_CHECK")
+          if 'user_version' not in vr:
+              failures.append("P0 RESTORE_NO_SCHEMA_VERSION_CHECK")
+          print("\n".join(failures) if failures else "cloud backup safety static PASS")
+          if failures: raise SystemExit(20)
+      - name: Payer filter semantic consistency
+        shell: python
+        run: |
+          from pathlib import Path
+          s=Path("candidate/web-manager/app.js").read_text()
+          a=s.index("function renderTransactions()")
+          b=s.index("function showDetail",a)
+          f=s[a:b]
+          purchases=f[f.index("const purchases"):f.index("const movements")]
+          movements=f[f.index("const movements"):f.index("let rows0")]
+          bad=[]
+          if 'state.payerFilter' not in purchases: bad.append("purchase payer filter missing")
+          if 'state.payerFilter' not in movements: bad.append("P1 movement payer filter missing")
+          print("\n".join(bad) if bad else "payer filter static PASS")
+          if bad: raise SystemExit(21)
+      - name: Printer permission exception hardening
+        shell: python
+        run: |
+          from pathlib import Path
+          s=Path("candidate/POS0210/app/src/main/java/vn/ecohome/pos0210/printing/BluetoothPrinter.kt").read_text()
+          segment=s[s.index("private fun printBitmapLocked"):s.index("data class PrintTransportStats")]
+          # Runtime permission is checked, but API calls should also be inside a SecurityException-safe boundary.
+          calls=('getRemoteDevice(address)','device.name','adapter.cancelDiscovery()','createRfcommSocketToServiceRecord')
+          unsafe=[c for c in calls if c in segment]
+          if unsafe and 'catch(_:SecurityException)' not in segment and 'catch(t:SecurityException)' not in segment:
+              print("P1 BLUETOOTH_SECURITY_EXCEPTION_NOT_EXPLICITLY_HANDLED:", unsafe)
+              raise SystemExit(22)
+          print("printer permission static PASS")
