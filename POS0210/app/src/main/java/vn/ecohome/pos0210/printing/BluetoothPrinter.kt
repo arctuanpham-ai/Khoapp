@@ -1,6 +1,7 @@
 package vn.ecohome.pos0210.printing
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.pm.PackageManager
@@ -26,6 +27,7 @@ object BluetoothPrinter {
         Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             ContextCompat.checkSelfPermission(context,Manifest.permission.BLUETOOTH_CONNECT)==PackageManager.PERMISSION_GRANTED
 
+    @SuppressLint("MissingPermission")
     fun pairedDevices(context:Context):List<PrinterDevice>{
         if(!hasPermission(context)) return emptyList()
         val adapter=(context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter ?: return emptyList()
@@ -39,6 +41,7 @@ object BluetoothPrinter {
     fun printBitmap(context:Context,address:String,bitmap:Bitmap,profile:PrinterProfile=PrinterProfile.MM58,jobType:PrintJobType=PrintJobType.TEST):Result<Unit> =
         synchronized(PRINT_LOCK){printBitmapLocked(context,address,bitmap,profile,jobType)}
 
+    @SuppressLint("MissingPermission")
     private fun printBitmapLocked(context:Context,address:String,bitmap:Bitmap,profile:PrinterProfile,jobType:PrintJobType):Result<Unit> = runCatching {
         require(address.isNotBlank()){"Chưa chọn máy in Bluetooth"}
         require(hasPermission(context)){"Chưa cấp quyền Bluetooth"}
