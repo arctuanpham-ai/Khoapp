@@ -32,6 +32,11 @@ object FirestorePrivateBackup {
     private const val MAX_CHUNKS=200
     private const val FORMAT="POS0210_ROOM_GZIP_V2_AB"
     private const val LEGACY_FORMAT="POS0210_ROOM_GZIP_V1"
+    private const val MIN_SUPPORTED_ROOM_VERSION=1
+    private const val CURRENT_ROOM_VERSION=19
+
+    internal fun supportsRestoreUserVersion(userVersion:Int):Boolean =
+        userVersion in MIN_SUPPORTED_ROOM_VERSION..CURRENT_ROOM_VERSION
 
     private fun root(fs:FirebaseFirestore,uid:String)=
         fs.collection("users").document(uid)
@@ -259,12 +264,27 @@ object FirestorePrivateBackup {
         val staged=File(context.cacheDir,"pos0210-cloud-restore.db")
         staged.outputStream().use{it.write(restored)}
         try{
-            SQLiteDatabase.openDatabase(staged.absolutePath,null,SQLiteDatabase.OPEN_READONLY).close()
-            replaceDatabase(context,staged)
+            validateStagedDatabase(staged)
+            replaceAndVerify(context,staged)
         }finally{
             staged.delete()
         }
     }
+
+    private fun validateStagedDatabase(staged:File){
+        SQLiteDatabase.openDatabase(staged.absolutePath,null,SQLiteDatabase.OPEN_READONLY).use { db ->
+            require(pragmaString(db,"PRAGMA integrity_check;")=="ok"){"RESTORE_SQLITE_INTEGRITY_FAILED"}
+            val version=pragmaString(db,"PRAGMA user_version;").toIntOrNull()
+                ?:error("RESTORE_SCHEMA_VERSION_INVALID")
+            require(supportsRestoreUserVersion(version)){"RESTORE_SCHEMA_VERSION_UNSUPPORTED:$version"}
+        }
+    }
+
+    private fun pragmaString(db:SQLiteDatabase,sql:String):String =
+        db.rawQuery(sql,null).use { cursor ->
+            require(cursor.moveToFirst()){"RESTORE_SQLITE_PRAGMA_EMPTY"}
+            cursor.getString(0)
+        }
 
     private fun makeScrubbedCopy(context:Context):File {
         val room=PosDatabase.get(context)
@@ -294,13 +314,44 @@ object FirestorePrivateBackup {
     private fun sha256(raw:ByteArray)=
         MessageDigest.getInstance("SHA-256").digest(raw).joinToString(""){"%02x".format(it)}
 
-    private fun replaceDatabase(context:Context,staged:File){
+    private fun replaceAndVerify(context:Context,staged:File){
         val target=context.getDatabasePath("pos0210.db")
         val safety=File(target.parentFile,"pos0210-before-cloud-restore.db")
+        runCatching { PosDatabase.get(context).openHelper.writableDatabase.query("PRAGMA wal_checkpoint(FULL)").close() }
         PosDatabase.closeForRestore()
         if(target.exists())target.copyTo(safety,true)
-        File(target.path+"-wal").delete()
-        File(target.path+"-shm").delete()
-        staged.copyTo(target,true)
+        deleteSidecars(target)
+        try{
+            staged.copyTo(target,true)
+            verifyRestoredRoomDatabase(context)
+        }catch(error:Throwable){
+            PosDatabase.closeForRestore()
+            deleteSidecars(target)
+            if(safety.exists())safety.copyTo(target,true) else target.delete()
+            deleteSidecars(target)
+            runCatching { PosDatabase.get(context).openHelper.writableDatabase }
+            throw IllegalStateException("RESTORE_ROLLED_BACK:${error.message}",error)
+        }
+    }
+
+    private fun verifyRestoredRoomDatabase(context:Context){
+        val room=PosDatabase.get(context)
+        room.openHelper.writableDatabase
+        val target=context.getDatabasePath("pos0210.db")
+        SQLiteDatabase.openDatabase(target.absolutePath,null,SQLiteDatabase.OPEN_READONLY).use { db ->
+            require(pragmaString(db,"PRAGMA integrity_check;")=="ok"){"RESTORE_POST_REPLACE_INTEGRITY_FAILED"}
+            val tables=mutableSetOf<String>()
+            db.rawQuery("SELECT name FROM sqlite_master WHERE type='table'",null).use { cursor ->
+                while(cursor.moveToNext())tables+=cursor.getString(0)
+            }
+            require(setOf("EmployeeEntity","DiningTableEntity","AppSettingEntity","BillEntity").all{it in tables}){
+                "RESTORE_CORE_TABLES_MISSING"
+            }
+        }
+    }
+
+    private fun deleteSidecars(database:File){
+        File(database.path+"-wal").delete()
+        File(database.path+"-shm").delete()
     }
 }

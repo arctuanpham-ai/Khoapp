@@ -2,7 +2,7 @@ name: POS0210 Upgrade Data Survival Gate
 
 on:
   push:
-    branches: [ pos0210-v1-rebuild, builder/issue-3-offline-qr ]
+    branches: [ pos0210-v1-rebuild, builder/issue-3-offline-qr, sol/web-manager-finance-v1 ]
     paths:
       - '.github/workflows/pos0210-upgrade-gate.yml'
       - '.github/scripts/pos0210-upgrade-gate.sh'

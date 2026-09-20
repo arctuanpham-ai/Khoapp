@@ -13,6 +13,7 @@ import {
   setDoc,
   writeBatch,
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+import { matchesPayer, normalizePayer } from "./payer-filter.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDhnjjTS1Da99p76VrjMGSKQxgib3b23zk",
@@ -141,10 +142,8 @@ function renderPeriodSummary() {
   const range = rangeForPeriod();
   const bills = state.bills.filter((b) => b.status === "PAID" && inRange(b.closedAt, range));
   const allPurchases = state.purchases.filter((p) => p.status !== "DELETED" && inRange(p.purchasedAt, range));
-  const purchases = state.payerFilter === "ALL"
-    ? allPurchases
-    : allPurchases.filter((p) => state.payerFilter === "UNKNOWN" ? !String(p.paidByName || "").trim() : String(p.paidByName || "").trim() === state.payerFilter);
-  const movements = state.movements.filter((m) => inRange(m.occurredAt, range));
+  const purchases = allPurchases.filter((p) => matchesPayer(state.payerFilter, p.paidByName));
+  const movements = state.movements.filter((m) => inRange(m.occurredAt, range) && matchesPayer(state.payerFilter, m.counterpartyName));
   const revenue = bills.reduce((s, b) => s + Number(b.total || 0), 0);
   const expense = allPurchases.reduce((s, p) => s + Number(p.total || 0), 0);
   const selectedPayerExpense = purchases.reduce((s, p) => s + Number(p.total || 0), 0);
@@ -207,13 +206,14 @@ function renderFinanceMetadata() {
   keep($("#entry-partner"), [new Option("Chọn người", ""), ...people.map((x) => new Option(x.name, x.id))]);
 
   const payerNames = [...new Set([
-    ...people.map((p) => p.name.trim()),
-    ...state.purchases.map((p) => String(p.paidByName || "").trim()).filter(Boolean),
+    ...people.map((p) => normalizePayer(p.name)).filter(Boolean),
+    ...state.purchases.map((p) => normalizePayer(p.paidByName)).filter(Boolean),
+    ...state.movements.map((m) => normalizePayer(m.counterpartyName)).filter(Boolean),
   ])].sort((a,b)=>a.localeCompare(b,"vi"));
   const payerSelect = $("#payer-filter");
   const currentFilter = state.payerFilter;
   payerSelect.replaceChildren(new Option("Tất cả người chi", "ALL"), ...payerNames.map((name)=>new Option(name,name)));
-  if (state.purchases.some((p)=>!String(p.paidByName||"").trim())) payerSelect.append(new Option("Chưa xác định","UNKNOWN"));
+  if ([...state.purchases.map((p)=>p.paidByName), ...state.movements.map((m)=>m.counterpartyName)].some((name)=>!normalizePayer(name))) payerSelect.append(new Option("Chưa xác định","UNKNOWN"));
   payerSelect.value = [...payerSelect.options].some((o)=>o.value===currentFilter) ? currentFilter : "ALL";
   state.payerFilter = payerSelect.value;
 }
@@ -222,10 +222,10 @@ function renderTransactions() {
   const range = rangeForPeriod();
   const purchases = state.purchases
     .filter((p) => p.status !== "DELETED" && inRange(p.purchasedAt, range))
-    .filter((p) => state.payerFilter === "ALL" || (state.payerFilter === "UNKNOWN" ? !String(p.paidByName || "").trim() : String(p.paidByName || "").trim() === state.payerFilter))
+    .filter((p) => matchesPayer(state.payerFilter, p.paidByName))
     .map((p) => ({ kind: "EXPENSE", at: Number(p.purchasedAt || 0), id: p.id, amount: Number(p.total || 0), title: EXPENSE_LABELS[p.expenseCategory] || "Phiếu chi", person: p.paidByName || "", note: p.note || "" }));
   const movements = state.movements
-    .filter((m) => inRange(m.occurredAt, range))
+    .filter((m) => inRange(m.occurredAt, range) && matchesPayer(state.payerFilter, m.counterpartyName))
     .map((m) => ({ kind: "MOVEMENT", at: Number(m.occurredAt || 0), id: m.id, amount: Number(m.amount || 0), title: MOVEMENT_LABELS[m.type] || m.type || "Dòng tiền", person: m.counterpartyName || "", note: m.note || "" }));
   let rows0 = [...purchases, ...movements].sort((a, b) => b.at - a.at);
   if (state.transactionKind !== "ALL") rows0 = rows0.filter((r) => r.kind === state.transactionKind);
