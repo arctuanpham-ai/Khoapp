@@ -625,7 +625,8 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
     val qrInfo = "${setting("qr_prefix").ifBlank { "0210" }} $shortTable ${validPaymentSession?.paymentCode.orEmpty()}".trim()
     val checkoutKey="${s.id}:${preview.total}:$qrInfo"
     val billPrinted=printedCheckoutKey==checkoutKey
-    val checkoutPrintTestMode = setting("checkout_print_test_mode")=="true" && e?.role=="ADMIN"
+    val checkoutTestEnabled by vm.checkoutPrintTestMode.collectAsState()
+    val checkoutPrintTestMode = checkoutTestEnabled && e?.role=="ADMIN"
     val qrConfigured = setting("bank_name").isNotBlank() && setting("bank_account").isNotBlank()
     val ambiguousEvent=bankEvents.firstOrNull{it.matchStatus=="AMBIGUOUS"&&it.amount==preview.total&&it.receivedAt>=s.openedAt}
 
@@ -754,7 +755,7 @@ fun Pay(vm: PosViewModel, t: DiningTableEntity, s: TableSessionEntity) {
                         else vm.printCheckoutBill(preview,qrInfo,matchedCustomer?.name?:customerName)
                     },
                     modifier=Modifier.fillMaxWidth(),
-                    enabled=preview.total>0&&pendingDelivery.isEmpty()&&validPaymentSession!=null&&(checkoutPrintTestMode||qrConfigured)
+                    enabled=preview.total>0&&pendingDelivery.isEmpty()&&validPaymentSession!=null
                 ){
                     Text(
                         if(pendingDelivery.isNotEmpty())"CHƯA GIAO ĐỦ · CHƯA THỂ IN BILL"
@@ -2673,7 +2674,7 @@ fun Printer(vm: PosViewModel) {
     val selectedMac = settings.firstOrNull { it.key == "printer_mac" }?.value ?: ""
     val selectedName = settings.firstOrNull { it.key == "printer_name" }?.value ?: ""
     val paperMm = settings.firstOrNull { it.key == "printer_paper_mm" }?.value ?: "58"
-    val checkoutTestMode = settings.firstOrNull { it.key == "checkout_print_test_mode" }?.value == "true"
+    val checkoutTestMode by vm.checkoutPrintTestMode.collectAsState()
     val current by vm.currentEmployee.collectAsState()
     val hasPermission = remember(permissionTick) { BluetoothPrinter.hasPermission(context) }
 
@@ -2718,7 +2719,7 @@ fun Printer(vm: PosViewModel) {
                                     Text("QA · BILL TEST KHÔNG IN THẬT",fontWeight=FontWeight.Black)
                                     Text("Chỉ dùng khi kiểm thử luồng thanh toán. Khi bật, Admin có thể xác nhận bước 'đã in bill' mà không cần máy in vật lý.",fontSize=11.sp)
                                 }
-                                Switch(checked=checkoutTestMode,onCheckedChange={vm.saveSetting("checkout_print_test_mode",it.toString())})
+                                Switch(checked=checkoutTestMode,onCheckedChange={vm.setCheckoutPrintTestMode(it)})
                             }
                             if(checkoutTestMode)Text("⚠ ĐANG BẬT CHẾ ĐỘ TEST · Tắt trước khi vận hành thật.",fontSize=12.sp,fontWeight=FontWeight.Black,color=Color(0xFF9A4B3D))
                         }
