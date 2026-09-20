@@ -42,8 +42,15 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Test and build full installable APK
-        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
+      - name: Verify web-manager and Firestore policy helpers
+        working-directory: .
+        run: |
+          node --check web-manager/app.js
+          node web-manager/payer-filter.test.mjs
+          bash scripts/verify-firestore-private-backup-rules.sh
+
+      - name: Lint, test and build full installable APK
+        run: gradle --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest --stacktrace
 
       - name: Read app version
         id: app_version
