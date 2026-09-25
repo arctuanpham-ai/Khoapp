@@ -14,6 +14,7 @@ import vn.ecohome.pos0210.cloud.*
 import vn.ecohome.pos0210.data.*
 import vn.ecohome.pos0210.printing.PrinterText
 import vn.ecohome.pos0210.printing.BluetoothPrinter
+import vn.ecohome.pos0210.printing.PrinterRouting
 import vn.ecohome.pos0210.printing.ReceiptRenderer
 import vn.ecohome.pos0210.payment.VietQrOffline
 import java.util.UUID
@@ -103,18 +104,27 @@ class PosViewModel(app:Application):AndroidViewModel(app){
  private fun printerMode()=setting("printer_mode").ifBlank{"TEST"}
  private fun printerMac()=setting("printer_mac")
  private fun printerName()=setting("printer_name").ifBlank{BluetoothPrinter.PROFILE_NAME}
+ private fun printerRouting()=PrinterRouting.fromSettings(printerMac(),setting("kitchen_printer_mac"),setting("receipt_printer_mac"))
+ private fun kitchenPrinterMac()=printerRouting().kitchenMac()
+ private fun receiptPrinterMac()=printerRouting().receiptMac()
+ private fun kitchenPrinterName()=setting("kitchen_printer_name").ifBlank{printerName()}
+ private fun receiptPrinterName()=setting("receipt_printer_name").ifBlank{printerName()}
  private fun printerProfile()=vn.ecohome.pos0210.printing.PrinterProfile.fromSetting(setting("printer_paper_mm"))
  private fun qrBitmap(amount:Long,info:String)=
   VietQrOffline.bitmap(setting("bank_name"),setting("bank_account"),setting("bank_holder"),amount,info).getOrNull()
- fun testBluetoothPrint(){
+ fun testBluetoothPrint(){ testBluetoothPrint(vn.ecohome.pos0210.printing.PrintJobType.TEST) }
+ fun testKitchenBluetoothPrint(){ testBluetoothPrint(vn.ecohome.pos0210.printing.PrintJobType.KITCHEN) }
+ private fun testBluetoothPrint(jobType:vn.ecohome.pos0210.printing.PrintJobType){
   viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO){
    if(printerMode()!="BLUETOOTH"){printerMessage.value="Hãy chọn chế độ BLUETOOTH trước";return@launch}
-   if(printerMac().isBlank()){printerMessage.value="Chưa chọn máy in Bluetooth";return@launch}
+   val mac=printerRouting().addressFor(jobType)
+   val name=if(jobType==vn.ecohome.pos0210.printing.PrintJobType.KITCHEN) kitchenPrinterName() else receiptPrinterName()
+   if(mac.isBlank()){printerMessage.value="Chưa chọn máy in Bluetooth cho ${if(jobType==vn.ecohome.pos0210.printing.PrintJobType.KITCHEN) "phiếu bếp" else "bill"}";return@launch}
    printerMessage.value="Đang in thử..."
    val qr=qrBitmap(135000,"0210 TEST")
    val profile=printerProfile()
-   val result=BluetoothPrinter.printBitmap(getApplication(),printerMac(),ReceiptRenderer.sampleBill(qr,profile),profile,vn.ecohome.pos0210.printing.PrintJobType.TEST)
-   printerMessage.value=if(result.isSuccess)"IN THỬ THÀNH CÔNG · ${printerName()}" else "IN THỬ LỖI: ${result.exceptionOrNull()?.message}"
+   val result=BluetoothPrinter.printBitmap(getApplication(),mac,ReceiptRenderer.sampleBill(qr,profile),profile,jobType)
+   printerMessage.value=if(result.isSuccess)"IN THỬ THÀNH CÔNG · $name" else "IN THỬ LỖI: ${result.exceptionOrNull()?.message}"
   }
  }
  fun setCartNote(key:String,note:String){cartNotes.value=cartNotes.value.toMutableMap().apply{if(note.isBlank())remove(key) else put(key,note.take(120))}}
@@ -312,7 +322,7 @@ fun saveSetting(key:String,value:String){
  val e=currentEmployee.value?:return
  val allowed=when(key){
   "storage_root_uri","master_config_uri","autoback_tree_uri" -> e.role=="ADMIN"||e.canManageSystem
-  "bank_name","bank_account","bank_holder","qr_prefix","printer_mode","printer_mac","printer_name","printer_paper_mm","bank_notification_enabled","bank_notification_vibrate","bank_notification_tts" -> e.role=="ADMIN"||e.role=="MANAGER"
+  "bank_name","bank_account","bank_holder","qr_prefix","printer_mode","printer_mac","printer_name","kitchen_printer_mac","kitchen_printer_name","receipt_printer_mac","receipt_printer_name","printer_paper_mm","bank_notification_enabled","bank_notification_vibrate","bank_notification_tts" -> e.role=="ADMIN"||e.role=="MANAGER"
   else -> e.role=="ADMIN"
  }
  if(!allowed){viewModelScope.launch{audit("SECURITY",key,"SETTING_DENIED","role=${e.role}")};return}
@@ -513,7 +523,7 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
     return@launch
    }
 
-   val mac=printerMac()
+   val mac=kitchenPrinterMac()
    if(mac.isBlank()){
     repo.failKitchenPrint(job.id,"NO_PRINTER_SELECTED")
     printerMessage.value="Chưa chọn máy in Bluetooth"
@@ -527,7 +537,7 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
    if(result.isSuccess){
     val now=System.currentTimeMillis()
     if(repo.finalizeKitchenPrint(job.id,b.id,now)){
-     audit("PRINT",b.id,"KITCHEN_PRINTED","printer=${printerName()},operator=${e.name},job=${job.id}")
+     audit("PRINT",b.id,"KITCHEN_PRINTED","printer=${kitchenPrinterName()},operator=${e.name},job=${job.id}")
      printerMessage.value="ĐÃ IN #${b.serviceNo.toString().padStart(3,'0')} · Đơn #${b.sequence}"
      autoBackup()
     }else{
@@ -535,7 +545,7 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
     }
    }else{
     repo.failKitchenPrint(job.id,result.exceptionOrNull()?.message ?: "UNKNOWN")
-    audit("PRINT",b.id,"KITCHEN_PRINT_FAILED","printer=${printerName()},job=${job.id}")
+    audit("PRINT",b.id,"KITCHEN_PRINT_FAILED","printer=${kitchenPrinterName()},job=${job.id}")
     printerMessage.value="IN THẤT BẠI · Có thể bấm lại để retry"
    }
   }
@@ -572,10 +582,10 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
    if(dao.cancelBatch(b.id)>0){
     audit("BATCH",b.id,"CANCELLED","reason=${reason.trim()},operator=${e.name}")
     autoBackup()
-    if(printerMode()=="BLUETOOTH"&&printerMac().isNotBlank()){
+    if(printerMode()=="BLUETOOTH"&&kitchenPrinterMac().isNotBlank()){
      val table=currentTable.value?.name ?: "Bàn"
      val profile=printerProfile()
-     val pr=BluetoothPrinter.printBitmap(getApplication(),printerMac(),ReceiptRenderer.cancel(table,b.sequence,e.name,reason.trim(),profile),profile,vn.ecohome.pos0210.printing.PrintJobType.CANCEL)
+     val pr=BluetoothPrinter.printBitmap(getApplication(),kitchenPrinterMac(),ReceiptRenderer.cancel(table,b.sequence,e.name,reason.trim(),profile),profile,vn.ecohome.pos0210.printing.PrintJobType.CANCEL)
      printerMessage.value=if(pr.isSuccess)"ĐÃ IN PHIẾU HỦY · Đơn #${b.sequence}" else "ĐÃ HỦY ĐƠN · In phiếu hủy lỗi: ${pr.exceptionOrNull()?.message}"
     }
    }
@@ -685,7 +695,7 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
   val printKey="${session.id}:${preview.total}:$qrInfo"
   printedCheckoutKey.value=null
   viewModelScope.launch(Dispatchers.IO){
-   if(printerMode()!="BLUETOOTH"||printerMac().isBlank()){printerMessage.value="CHƯA CẤU HÌNH MÁY IN · Không thể xác nhận trước khi in bill";return@launch}
+   if(printerMode()!="BLUETOOTH"||receiptPrinterMac().isBlank()){printerMessage.value="CHƯA CẤU HÌNH MÁY IN BILL · Không thể xác nhận trước khi in bill";return@launch}
    val batches=dao.batches(session.id).first().filter{it.status!="CANCELLED"}
    val lines=mutableListOf<Triple<String,Int,Long>>()
    batches.forEach{batch->dao.batchItems(batch.id).first().forEach{item->lines.add(Triple(item.itemNameSnapshot,item.qty,item.unitPriceSnapshot))}}
@@ -702,10 +712,10 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
    val job=PrintJobEntity(UUID.randomUUID().toString(),null,null,"BILL_PREPAY",createdAt=now)
    dao.insertPrintJob(job)
    if(repo.claimPrint(job.id,"ANDROID")){
-    val result=BluetoothPrinter.printBitmap(getApplication(),printerMac(),bitmap,profile,vn.ecohome.pos0210.printing.PrintJobType.PAYMENT)
+    val result=BluetoothPrinter.printBitmap(getApplication(),receiptPrinterMac(),bitmap,profile,vn.ecohome.pos0210.printing.PrintJobType.PAYMENT)
     if(result.isSuccess){
      dao.markPrintSuccess(job.id,System.currentTimeMillis());printedCheckoutKey.value=printKey
-     audit("PRINT",session.id,"PREPAY_BILL_PRINTED","printer=${printerName()},job=${job.id},amount=${preview.total}")
+     audit("PRINT",session.id,"PREPAY_BILL_PRINTED","printer=${receiptPrinterName()},job=${job.id},amount=${preview.total}")
      printerMessage.value="ĐÃ IN BILL · Chờ khách kiểm tra và thanh toán"
     }else{dao.markPrintFailed(job.id,result.exceptionOrNull()?.message?:"UNKNOWN");printerMessage.value="IN BILL LỖI · ${result.exceptionOrNull()?.message?:"Thử in lại"}"}
    }
@@ -785,14 +795,14 @@ fun attachStorageRoot(uri:String,allowWrites:Boolean){
     val job=PrintJobEntity(java.util.UUID.randomUUID().toString(),null,bill.id,"BILL",createdAt=System.currentTimeMillis())
     dao.insertPrintJob(job)
     if(repo.claimPrint(job.id,"ANDROID")){
-     val pr=BluetoothPrinter.printBitmap(getApplication(),printerMac(),bmp,profile,vn.ecohome.pos0210.printing.PrintJobType.PAYMENT)
+     val pr=BluetoothPrinter.printBitmap(getApplication(),receiptPrinterMac(),bmp,profile,vn.ecohome.pos0210.printing.PrintJobType.PAYMENT)
      if(pr.isSuccess){
       dao.markPrintSuccess(job.id,System.currentTimeMillis())
-      audit("PRINT",bill.id,"BILL_PRINTED","printer=${printerName()},job=${job.id}")
+      audit("PRINT",bill.id,"BILL_PRINTED","printer=${receiptPrinterName()},job=${job.id}")
       printerMessage.value="ĐÃ IN BILL · ${bill.billNo}"
      }else{
       dao.markPrintFailed(job.id,pr.exceptionOrNull()?.message ?: "UNKNOWN")
-      audit("PRINT",bill.id,"BILL_PRINT_FAILED","printer=${printerName()},job=${job.id}")
+      audit("PRINT",bill.id,"BILL_PRINT_FAILED","printer=${receiptPrinterName()},job=${job.id}")
       printerMessage.value="ĐÃ THANH TOÁN · IN BILL LỖI: ${pr.exceptionOrNull()?.message ?: "Thử in lại"}"
      }
     }
