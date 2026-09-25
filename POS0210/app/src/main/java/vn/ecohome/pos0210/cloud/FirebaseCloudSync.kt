@@ -235,7 +235,7 @@ object FirebaseCloudSync {
         val accounting=dao.cloudAccountingSnapshot().firstOrNull{it.monthKey==monthKey};val operatingProfit=accounting?.cogs?.let{monthRevenue-it-fixed-variableExpense-other-depreciation};val openingCash=accounting?.openingCash?:0;val closingCash=openingCash+received+contribution+workingCapital+otherCashIn-inventory-fixed-variableExpense-other-unclassified-capital-setup-withdrawal-profitWithdrawal
         val initialInvestment=purchases.filter{it.status=="ACTIVE"&&it.expenseCategory in setOf(ExpenseCategories.SETUP_COST,ExpenseCategories.INITIAL_INVESTMENT_SUNK)}.sumOf{it.total}+assets.sumOf{it.totalCost};val recoveredCapital=movements.filter{it.type=="RECOVERED_CAPITAL"}.sumOf{it.amount};val paybackBp=if(initialInvestment<=0)0 else ((recoveredCapital.coerceAtMost(initialInvestment)*10_000)/initialInvestment).toInt()
         return mapOf("monthKey" to monthKey,"monthRevenue" to monthRevenue,"operatingProfit" to operatingProfit,"closingCash" to closingCash,"initialInvestment" to initialInvestment,"recoveredCapital" to recoveredCapital,"paybackBasisPoints" to paybackBp)
-    }}
+    }
     fun dashboard(context:Context):Flow<CloudDashboard> = callbackFlow{
         val c=config(context);if(!c.valid){trySend(CloudDashboard(error="Chưa cấu hình Firebase"));close();return@callbackFlow}
         val firebaseApp=firebaseApp(context,c);val uid=FirebaseAuth.getInstance(firebaseApp).currentUser?.uid
