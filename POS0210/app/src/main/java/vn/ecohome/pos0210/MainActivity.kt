@@ -2681,6 +2681,7 @@ fun Printer(vm: PosViewModel) {
     val paperMm = settings.firstOrNull { it.key == "printer_paper_mm" }?.value ?: "58"
     val checkoutTestMode by vm.checkoutPrintTestMode.collectAsState()
     val current by vm.currentEmployee.collectAsState()
+    var assignmentTarget by remember { mutableStateOf("KITCHEN") }
     val hasPermission = remember(permissionTick) { BluetoothPrinter.hasPermission(context) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
